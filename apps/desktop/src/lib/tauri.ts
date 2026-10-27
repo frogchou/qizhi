@@ -2,6 +2,7 @@ import type {
   MaskedServiceConfig,
   ServiceConfigurationInput,
 } from "./contracts";
+import { invoke } from "@tauri-apps/api/core";
 
 export interface QizhiCommands {
   getSettings(): Promise<MaskedServiceConfig[]>;
@@ -10,6 +11,9 @@ export interface QizhiCommands {
     service: string,
   ): Promise<{ available: boolean; message: string }>;
   getEverythingStatus?(): Promise<EverythingStatus>;
+  getTodaySnapshot(): Promise<TodaySnapshot>;
+  refreshToday(): Promise<TodaySnapshot>;
+  revealInExplorer(id: number): Promise<void>;
 }
 
 export type EverythingStatus = {
@@ -17,6 +21,28 @@ export type EverythingStatus = {
   adapter: string;
   remediation: string;
 };
+
+export type TodayFile = {
+  id: number;
+  canonicalPath: string;
+  modifiedAtUtcMs: number;
+  sizeBytes: number;
+  source: string;
+  status: "待分析";
+};
+
+export type TodaySnapshot =
+  | {
+      state: "ready";
+      files: TodayFile[];
+      clusters: { label: string; fileIds: number[] }[];
+    }
+  | {
+      state: "unavailable";
+      remediation: string;
+      files: TodayFile[];
+      clusters: { label: string; fileIds: number[] }[];
+    };
 
 export const unavailableCommands: QizhiCommands = {
   async getSettings() {
@@ -28,4 +54,29 @@ export const unavailableCommands: QizhiCommands = {
   async testServiceConnection() {
     return { available: false, message: "桌面服务尚未连接" };
   },
+  async getTodaySnapshot() {
+    return {
+      state: "unavailable",
+      remediation: "桌面服务尚未连接，无法检测 Everything。",
+      files: [],
+      clusters: [],
+    };
+  },
+  async refreshToday() {
+    return this.getTodaySnapshot();
+  },
+  async revealInExplorer() {
+    throw new Error("桌面服务尚未连接");
+  },
+};
+
+export const tauriCommands: QizhiCommands = {
+  getSettings: () => invoke("get_settings"),
+  saveSettings: (input) => invoke("save_settings", { input }),
+  testServiceConnection: (service) =>
+    invoke("test_service_connection", { service }),
+  getEverythingStatus: () => invoke("get_everything_status"),
+  getTodaySnapshot: () => invoke("get_today_snapshot"),
+  refreshToday: () => invoke("refresh_today"),
+  revealInExplorer: (id) => invoke("reveal_in_explorer", { id }),
 };

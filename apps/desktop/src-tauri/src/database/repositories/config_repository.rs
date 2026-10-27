@@ -19,4 +19,11 @@ impl ConfigRepository {
             Ok(())
         })
     }
+
+    pub fn list(&self) -> Result<Vec<MaskedServiceConfig>, AppError> {
+        self.database.with_connection(|connection| {
+            let mut statement = connection.prepare("SELECT service, endpoint, api_key_mask, credential_reference FROM app_config ORDER BY service")?;
+            statement.query_map([], |row| Ok(MaskedServiceConfig { service: row.get(0)?, endpoint: row.get(1)?, api_key_mask: row.get(2)?, credential_reference: row.get(3)? }))?.collect()
+        })
+    }
 }

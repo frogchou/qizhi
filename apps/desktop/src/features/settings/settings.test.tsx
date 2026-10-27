@@ -15,6 +15,9 @@ describe("SettingsPage", () => {
         credentialReference: "qizhi/openai/default",
       }),
       testServiceConnection: vi.fn(),
+      getTodaySnapshot: vi.fn(),
+      refreshToday: vi.fn(),
+      revealInExplorer: vi.fn(),
     };
 
     render(<SettingsPage commands={commands} />);
@@ -38,6 +41,9 @@ describe("SettingsPage", () => {
       getSettings: vi.fn().mockResolvedValue([]),
       saveSettings: vi.fn(),
       testServiceConnection: vi.fn(),
+      getTodaySnapshot: vi.fn(),
+      refreshToday: vi.fn(),
+      revealInExplorer: vi.fn(),
       getEverythingStatus: vi.fn().mockResolvedValue({
         available: false,
         adapter: "unavailable",
