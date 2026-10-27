@@ -32,4 +32,22 @@ describe("SettingsPage", () => {
       screen.queryByDisplayValue("test-secret-never-rendered"),
     ).not.toBeInTheDocument();
   });
+
+  it("shows the privacy boundary and a redacted Everything remediation", async () => {
+    const commands: QizhiCommands = {
+      getSettings: vi.fn().mockResolvedValue([]),
+      saveSettings: vi.fn(),
+      testServiceConnection: vi.fn(),
+      getEverythingStatus: vi.fn().mockResolvedValue({
+        available: false,
+        adapter: "unavailable",
+        remediation: "未检测到 Everything，请安装并启动 Everything。",
+      }),
+    };
+
+    render(<SettingsPage commands={commands} />);
+
+    expect(screen.getByText(/系统目录.*始终被排除/)).toBeInTheDocument();
+    expect(await screen.findByText(/未检测到 Everything/)).toBeInTheDocument();
+  });
 });

@@ -2,6 +2,8 @@ pub mod app_state;
 pub mod config;
 pub mod contracts;
 pub mod database;
+pub mod discovery;
+pub mod scan;
 pub mod telemetry;
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/

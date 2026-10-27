@@ -15,6 +15,10 @@ pub enum AppError {
     InvalidConfig,
     #[error("storage operation failed")]
     Storage,
+    #[error("file discovery is unavailable")]
+    DiscoveryUnavailable,
+    #[error("file discovery returned invalid data")]
+    DiscoveryInvalidData,
 }
 
 impl AppError {
@@ -22,6 +26,8 @@ impl AppError {
         match self {
             Self::InvalidConfig => "invalid_config",
             Self::Storage => "storage_error",
+            Self::DiscoveryUnavailable => "discovery_unavailable",
+            Self::DiscoveryInvalidData => "discovery_invalid_data",
         }
     }
 }

@@ -9,7 +9,14 @@ export interface QizhiCommands {
   testServiceConnection(
     service: string,
   ): Promise<{ available: boolean; message: string }>;
+  getEverythingStatus?(): Promise<EverythingStatus>;
 }
+
+export type EverythingStatus = {
+  available: boolean;
+  adapter: string;
+  remediation: string;
+};
 
 export const unavailableCommands: QizhiCommands = {
   async getSettings() {

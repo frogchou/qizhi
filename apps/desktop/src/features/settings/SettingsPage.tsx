@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import type { MaskedServiceConfig } from "../../lib/contracts";
-import type { QizhiCommands } from "../../lib/tauri";
+import type { EverythingStatus, QizhiCommands } from "../../lib/tauri";
 
 type SettingsPageProps = { commands: QizhiCommands };
 
@@ -10,6 +10,20 @@ export function SettingsPage({ commands }: SettingsPageProps) {
   const [apiKey, setApiKey] = useState("");
   const [saved, setSaved] = useState<MaskedServiceConfig | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [everything, setEverything] = useState<EverythingStatus | null>(null);
+
+  useEffect(() => {
+    commands
+      .getEverythingStatus?.()
+      .then(setEverything)
+      .catch(() => {
+        setEverything({
+          available: false,
+          adapter: "unavailable",
+          remediation: "Everything 状态暂不可用，请稍后重新检测。",
+        });
+      });
+  }, [commands]);
 
   async function save() {
     setError(null);
@@ -51,6 +65,20 @@ export function SettingsPage({ commands }: SettingsPageProps) {
       </button>
       {saved ? <p aria-label="已保存密钥掩码">{saved.apiKeyMask}</p> : null}
       {error ? <p role="alert">{error}</p> : null}
+      <aside>
+        <h2>扫描与隐私</h2>
+        <p>
+          仅扫描你明确添加的工作目录；系统目录、Program
+          Files、AppData、回收站、网络路径和重解析点始终被排除。
+        </p>
+        <p>自定义排除规则将在保存后应用于下一次扫描。</p>
+      </aside>
+      <aside aria-label="Everything 状态">
+        <h2>Everything</h2>
+        <p>
+          {everything ? everything.remediation : "正在检测本机 Everything…"}
+        </p>
+      </aside>
       <aside>
         <h2>连接服务</h2>
         <p>Everything、JEV、RAGFlow 与 Codex 的业务能力将在后续阶段启用。</p>
