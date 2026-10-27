@@ -1,4 +1,9 @@
-use std::{path::PathBuf, process::Command};
+use std::{
+    path::PathBuf,
+    process::Command,
+    thread,
+    time::{Duration, Instant},
+};
 
 use crate::{database::AppError, scan::policy::AllowedRoot};
 
@@ -19,7 +24,7 @@ impl EsCliDiscovery {
         }
     }
 
-    fn args_for_root(&self, root: &AllowedRoot, start_utc_ms: i64, end_utc_ms: i64) -> Vec<String> {
+    fn args_for_root(&self, root: &AllowedRoot) -> Vec<String> {
         vec![
             "-tsv".to_owned(),
             "-full-path".to_owned(),
@@ -31,7 +36,7 @@ impl EsCliDiscovery {
             self.result_limit.to_string(),
             "-path".to_owned(),
             root.0.to_string_lossy().to_string(),
-            format!("file: dm:{start_utc_ms}..{end_utc_ms}"),
+            "file:".to_owned(),
         ]
     }
 }
@@ -64,16 +69,36 @@ impl FileDiscovery for EsCliDiscovery {
         }
         let mut result = Vec::new();
         for root in roots {
-            let output = Command::new(&self.executable)
-                .args(self.args_for_root(root, start_utc_ms, end_utc_ms))
-                .output()
+            let mut child = Command::new(&self.executable)
+                .args(self.args_for_root(root))
+                .stdout(std::process::Stdio::piped())
+                .spawn()
+                .map_err(|_| AppError::DiscoveryUnavailable)?;
+            let deadline = Instant::now() + Duration::from_secs(8);
+            while child
+                .try_wait()
+                .map_err(|_| AppError::DiscoveryUnavailable)?
+                .is_none()
+            {
+                if Instant::now() >= deadline {
+                    let _ = child.kill();
+                    return Err(AppError::DiscoveryUnavailable);
+                }
+                thread::sleep(Duration::from_millis(25));
+            }
+            let output = child
+                .wait_with_output()
                 .map_err(|_| AppError::DiscoveryUnavailable)?;
             if !output.status.success() {
                 return Err(AppError::DiscoveryUnavailable);
             }
             let text =
                 String::from_utf8(output.stdout).map_err(|_| AppError::DiscoveryInvalidData)?;
-            result.extend(parse_es_output(&text)?);
+            result.extend(parse_es_output(&text)?.into_iter().filter_map(|mut item| {
+                item.modified_at_utc_ms = filetime_to_unix_ms(item.modified_at_utc_ms)?;
+                (item.modified_at_utc_ms >= start_utc_ms && item.modified_at_utc_ms < end_utc_ms)
+                    .then_some(item)
+            }));
             if result.len() >= self.result_limit {
                 result.truncate(self.result_limit);
                 break;
@@ -81,4 +106,10 @@ impl FileDiscovery for EsCliDiscovery {
         }
         Ok(result)
     }
+}
+
+fn filetime_to_unix_ms(filetime: i64) -> Option<i64> {
+    filetime
+        .checked_div(10_000)?
+        .checked_sub(11_644_473_600_000)
 }

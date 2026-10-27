@@ -27,6 +27,13 @@ function commands(snapshot: TodaySnapshot = readySnapshot): QizhiCommands {
     getTodaySnapshot: vi.fn().mockResolvedValue(snapshot),
     refreshToday: vi.fn().mockResolvedValue(snapshot),
     revealInExplorer: vi.fn().mockResolvedValue(undefined),
+    listScanRules: vi.fn().mockResolvedValue({
+      allowedRoots: [],
+      customExclusions: [],
+      esCliPath: null,
+      lockedExclusions: [],
+    }),
+    saveScanRules: vi.fn(),
   };
 }
 

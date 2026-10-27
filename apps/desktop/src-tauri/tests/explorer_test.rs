@@ -32,6 +32,7 @@ fn reveals_only_a_persisted_allowed_file_using_an_argument_vector() {
     let path = std::env::current_dir()
         .expect("work dir")
         .join("brief.docx");
+    std::fs::write(&path, b"test").expect("test file");
     database
         .files()
         .upsert(&FileRecordInput {
@@ -55,4 +56,5 @@ fn reveals_only_a_persisted_allowed_file_using_an_argument_vector() {
         )]
     );
     assert!(launcher.reveal(999).is_err());
+    let _ = std::fs::remove_file(path);
 }

@@ -47,7 +47,8 @@ impl ScanService {
         let mut skipped = Vec::new();
         for item in discovered {
             let path = Path::new(&item.path);
-            if item.modified_at_utc_ms < start_utc_ms
+            if !roots.iter().any(|root| path.starts_with(&root.0))
+                || item.modified_at_utc_ms < start_utc_ms
                 || item.modified_at_utc_ms >= next_start_utc_ms
                 || !self.policy.is_allowed(path)
             {

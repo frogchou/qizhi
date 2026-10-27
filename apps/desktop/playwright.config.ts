@@ -6,8 +6,9 @@ export default defineConfig({
     baseURL: "http://127.0.0.1:1420",
     launchOptions: {
       executablePath:
-        process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE ??
+        process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE ?? (process.env.CI ? undefined :
         "C:/Program Files/Google/Chrome/Application/chrome.exe",
+        ),
     },
   },
   webServer: {

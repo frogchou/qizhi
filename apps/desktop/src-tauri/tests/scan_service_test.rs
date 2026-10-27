@@ -50,6 +50,7 @@ fn refreshes_today_once_skips_unsafe_or_changing_files_and_uses_half_open_day_ra
         .join("report.docx")
         .to_string_lossy()
         .to_string();
+    std::fs::write(&accepted, b"0123456789").expect("accepted test file");
     let next_day = working_root
         .join("tomorrow.docx")
         .to_string_lossy()
@@ -93,4 +94,5 @@ fn refreshes_today_once_skips_unsafe_or_changing_files_and_uses_half_open_day_ra
     assert_eq!(database.files().count().expect("count"), 1);
     assert_eq!(snapshot.skipped.len(), 2);
     assert_eq!(snapshot.clusters.len(), 1);
+    let _ = std::fs::remove_file(accepted);
 }

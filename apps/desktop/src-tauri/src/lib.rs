@@ -19,7 +19,13 @@ pub fn run() {
             std::fs::create_dir_all(&data_dir).expect("create app data directory");
             let database =
                 database::Database::open(&data_dir.join("qizhi.db")).expect("open local database");
-            app.manage(app_state::AppState { database });
+            let scan_rules =
+                scan::configuration::ScanRuleStore::open(&data_dir.join("scan-rules.json"))
+                    .expect("open scan rules");
+            app.manage(app_state::AppState {
+                database,
+                scan_rules,
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -27,6 +33,8 @@ pub fn run() {
             commands::settings::save_settings,
             commands::settings::test_service_connection,
             commands::settings::get_everything_status,
+            commands::settings::list_scan_rules,
+            commands::settings::save_scan_rules,
             commands::today::get_today_snapshot,
             commands::today::refresh_today,
             commands::today::reveal_in_explorer,

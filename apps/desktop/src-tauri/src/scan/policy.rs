@@ -6,11 +6,22 @@ pub struct AllowedRoot(pub PathBuf);
 
 pub struct ScanPolicy {
     exclusions: Vec<PathBuf>,
+    allowed_roots: Vec<AllowedRoot>,
 }
 
 impl ScanPolicy {
     pub fn new(exclusions: Vec<PathBuf>) -> Self {
-        Self { exclusions }
+        Self {
+            exclusions,
+            allowed_roots: vec![],
+        }
+    }
+
+    pub fn for_roots(exclusions: Vec<PathBuf>, allowed_roots: Vec<AllowedRoot>) -> Self {
+        Self {
+            exclusions,
+            allowed_roots,
+        }
     }
     pub fn validate_root(&self, path: &Path) -> Result<AllowedRoot, AppError> {
         let value = path.to_string_lossy().to_ascii_lowercase();
@@ -42,6 +53,13 @@ impl ScanPolicy {
     }
 
     pub fn is_allowed(&self, path: &Path) -> bool {
-        self.validate_root(path).is_ok()
+        if self.validate_root(path).is_err() || !path.is_file() {
+            return false;
+        }
+        self.allowed_roots.is_empty()
+            || self
+                .allowed_roots
+                .iter()
+                .any(|root| path.starts_with(&root.0))
     }
 }

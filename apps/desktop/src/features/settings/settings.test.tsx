@@ -18,6 +18,13 @@ describe("SettingsPage", () => {
       getTodaySnapshot: vi.fn(),
       refreshToday: vi.fn(),
       revealInExplorer: vi.fn(),
+      listScanRules: vi.fn().mockResolvedValue({
+        allowedRoots: [],
+        customExclusions: [],
+        esCliPath: null,
+        lockedExclusions: [],
+      }),
+      saveScanRules: vi.fn(),
     };
 
     render(<SettingsPage commands={commands} />);
@@ -44,6 +51,13 @@ describe("SettingsPage", () => {
       getTodaySnapshot: vi.fn(),
       refreshToday: vi.fn(),
       revealInExplorer: vi.fn(),
+      listScanRules: vi.fn().mockResolvedValue({
+        allowedRoots: [],
+        customExclusions: [],
+        esCliPath: null,
+        lockedExclusions: [],
+      }),
+      saveScanRules: vi.fn(),
       getEverythingStatus: vi.fn().mockResolvedValue({
         available: false,
         adapter: "unavailable",

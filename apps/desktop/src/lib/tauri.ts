@@ -14,6 +14,8 @@ export interface QizhiCommands {
   getTodaySnapshot(): Promise<TodaySnapshot>;
   refreshToday(): Promise<TodaySnapshot>;
   revealInExplorer(id: number): Promise<void>;
+  listScanRules(): Promise<ScanRules>;
+  saveScanRules(input: Omit<ScanRules, "lockedExclusions">): Promise<ScanRules>;
 }
 
 export type EverythingStatus = {
@@ -44,6 +46,13 @@ export type TodaySnapshot =
       clusters: { label: string; fileIds: number[] }[];
     };
 
+export type ScanRules = {
+  allowedRoots: string[];
+  customExclusions: string[];
+  esCliPath: string | null;
+  lockedExclusions: string[];
+};
+
 export const unavailableCommands: QizhiCommands = {
   async getSettings() {
     return [];
@@ -68,6 +77,17 @@ export const unavailableCommands: QizhiCommands = {
   async revealInExplorer() {
     throw new Error("桌面服务尚未连接");
   },
+  async listScanRules() {
+    return {
+      allowedRoots: [],
+      customExclusions: [],
+      esCliPath: null,
+      lockedExclusions: [],
+    };
+  },
+  async saveScanRules() {
+    throw new Error("桌面服务尚未连接");
+  },
 };
 
 export const tauriCommands: QizhiCommands = {
@@ -79,4 +99,6 @@ export const tauriCommands: QizhiCommands = {
   getTodaySnapshot: () => invoke("get_today_snapshot"),
   refreshToday: () => invoke("refresh_today"),
   revealInExplorer: (id) => invoke("reveal_in_explorer", { id }),
+  listScanRules: () => invoke("list_scan_rules"),
+  saveScanRules: (input) => invoke("save_scan_rules", { input }),
 };

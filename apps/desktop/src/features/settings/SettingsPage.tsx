@@ -11,6 +11,8 @@ export function SettingsPage({ commands }: SettingsPageProps) {
   const [saved, setSaved] = useState<MaskedServiceConfig | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [everything, setEverything] = useState<EverythingStatus | null>(null);
+  const [roots, setRoots] = useState("");
+  const [esCliPath, setEsCliPath] = useState("");
 
   useEffect(() => {
     commands
@@ -24,6 +26,46 @@ export function SettingsPage({ commands }: SettingsPageProps) {
         });
       });
   }, [commands]);
+
+  useEffect(() => {
+    commands
+      .getSettings()
+      .then((configs) => {
+        const openai = configs.find((config) => config.service === "openai");
+        if (openai) {
+          setEndpoint(openai.endpoint);
+          setSaved(openai);
+        }
+      })
+      .catch(() => undefined);
+  }, [commands]);
+
+  useEffect(() => {
+    commands
+      .listScanRules()
+      .then((rules) => {
+        setRoots(rules.allowedRoots.join("\n"));
+        setEsCliPath(rules.esCliPath ?? "");
+      })
+      .catch(() => undefined);
+  }, [commands]);
+
+  async function saveScanRules() {
+    setError(null);
+    try {
+      await commands.saveScanRules({
+        allowedRoots: roots
+          .split("\n")
+          .map((value) => value.trim())
+          .filter(Boolean),
+        customExclusions: [],
+        esCliPath: esCliPath.trim() || null,
+      });
+      setEverything((await commands.getEverythingStatus?.()) ?? null);
+    } catch {
+      setError("扫描范围未保存，请检查目录与 es.exe 路径。");
+    }
+  }
 
   async function save() {
     setError(null);
@@ -72,6 +114,23 @@ export function SettingsPage({ commands }: SettingsPageProps) {
           Files、AppData、回收站、网络路径和重解析点始终被排除。
         </p>
         <p>自定义排除规则将在保存后应用于下一次扫描。</p>
+        <label>
+          允许扫描的工作目录（每行一个）
+          <textarea
+            value={roots}
+            onChange={(event) => setRoots(event.currentTarget.value)}
+          />
+        </label>
+        <label>
+          es.exe 路径
+          <input
+            value={esCliPath}
+            onChange={(event) => setEsCliPath(event.currentTarget.value)}
+          />
+        </label>
+        <button type="button" onClick={saveScanRules}>
+          保存扫描范围
+        </button>
       </aside>
       <aside aria-label="Everything 状态">
         <h2>Everything</h2>

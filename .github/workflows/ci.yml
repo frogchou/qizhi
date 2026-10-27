@@ -11,7 +11,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
         with:
-          version: 10
+          version: 11.7.0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -25,3 +25,5 @@ jobs:
       - run: cargo fmt --check --manifest-path apps/desktop/src-tauri/Cargo.toml
       - run: cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml -- -D warnings
       - run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
+      - run: pnpm --filter @qizhi/desktop exec playwright install chromium
+      - run: pnpm --filter @qizhi/desktop e2e
