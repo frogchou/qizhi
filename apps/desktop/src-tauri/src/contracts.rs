@@ -33,6 +33,24 @@ pub struct FileRecord {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TodayCluster {
+    pub label: String,
+    pub file_ids: Vec<i64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ScanSkip {
+    pub reason: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TodaySnapshot {
+    pub files: Vec<FileRecord>,
+    pub clusters: Vec<TodayCluster>,
+    pub skipped: Vec<ScanSkip>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MaskedServiceConfig {
     pub service: String,
     pub endpoint: String,
