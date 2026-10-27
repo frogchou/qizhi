@@ -20,7 +20,7 @@ pub fn select_discovery(
     cli: AdapterAvailability,
 ) -> Box<dyn FileDiscovery> {
     match (sdk, cli) {
-        (AdapterAvailability::Available, _) => Box::new(EverythingSdkDiscovery),
+        (AdapterAvailability::Available, _) => Box::new(EverythingSdkDiscovery::unconfigured()),
         (_, AdapterAvailability::Available) => Box::new(StaticCliDiscovery),
         _ => Box::new(UnavailableDiscovery),
     }
@@ -32,7 +32,22 @@ pub fn select_discovery_with_cli_path(
     cli_path: Option<PathBuf>,
 ) -> Box<dyn FileDiscovery> {
     if sdk_available {
-        Box::new(EverythingSdkDiscovery)
+        Box::new(EverythingSdkDiscovery::unconfigured())
+    } else if let Some(path) = cli_path.filter(|value| value.is_file()) {
+        Box::new(EsCliDiscovery::new(path))
+    } else {
+        Box::new(UnavailableDiscovery)
+    }
+}
+
+/// Uses the native SDK when its DLL was explicitly selected; otherwise falls
+/// back to the separately configured `es.exe` command-line adapter.
+pub fn select_discovery_with_paths(
+    sdk_path: Option<PathBuf>,
+    cli_path: Option<PathBuf>,
+) -> Box<dyn FileDiscovery> {
+    if let Some(path) = sdk_path.filter(|value| value.is_file()) {
+        Box::new(EverythingSdkDiscovery::new(path))
     } else if let Some(path) = cli_path.filter(|value| value.is_file()) {
         Box::new(EsCliDiscovery::new(path))
     } else {

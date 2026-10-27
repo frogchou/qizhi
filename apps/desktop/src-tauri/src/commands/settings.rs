@@ -4,7 +4,7 @@ use tauri::State;
 use crate::{
     app_state::AppState,
     config::{ConfigService, ServiceConfigurationInput, secret_store::WindowsCredentialStore},
-    discovery::selector::select_discovery_with_cli_path,
+    discovery::selector::select_discovery_with_paths,
     scan::{configuration::ScanRules, policy::ScanPolicy},
 };
 
@@ -93,8 +93,10 @@ pub fn get_everything_status(state: State<'_, AppState>) -> EverythingStatus {
             };
         }
     };
-    let adapter =
-        select_discovery_with_cli_path(false, rules.es_cli_path.map(std::path::PathBuf::from));
+    let adapter = select_discovery_with_paths(
+        rules.everything_sdk_path.map(std::path::PathBuf::from),
+        rules.es_cli_path.map(std::path::PathBuf::from),
+    );
     let health = adapter.health();
     EverythingStatus {
         available: health.available,
@@ -108,6 +110,7 @@ pub fn get_everything_status(state: State<'_, AppState>) -> EverythingStatus {
 pub struct SaveScanRulesInput {
     allowed_roots: Vec<String>,
     custom_exclusions: Vec<String>,
+    everything_sdk_path: Option<String>,
     es_cli_path: Option<String>,
 }
 
@@ -116,6 +119,7 @@ pub struct SaveScanRulesInput {
 pub struct ScanRulesOutput {
     allowed_roots: Vec<String>,
     custom_exclusions: Vec<String>,
+    everything_sdk_path: Option<String>,
     es_cli_path: Option<String>,
     locked_exclusions: Vec<String>,
 }
@@ -124,6 +128,7 @@ fn rules_output(value: ScanRules) -> ScanRulesOutput {
     ScanRulesOutput {
         allowed_roots: value.allowed_roots,
         custom_exclusions: value.custom_exclusions,
+        everything_sdk_path: value.everything_sdk_path,
         es_cli_path: value.es_cli_path,
         locked_exclusions: ScanRules::default().locked_exclusions(),
     }
@@ -167,6 +172,7 @@ pub fn save_scan_rules(
                 .map(|root| root.0.to_string_lossy().to_string())
                 .collect(),
             custom_exclusions: input.custom_exclusions,
+            everything_sdk_path: input.everything_sdk_path,
             es_cli_path: input.es_cli_path,
         })
         .map(rules_output)

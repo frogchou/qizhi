@@ -1,14 +1,11 @@
+use chrono::{Datelike, Local, TimeZone};
 use serde::Serialize;
-use std::{
-    path::PathBuf,
-    sync::Arc,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::{path::PathBuf, sync::Arc};
 use tauri::State;
 
 use crate::{
     app_state::AppState,
-    discovery::selector::select_discovery_with_cli_path,
+    discovery::selector::select_discovery_with_paths,
     scan::{
         file_stability::MetadataStability,
         policy::{AllowedRoot, ScanPolicy},
@@ -57,7 +54,12 @@ fn unavailable(message: impl Into<String>) -> TodayUnavailable {
         clusters: vec![],
     }
 }
-type ActiveRules = (Vec<AllowedRoot>, Vec<PathBuf>, Option<PathBuf>);
+type ActiveRules = (
+    Vec<AllowedRoot>,
+    Vec<PathBuf>,
+    Option<PathBuf>,
+    Option<PathBuf>,
+);
 fn rules(state: &AppState) -> Result<ActiveRules, TodayUnavailable> {
     let rules = state
         .scan_rules
@@ -79,19 +81,30 @@ fn rules(state: &AppState) -> Result<ActiveRules, TodayUnavailable> {
     if roots.is_empty() {
         return Err(unavailable("请先在设置中添加允许扫描的工作目录。"));
     }
-    Ok((roots, exclusions, rules.es_cli_path.map(PathBuf::from)))
+    Ok((
+        roots,
+        exclusions,
+        rules.everything_sdk_path.map(PathBuf::from),
+        rules.es_cli_path.map(PathBuf::from),
+    ))
 }
 fn bounds() -> (i64, i64) {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as i64;
-    let start = now / 86_400_000 * 86_400_000;
-    (start, start + 86_400_000)
+    let now = Local::now();
+    let today = now.date_naive();
+    let start = Local
+        .with_ymd_and_hms(today.year(), today.month(), today.day(), 0, 0, 0)
+        .earliest()
+        .expect("local midnight is representable");
+    let tomorrow = today.succ_opt().expect("tomorrow is representable");
+    let end = Local
+        .with_ymd_and_hms(tomorrow.year(), tomorrow.month(), tomorrow.day(), 0, 0, 0)
+        .earliest()
+        .expect("next local midnight is representable");
+    (start.timestamp_millis(), end.timestamp_millis())
 }
 fn refresh(state: &AppState) -> Result<TodayReady, TodayUnavailable> {
-    let (roots, exclusions, cli_path) = rules(state)?;
-    let discovery = select_discovery_with_cli_path(false, cli_path);
+    let (roots, exclusions, sdk_path, cli_path) = rules(state)?;
+    let discovery = select_discovery_with_paths(sdk_path, cli_path);
     if !discovery.health().available {
         return Err(unavailable(discovery.health().remediation));
     }
@@ -139,7 +152,7 @@ pub fn refresh_today(state: State<'_, AppState>) -> Result<TodayReady, TodayUnav
 }
 #[tauri::command]
 pub fn reveal_in_explorer(state: State<'_, AppState>, id: i64) -> Result<(), String> {
-    let (roots, exclusions, _) = rules(&state).map_err(|value| value.remediation)?;
+    let (roots, exclusions, _, _) = rules(&state).map_err(|value| value.remediation)?;
     ExplorerLauncher::new(
         state.database.files(),
         ScanPolicy::for_roots(exclusions, roots),
@@ -147,4 +160,27 @@ pub fn reveal_in_explorer(state: State<'_, AppState>, id: i64) -> Result<(), Str
     )
     .reveal(id)
     .map_err(|error| error.code().to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::{Local, TimeZone, Timelike};
+
+    use super::bounds;
+
+    #[test]
+    fn uses_local_calendar_midnights_for_today() {
+        let (start, end) = bounds();
+        let start = Local
+            .timestamp_millis_opt(start)
+            .single()
+            .expect("valid local start");
+        let end = Local
+            .timestamp_millis_opt(end)
+            .single()
+            .expect("valid local end");
+        assert_eq!((start.hour(), start.minute(), start.second()), (0, 0, 0));
+        assert_eq!((end.hour(), end.minute(), end.second()), (0, 0, 0));
+        assert!(end > start);
+    }
 }

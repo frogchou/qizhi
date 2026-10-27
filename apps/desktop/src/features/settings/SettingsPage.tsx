@@ -12,6 +12,8 @@ export function SettingsPage({ commands }: SettingsPageProps) {
   const [error, setError] = useState<string | null>(null);
   const [everything, setEverything] = useState<EverythingStatus | null>(null);
   const [roots, setRoots] = useState("");
+  const [customExclusions, setCustomExclusions] = useState("");
+  const [everythingSdkPath, setEverythingSdkPath] = useState("");
   const [esCliPath, setEsCliPath] = useState("");
 
   useEffect(() => {
@@ -45,6 +47,8 @@ export function SettingsPage({ commands }: SettingsPageProps) {
       .listScanRules()
       .then((rules) => {
         setRoots(rules.allowedRoots.join("\n"));
+        setCustomExclusions(rules.customExclusions.join("\n"));
+        setEverythingSdkPath(rules.everythingSdkPath ?? "");
         setEsCliPath(rules.esCliPath ?? "");
       })
       .catch(() => undefined);
@@ -58,7 +62,11 @@ export function SettingsPage({ commands }: SettingsPageProps) {
           .split("\n")
           .map((value) => value.trim())
           .filter(Boolean),
-        customExclusions: [],
+        customExclusions: customExclusions
+          .split("\n")
+          .map((value) => value.trim())
+          .filter(Boolean),
+        everythingSdkPath: everythingSdkPath.trim() || null,
         esCliPath: esCliPath.trim() || null,
       });
       setEverything((await commands.getEverythingStatus?.()) ?? null);
@@ -119,6 +127,22 @@ export function SettingsPage({ commands }: SettingsPageProps) {
           <textarea
             value={roots}
             onChange={(event) => setRoots(event.currentTarget.value)}
+          />
+        </label>
+        <label>
+          自定义排除目录（每行一个）
+          <textarea
+            value={customExclusions}
+            onChange={(event) => setCustomExclusions(event.currentTarget.value)}
+          />
+        </label>
+        <label>
+          Everything SDK DLL 路径（Everything64.dll）
+          <input
+            value={everythingSdkPath}
+            onChange={(event) =>
+              setEverythingSdkPath(event.currentTarget.value)
+            }
           />
         </label>
         <label>

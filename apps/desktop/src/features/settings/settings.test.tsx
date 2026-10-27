@@ -21,6 +21,7 @@ describe("SettingsPage", () => {
       listScanRules: vi.fn().mockResolvedValue({
         allowedRoots: [],
         customExclusions: [],
+        everythingSdkPath: null,
         esCliPath: null,
         lockedExclusions: [],
       }),
@@ -54,6 +55,7 @@ describe("SettingsPage", () => {
       listScanRules: vi.fn().mockResolvedValue({
         allowedRoots: [],
         customExclusions: [],
+        everythingSdkPath: null,
         esCliPath: null,
         lockedExclusions: [],
       }),

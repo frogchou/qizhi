@@ -5,6 +5,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+use chrono::{Local, TimeZone};
+
 use crate::{database::AppError, scan::policy::AllowedRoot};
 
 use super::port::{DiscoveredFile, DiscoveryHealth, FileDiscovery, parse_es_output};
@@ -24,8 +26,15 @@ impl EsCliDiscovery {
         }
     }
 
-    fn args_for_root(&self, root: &AllowedRoot) -> Vec<String> {
-        vec![
+    fn args_for_root(
+        &self,
+        root: &AllowedRoot,
+        start_utc_ms: i64,
+        end_utc_ms: i64,
+    ) -> Result<Vec<String>, AppError> {
+        let start_date = local_date(start_utc_ms)?;
+        let end_date = local_date(end_utc_ms)?;
+        Ok(vec![
             "-tsv".to_owned(),
             "-full-path".to_owned(),
             "-size".to_owned(),
@@ -36,8 +45,8 @@ impl EsCliDiscovery {
             self.result_limit.to_string(),
             "-path".to_owned(),
             root.0.to_string_lossy().to_string(),
-            "file:".to_owned(),
-        ]
+            format!("file: dm:{start_date}..{end_date}"),
+        ])
     }
 }
 
@@ -70,7 +79,7 @@ impl FileDiscovery for EsCliDiscovery {
         let mut result = Vec::new();
         for root in roots {
             let mut child = Command::new(&self.executable)
-                .args(self.args_for_root(root))
+                .args(self.args_for_root(root, start_utc_ms, end_utc_ms)?)
                 .stdout(std::process::Stdio::piped())
                 .spawn()
                 .map_err(|_| AppError::DiscoveryUnavailable)?;
@@ -112,4 +121,34 @@ fn filetime_to_unix_ms(filetime: i64) -> Option<i64> {
     filetime
         .checked_div(10_000)?
         .checked_sub(11_644_473_600_000)
+}
+
+fn local_date(timestamp_ms: i64) -> Result<String, AppError> {
+    Local
+        .timestamp_millis_opt(timestamp_ms)
+        .single()
+        .map(|value| value.format("%F").to_string())
+        .ok_or(AppError::DiscoveryInvalidData)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::{AllowedRoot, EsCliDiscovery};
+
+    #[test]
+    fn applies_the_date_filter_before_the_result_limit() {
+        let discovery = EsCliDiscovery::new(PathBuf::from("C:\\tools\\es.exe"));
+        let args = discovery
+            .args_for_root(&AllowedRoot(PathBuf::from("C:\\work")), 0, 86_400_000)
+            .expect("valid date range");
+        let limit = args
+            .iter()
+            .position(|value| value == "-n")
+            .expect("limit flag");
+        let query = args.last().expect("Everything query");
+        assert!(limit < args.len() - 1);
+        assert!(query.starts_with("file: dm:"));
+    }
 }

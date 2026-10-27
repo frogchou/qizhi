@@ -47,8 +47,7 @@ impl ScanService {
         let mut skipped = Vec::new();
         for item in discovered {
             let path = Path::new(&item.path);
-            if !roots.iter().any(|root| path.starts_with(&root.0))
-                || item.modified_at_utc_ms < start_utc_ms
+            if item.modified_at_utc_ms < start_utc_ms
                 || item.modified_at_utc_ms >= next_start_utc_ms
                 || !self.policy.is_allowed(path)
             {
@@ -63,7 +62,9 @@ impl ScanService {
                 });
                 continue;
             }
-            let canonical_path = item.path;
+            let canonical_path = display_path(
+                std::fs::canonicalize(path).map_err(|_| AppError::DiscoveryInvalidData)?,
+            );
             let file_identity = canonical_path.to_ascii_lowercase();
             self.files.upsert(&FileRecordInput {
                 canonical_path,
@@ -81,6 +82,18 @@ impl ScanService {
             files,
             skipped,
         })
+    }
+}
+
+fn display_path(path: std::path::PathBuf) -> String {
+    let value = path.to_string_lossy().to_string();
+    #[cfg(windows)]
+    {
+        value.strip_prefix(r"\\?\").unwrap_or(&value).to_owned()
+    }
+    #[cfg(not(windows))]
+    {
+        value
     }
 }
 

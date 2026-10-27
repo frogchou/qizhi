@@ -49,6 +49,7 @@ export type TodaySnapshot =
 export type ScanRules = {
   allowedRoots: string[];
   customExclusions: string[];
+  everythingSdkPath: string | null;
   esCliPath: string | null;
   lockedExclusions: string[];
 };
@@ -81,6 +82,7 @@ export const unavailableCommands: QizhiCommands = {
     return {
       allowedRoots: [],
       customExclusions: [],
+      everythingSdkPath: null,
       esCliPath: null,
       lockedExclusions: [],
     };

@@ -19,6 +19,7 @@ pub const LOCKED_EXCLUSIONS: &[&str] = &[
 pub struct ScanRules {
     pub allowed_roots: Vec<String>,
     pub custom_exclusions: Vec<String>,
+    pub everything_sdk_path: Option<String>,
     pub es_cli_path: Option<String>,
 }
 

@@ -30,6 +30,7 @@ function commands(snapshot: TodaySnapshot = readySnapshot): QizhiCommands {
     listScanRules: vi.fn().mockResolvedValue({
       allowedRoots: [],
       customExclusions: [],
+      everythingSdkPath: null,
       esCliPath: null,
       lockedExclusions: [],
     }),

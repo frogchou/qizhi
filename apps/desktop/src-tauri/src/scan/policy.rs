@@ -43,23 +43,27 @@ impl ScanPolicy {
         {
             return Err(AppError::InvalidConfig);
         }
+        let canonical = std::fs::canonicalize(path).map_err(|_| AppError::InvalidConfig)?;
         if std::fs::symlink_metadata(path)
             .map(|meta| meta.file_type().is_symlink())
             .unwrap_or(false)
         {
             return Err(AppError::InvalidConfig);
         }
-        Ok(AllowedRoot(path.to_path_buf()))
+        Ok(AllowedRoot(canonical))
     }
 
     pub fn is_allowed(&self, path: &Path) -> bool {
-        if self.validate_root(path).is_err() || !path.is_file() {
+        let Ok(canonical) = self.validate_root(path) else {
+            return false;
+        };
+        if !canonical.0.is_file() {
             return false;
         }
         self.allowed_roots.is_empty()
             || self
                 .allowed_roots
                 .iter()
-                .any(|root| path.starts_with(&root.0))
+                .any(|root| canonical.0.starts_with(&root.0))
     }
 }
