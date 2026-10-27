@@ -6,7 +6,10 @@
 
 1. 安装 Node.js、pnpm 和 Rust stable 工具链。
 2. 运行 `pnpm install`。
-3. 运行 `pnpm --filter @qizhi/desktop test -- --run`。
-4. 运行 `pnpm --filter @qizhi/desktop tauri dev`。
+3. 运行 `pnpm --filter @qizhi/desktop check` 和 `pnpm --filter @qizhi/desktop test -- --run`。
+4. 运行 `pnpm --filter @qizhi/desktop e2e`。
+5. 运行 `pnpm --filter @qizhi/desktop tauri dev`。
 
 密钥只能在应用设置中输入；不得写入 `.env`、文档、日志或版本控制。
+
+发布验收请参阅 [阶段 0–1 清单](docs/testing/stage-0-1-manual-checklist.md)。

@@ -41,6 +41,9 @@ describe("TodayPage", () => {
       screen.getByRole("button", { name: "加入知识库（后续版本）" }),
     ).toBeDisabled();
     fireEvent.click(screen.getByText("周报.docx"));
+    expect(
+      screen.getByRole("button", { name: "加入知识库（后续版本）" }),
+    ).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "在资源管理器中定位" }));
     await waitFor(() =>
       expect(client.revealInExplorer).toHaveBeenCalledWith(7),

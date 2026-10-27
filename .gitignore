@@ -3,6 +3,8 @@
 node_modules/
 dist/
 target/
+test-results/
+playwright-report/
 .env*
 *.db
 *.sqlite

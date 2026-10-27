@@ -155,7 +155,7 @@ export function TodayPage({ commands }: { commands: QizhiCommands }) {
           >
             在资源管理器中定位
           </button>
-          <button className="button outline full" disabled={selected === null}>
+          <button className="button outline full" disabled>
             加入知识库（后续版本）
           </button>
         </aside>
