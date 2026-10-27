@@ -30,10 +30,9 @@ impl EsCliDiscovery {
         &self,
         root: &AllowedRoot,
         start_utc_ms: i64,
-        end_utc_ms: i64,
+        _end_utc_ms: i64,
     ) -> Result<Vec<String>, AppError> {
         let start_date = local_date(start_utc_ms)?;
-        let end_date = local_date(end_utc_ms)?;
         Ok(vec![
             "-tsv".to_owned(),
             "-full-path".to_owned(),
@@ -45,7 +44,7 @@ impl EsCliDiscovery {
             self.result_limit.to_string(),
             "-path".to_owned(),
             root.0.to_string_lossy().to_string(),
-            format!("file: dm:{start_date}..{end_date}"),
+            format!("file: dm:{start_date}"),
         ])
     }
 }
@@ -150,5 +149,6 @@ mod tests {
         let query = args.last().expect("Everything query");
         assert!(limit < args.len() - 1);
         assert!(query.starts_with("file: dm:"));
+        assert!(!query.contains(".."));
     }
 }

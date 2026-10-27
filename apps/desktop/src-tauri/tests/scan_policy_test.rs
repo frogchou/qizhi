@@ -12,6 +12,7 @@ fn rejects_system_network_and_excluded_paths_but_allows_a_work_directory() {
 
     for path in [
         Path::new(r"C:\Windows"),
+        Path::new(r"C:\Users\Public\..\..\Windows"),
         Path::new(r"C:\Program Files"),
         Path::new(r"C:\Users\example\AppData\Roaming"),
         Path::new(r"C:\$Recycle.Bin"),

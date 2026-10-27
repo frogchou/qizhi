@@ -47,8 +47,12 @@ pub fn select_discovery_with_paths(
     cli_path: Option<PathBuf>,
 ) -> Box<dyn FileDiscovery> {
     if let Some(path) = sdk_path.filter(|value| value.is_file()) {
-        Box::new(EverythingSdkDiscovery::new(path))
-    } else if let Some(path) = cli_path.filter(|value| value.is_file()) {
+        let sdk = EverythingSdkDiscovery::new(path);
+        if sdk.health().available {
+            return Box::new(sdk);
+        }
+    }
+    if let Some(path) = cli_path.filter(|value| value.is_file()) {
         Box::new(EsCliDiscovery::new(path))
     } else {
         Box::new(UnavailableDiscovery)

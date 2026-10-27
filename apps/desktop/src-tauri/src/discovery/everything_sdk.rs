@@ -50,12 +50,11 @@ impl FileDiscovery for EverythingSdkDiscovery {
                 adapter: self.name().to_owned(),
                 remediation: "Everything SDK 已连接；扫描时会校验 Everything 服务状态。".to_owned(),
             },
-            Err(_) => DiscoveryHealth {
+            _ => DiscoveryHealth {
                 available: false,
                 adapter: self.name().to_owned(),
-                remediation:
-                    "未找到或无法加载 Everything64.dll，请在设置中指定 Everything SDK DLL。"
-                        .to_owned(),
+                remediation: "Everything SDK DLL 未就绪，请确认 DLL 配置有效，或改用 es.exe。"
+                    .to_owned(),
             },
         }
     }
@@ -70,7 +69,6 @@ impl FileDiscovery for EverythingSdkDiscovery {
             return Err(AppError::DiscoveryInvalidData);
         }
         let start_date = local_date(start_utc_ms)?;
-        let end_date = local_date(end_utc_ms)?;
         let sdk = self.library()?;
         let mut files = Vec::new();
         for root in roots {
@@ -78,7 +76,7 @@ impl FileDiscovery for EverythingSdkDiscovery {
                 break;
             }
             let query = format!(
-                "file: dm:{start_date}..{end_date} path:\"{}\"",
+                "file: dm:{start_date} path:\"{}\"",
                 root.0.to_string_lossy()
             );
             sdk.query(&query, RESULT_LIMIT.saturating_sub(files.len()))?;
@@ -123,6 +121,7 @@ mod native {
         fn LoadLibraryW(name: *const u16) -> *mut c_void;
         fn FreeLibrary(module: *mut c_void) -> i32;
         fn GetProcAddress(module: *mut c_void, name: *const c_char) -> *const c_void;
+        fn SetThreadErrorMode(new_mode: u32, old_mode: *mut u32) -> i32;
     }
 
     pub(super) struct SdkLibrary {
@@ -147,8 +146,15 @@ mod native {
                 .encode_wide()
                 .chain(std::iter::once(0))
                 .collect::<Vec<_>>();
+            // Suppress Windows' modal bad-image dialog for a misconfigured DLL.
+            let mut previous_error_mode = 0_u32;
+            let changed_error_mode =
+                unsafe { SetThreadErrorMode(0x0001 | 0x8000, &mut previous_error_mode) != 0 };
             // The selected SDK path is only loaded after a local file check.
             let module = unsafe { LoadLibraryW(wide.as_ptr()) };
+            if changed_error_mode {
+                unsafe { SetThreadErrorMode(previous_error_mode, std::ptr::null_mut()) };
+            }
             if module.is_null() {
                 return Err(AppError::DiscoveryUnavailable);
             }
