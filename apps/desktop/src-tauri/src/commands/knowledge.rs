@@ -59,16 +59,22 @@ pub async fn list_ragflow_chats(
     let state = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let result = client(&state).and_then(|client| {
-            client
-                .list_chats()
-                .map(|chats| chats.into_iter().map(RagflowChatOutput::from).collect::<Vec<_>>())
+            client.list_chats().map(|chats| {
+                chats
+                    .into_iter()
+                    .map(RagflowChatOutput::from)
+                    .collect::<Vec<_>>()
+            })
         });
         match &result {
             Ok(chats) => state.logger.info(
                 "ragflow",
                 &format!("loaded {} RAGFlow chat assistants", chats.len()),
             ),
-            Err(error) => state.logger.error("ragflow", &format!("loading chat assistants failed: {error}")),
+            Err(error) => state.logger.error(
+                "ragflow",
+                &format!("loading chat assistants failed: {error}"),
+            ),
         }
         result
     })
@@ -88,7 +94,9 @@ pub async fn ask_ragflow_chat(
             .map(RagflowAnswerOutput::from);
         match &result {
             Ok(_) => state.logger.info("ragflow", "RAGFlow question completed"),
-            Err(error) => state.logger.error("ragflow", &format!("RAGFlow question failed: {error}")),
+            Err(error) => state
+                .logger
+                .error("ragflow", &format!("RAGFlow question failed: {error}")),
         }
         result
     })

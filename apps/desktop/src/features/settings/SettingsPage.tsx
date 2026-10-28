@@ -159,6 +159,10 @@ export function SettingsPage({ commands }: SettingsPageProps) {
       });
       setRagflowSaved(config);
       setRagflowApiKey("");
+      setRagflowConnection({
+        available: true,
+        message: "RAGFlow 设置已保存，可前往知识库加载机器人。",
+      });
     } catch {
       setError("RAGFlow 设置未保存，请检查 Base URL 和本机凭据服务。");
       setRagflowApiKey("");
@@ -423,7 +427,7 @@ export function SettingsPage({ commands }: SettingsPageProps) {
                     : "connection-result"
                 }
               >
-                {ragflowConnection.available
+                {ragflowConnection.available && !ragflowSaved
                   ? `${ragflowConnection.message}；请点击“保存 RAGFlow”后在知识库中使用。`
                   : ragflowConnection.message}
               </p>

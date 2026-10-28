@@ -174,6 +174,25 @@ h2 {
   justify-content: space-between;
   padding: 16px 18px;
 }
+.file-controls {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(180px, 1fr) minmax(130px, auto) minmax(
+      145px,
+      auto
+    );
+  padding: 12px 14px;
+}
+.file-controls input,
+.file-controls select {
+  background: #fff;
+  border: 1px solid #d7dfd8;
+  border-radius: 6px;
+  color: #30443a;
+  font: inherit;
+  min-width: 0;
+  padding: 8px 10px;
+}
 .file-list {
   list-style: none;
   margin: 0;
@@ -492,6 +511,9 @@ h2 {
   white-space: pre-wrap;
 }
 @media (max-width: 980px) {
+  .file-controls {
+    grid-template-columns: 1fr;
+  }
   .path-columns,
   .knowledge-layout,
   .service-card {

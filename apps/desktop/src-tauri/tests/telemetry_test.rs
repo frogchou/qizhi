@@ -1,6 +1,9 @@
-use std::{fs, time::{SystemTime, UNIX_EPOCH}};
+use std::{
+    fs,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
-use qizhi_desktop_lib::telemetry::{redact_message, AppLogger};
+use qizhi_desktop_lib::telemetry::{AppLogger, redact_message};
 
 #[test]
 fn diagnostic_log_redacts_credentials_before_writing() {

@@ -161,5 +161,8 @@ describe("SettingsPage", () => {
     expect(
       screen.queryByDisplayValue("ragflow-secret-never-rendered"),
     ).not.toBeInTheDocument();
+    expect(
+      screen.getByText("RAGFlow 设置已保存，可前往知识库加载机器人。"),
+    ).toBeInTheDocument();
   });
 });

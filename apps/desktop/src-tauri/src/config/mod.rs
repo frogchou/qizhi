@@ -38,6 +38,9 @@ impl<S: SecretStore> ConfigService<S> {
         }
         let credential_reference = format!("qizhi/{}/default", input.service);
         self.secrets.put(&credential_reference, &input.api_key)?;
+        if self.secrets.get(&credential_reference)? != input.api_key {
+            return Err(AppError::Storage);
+        }
         let config = MaskedServiceConfig {
             service: input.service,
             endpoint: input.endpoint,

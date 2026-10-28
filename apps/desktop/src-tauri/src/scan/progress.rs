@@ -86,12 +86,13 @@ impl TodayScanProgress {
     }
 
     pub fn snapshot(&self) -> TodayScanStatus {
-        self.status.lock().map(|status| status.clone()).unwrap_or_else(|_| {
-            TodayScanStatus {
+        self.status
+            .lock()
+            .map(|status| status.clone())
+            .unwrap_or_else(|_| TodayScanStatus {
                 state: "failed".to_owned(),
                 message: Some("无法读取扫描状态。".to_owned()),
                 ..TodayScanStatus::default()
-            }
-        })
+            })
     }
 }

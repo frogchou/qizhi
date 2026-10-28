@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { StatusNotice } from "../../components/StatusNotice";
 import type {
@@ -22,6 +22,61 @@ function formatBytes(bytes: number) {
     ? `${bytes} B`
     : `${Math.max(1, Math.round(bytes / 1024))} KB`;
 }
+function extension(path: string) {
+  const name = filename(path);
+  const dot = name.lastIndexOf(".");
+  return dot > 0 ? name.slice(dot + 1).toLowerCase() : "";
+}
+function fileCategory(path: string) {
+  const value = extension(path);
+  return SOURCE_EXTENSIONS.has(value) ? "sourceCode" : "documents";
+}
+function wildcardMatches(value: string, query: string) {
+  const normalized = query.trim();
+  if (!normalized) return true;
+  const pattern = normalized
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*/g, ".*")
+    .replace(/\?/g, ".");
+  return new RegExp(`^${pattern}$`, "i").test(value);
+}
+
+const SOURCE_EXTENSIONS = new Set([
+  "rs",
+  "py",
+  "js",
+  "jsx",
+  "ts",
+  "tsx",
+  "java",
+  "kt",
+  "kts",
+  "go",
+  "c",
+  "h",
+  "cc",
+  "cpp",
+  "cxx",
+  "cs",
+  "php",
+  "rb",
+  "swift",
+  "scala",
+  "sql",
+  "sh",
+  "ps1",
+  "r",
+  "lua",
+  "dart",
+  "vue",
+  "svelte",
+  "css",
+  "scss",
+  "less",
+  "dockerfile",
+  "gradle",
+  "groovy",
+]);
 
 export function TodayPage({ commands }: { commands: QizhiCommands }) {
   const [snapshot, setSnapshot] = useState<TodaySnapshot | null>(null);
@@ -29,6 +84,11 @@ export function TodayPage({ commands }: { commands: QizhiCommands }) {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [scanStatus, setScanStatus] = useState<TodayScanStatus | null>(null);
+  const [query, setQuery] = useState("");
+  const [category, setCategory] = useState<"all" | "documents" | "sourceCode">(
+    "all",
+  );
+  const [sort, setSort] = useState("time-desc");
 
   useEffect(() => {
     commands
@@ -83,6 +143,40 @@ export function TodayPage({ commands }: { commands: QizhiCommands }) {
     }
     return "正在准备扫描允许目录；你仍可浏览已发现的文件。";
   }
+
+  const visibleFiles = useMemo(() => {
+    if (!snapshot || snapshot.state !== "ready") return [];
+    const collator = new Intl.Collator("zh-CN", { sensitivity: "base" });
+    const [field, direction] = sort.split("-");
+    const factor = direction === "asc" ? 1 : -1;
+    return snapshot.files
+      .filter(
+        (file) =>
+          category === "all" || fileCategory(file.canonicalPath) === category,
+      )
+      .filter((file) => wildcardMatches(filename(file.canonicalPath), query))
+      .sort((left, right) => {
+        if (field === "name") {
+          return (
+            factor *
+            collator.compare(
+              filename(left.canonicalPath),
+              filename(right.canonicalPath),
+            )
+          );
+        }
+        if (field === "type") {
+          return (
+            factor *
+            collator.compare(
+              extension(left.canonicalPath),
+              extension(right.canonicalPath),
+            )
+          );
+        }
+        return factor * (left.modifiedAtUtcMs - right.modifiedAtUtcMs);
+      });
+  }, [category, query, snapshot, sort]);
   async function locate() {
     if (selected === null) return;
     try {
@@ -141,13 +235,47 @@ export function TodayPage({ commands }: { commands: QizhiCommands }) {
         <div className="file-panel">
           <div className="panel-title">
             <span>文件</span>
-            <span>{snapshot.files.length} 项</span>
+            <span>{visibleFiles.length} 项</span>
           </div>
-          {snapshot.files.length === 0 ? (
+          <div className="file-controls" aria-label="今日文件筛选与排序">
+            <input
+              aria-label="按文件名搜索"
+              value={query}
+              placeholder="搜索文件名，支持 * 和 ?"
+              onChange={(event) => setQuery(event.currentTarget.value)}
+            />
+            <select
+              aria-label="文件类型筛选"
+              value={category}
+              onChange={(event) =>
+                setCategory(
+                  event.currentTarget.value as
+                    "all" | "documents" | "sourceCode",
+                )
+              }
+            >
+              <option value="all">所有支持类型</option>
+              <option value="documents">文档与文本</option>
+              <option value="sourceCode">源代码</option>
+            </select>
+            <select
+              aria-label="排序方式"
+              value={sort}
+              onChange={(event) => setSort(event.currentTarget.value)}
+            >
+              <option value="time-desc">时间：最新优先</option>
+              <option value="time-asc">时间：最早优先</option>
+              <option value="name-asc">名称：A → Z</option>
+              <option value="name-desc">名称：Z → A</option>
+              <option value="type-asc">类型：A → Z</option>
+              <option value="type-desc">类型：Z → A</option>
+            </select>
+          </div>
+          {visibleFiles.length === 0 ? (
             <p className="empty">今天的扫描范围内还没有发现新文件。</p>
           ) : (
             <ul className="file-list">
-              {snapshot.files.map((file) => (
+              {visibleFiles.map((file) => (
                 <li key={file.id}>
                   <button
                     className={

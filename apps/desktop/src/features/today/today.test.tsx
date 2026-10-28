@@ -138,4 +138,61 @@ describe("TodayPage", () => {
     ).toBeInTheDocument();
     completeRefresh?.({ state: "ready", files: [], clusters: [] });
   });
+
+  it("filters by supported file type, matches wildcard file names, and sorts the visible list", async () => {
+    const snapshot: TodaySnapshot = {
+      state: "ready",
+      files: [
+        {
+          ...readySnapshot.files[0],
+          id: 1,
+          canonicalPath: "D:\\工作\\周报.docx",
+          modifiedAtUtcMs: 100,
+        },
+        {
+          ...readySnapshot.files[0],
+          id: 2,
+          canonicalPath: "D:\\工作\\analysis.py",
+          modifiedAtUtcMs: 300,
+        },
+        {
+          ...readySnapshot.files[0],
+          id: 3,
+          canonicalPath: "D:\\工作\\会议纪要.md",
+          modifiedAtUtcMs: 200,
+        },
+      ],
+      clusters: [{ label: "本机文件", fileIds: [1, 2, 3] }],
+    };
+    render(<TodayPage commands={commands(snapshot)} />);
+    await screen.findByText("周报.docx");
+
+    fireEvent.change(screen.getByLabelText("文件类型筛选"), {
+      target: { value: "sourceCode" },
+    });
+    expect(screen.getByText("analysis.py")).toBeInTheDocument();
+    expect(screen.queryByText("周报.docx")).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("文件类型筛选"), {
+      target: { value: "all" },
+    });
+    fireEvent.change(screen.getByLabelText("按文件名搜索"), {
+      target: { value: "周*.docx" },
+    });
+    expect(screen.getByText("周报.docx")).toBeInTheDocument();
+    expect(screen.queryByText("analysis.py")).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("按文件名搜索"), {
+      target: { value: "" },
+    });
+    fireEvent.change(screen.getByLabelText("排序方式"), {
+      target: { value: "name-asc" },
+    });
+    const names = screen.getAllByRole("button", { name: /\.docx|\.py|\.md/ });
+    expect(names.map((item) => item.textContent)).toEqual([
+      expect.stringContaining("会议纪要.md"),
+      expect.stringContaining("周报.docx"),
+      expect.stringContaining("analysis.py"),
+    ]);
+  });
 });

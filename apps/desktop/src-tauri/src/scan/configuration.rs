@@ -1,6 +1,9 @@
 use crate::{
     database::AppError,
-    scan::{file_filter::{FileCategory, default_file_categories}, policy::ScanPolicy},
+    scan::{
+        file_filter::{FileCategory, default_file_categories},
+        policy::ScanPolicy,
+    },
 };
 use serde::{Deserialize, Serialize};
 use std::{
