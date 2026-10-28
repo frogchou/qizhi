@@ -57,8 +57,9 @@ describe("TodayPage", () => {
     await waitFor(() =>
       expect(client.revealInExplorer).toHaveBeenCalledWith(7),
     );
-    fireEvent.click(screen.getByRole("button", { name: "刷新列表" }));
     await waitFor(() => expect(client.refreshToday).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "刷新列表" }));
+    await waitFor(() => expect(client.refreshToday).toHaveBeenCalledTimes(2));
   });
 
   it("shows remediation rather than an empty table when discovery is unavailable", async () => {
@@ -87,5 +88,25 @@ describe("TodayPage", () => {
     expect(
       await screen.findByText("今天的扫描范围内还没有发现新文件。"),
     ).toBeInTheDocument();
+  });
+
+  it("keeps the cached today view usable while a background refresh is running", async () => {
+    let completeRefresh: ((value: TodaySnapshot) => void) | undefined;
+    const client = commands({ state: "ready", files: [], clusters: [] });
+    client.refreshToday = vi.fn(
+      () =>
+        new Promise<TodaySnapshot>((resolve) => {
+          completeRefresh = resolve;
+        }),
+    );
+
+    render(<TodayPage commands={client} />);
+
+    expect(
+      await screen.findByText("今天的扫描范围内还没有发现新文件。"),
+    ).toBeInTheDocument();
+    await waitFor(() => expect(client.refreshToday).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole("button", { name: "刷新中…" })).toBeDisabled();
+    completeRefresh?.({ state: "ready", files: [], clusters: [] });
   });
 });

@@ -1,10 +1,12 @@
 use chrono::{Datelike, Local, TimeZone};
 use serde::Serialize;
-use std::{path::PathBuf, sync::Arc};
+use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
 use tauri::State;
 
 use crate::{
     app_state::AppState,
+    contracts::{FileRecord, LocalDayRange},
+    database::{AppError, repositories::FileRepository},
     discovery::{native_fs::NativeFileDiscovery, port::FileDiscovery},
     scan::{
         file_stability::MetadataStability,
@@ -103,10 +105,26 @@ fn refresh(state: &AppState) -> Result<TodayReady, TodayUnavailable> {
     )
     .refresh_for_range(roots, start, end)
     .map_err(|_| unavailable("刷新未完成，请检查扫描范围和文件访问权限。"))?;
-    Ok(TodayReady {
+    Ok(ready_from_files(snapshot.files))
+}
+
+fn cached_snapshot_for_range(
+    files: FileRepository,
+    start_utc_ms: i64,
+    end_utc_ms: i64,
+) -> Result<TodayReady, AppError> {
+    let files = files.list_for_local_day(LocalDayRange::new(start_utc_ms, end_utc_ms))?;
+    Ok(ready_from_files(files))
+}
+
+fn ready_from_files(files: Vec<FileRecord>) -> TodayReady {
+    let mut groups = BTreeMap::<String, Vec<i64>>::new();
+    for file in &files {
+        groups.entry(file.source.clone()).or_default().push(file.id);
+    }
+    TodayReady {
         state: "ready",
-        files: snapshot
-            .files
+        files: files
             .into_iter()
             .map(|file| TodayFile {
                 id: file.id,
@@ -117,15 +135,11 @@ fn refresh(state: &AppState) -> Result<TodayReady, TodayUnavailable> {
                 status: "待分析",
             })
             .collect(),
-        clusters: snapshot
-            .clusters
+        clusters: groups
             .into_iter()
-            .map(|cluster| TodayCluster {
-                label: cluster.label,
-                file_ids: cluster.file_ids,
-            })
+            .map(|(label, file_ids)| TodayCluster { label, file_ids })
             .collect(),
-    })
+    }
 }
 
 fn today_discovery(exclusions: Vec<PathBuf>) -> Arc<dyn FileDiscovery> {
@@ -136,10 +150,9 @@ fn today_discovery(exclusions: Vec<PathBuf>) -> Arc<dyn FileDiscovery> {
 pub async fn get_today_snapshot(
     state: State<'_, AppState>,
 ) -> Result<TodayReady, TodayUnavailable> {
-    let state = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || refresh(&state))
-        .await
-        .map_err(|_| unavailable("读取今日文件时发生意外错误。"))?
+    let (start, end) = bounds();
+    cached_snapshot_for_range(state.database.files(), start, end)
+        .map_err(|_| unavailable("无法读取已发现的今日文件。"))
 }
 #[tauri::command]
 pub async fn refresh_today(state: State<'_, AppState>) -> Result<TodayReady, TodayUnavailable> {
@@ -162,9 +175,13 @@ pub fn reveal_in_explorer(state: State<'_, AppState>, id: i64) -> Result<(), Str
 
 #[cfg(test)]
 mod tests {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
     use chrono::{Local, TimeZone, Timelike};
 
-    use super::{bounds, today_discovery};
+    use crate::{contracts::FileRecordInput, database::Database};
+
+    use super::{bounds, cached_snapshot_for_range, today_discovery};
 
     #[test]
     fn uses_local_calendar_midnights_for_today() {
@@ -185,5 +202,33 @@ mod tests {
     #[test]
     fn uses_native_discovery_without_an_everything_connection() {
         assert_eq!(today_discovery(vec![]).name(), "native-file-system");
+    }
+
+    #[test]
+    fn cached_snapshot_returns_persisted_today_records_without_discovery() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock after epoch")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("qizhi-today-cache-{nonce}.sqlite"));
+        let database = Database::open(&path).expect("database opens");
+        let (start, end) = bounds();
+        database
+            .files()
+            .upsert(&FileRecordInput {
+                canonical_path: r"D:\\work\\today.txt".to_owned(),
+                file_identity: "today-file".to_owned(),
+                modified_at_utc_ms: start + 1,
+                size_bytes: 12,
+                source: "本机文件".to_owned(),
+            })
+            .expect("persist today file");
+
+        let snapshot = cached_snapshot_for_range(database.files(), start, end)
+            .expect("read persisted snapshot");
+
+        assert_eq!(snapshot.files.len(), 1);
+        assert_eq!(snapshot.files[0].canonical_path, r"D:\\work\\today.txt");
+        let _ = std::fs::remove_file(path);
     }
 }

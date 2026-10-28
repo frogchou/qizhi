@@ -28,7 +28,10 @@ export function TodayPage({ commands }: { commands: QizhiCommands }) {
   useEffect(() => {
     commands
       .getTodaySnapshot()
-      .then(setSnapshot)
+      .then((cachedSnapshot) => {
+        setSnapshot(cachedSnapshot);
+        void refresh();
+      })
       .catch(() =>
         setSnapshot({
           state: "unavailable",
@@ -101,6 +104,11 @@ export function TodayPage({ commands }: { commands: QizhiCommands }) {
           </button>
         </div>
       </header>
+      {busy ? (
+        <StatusNotice>
+          正在后台扫描允许目录；你仍可浏览已发现的文件。
+        </StatusNotice>
+      ) : null}
       {notice ? <StatusNotice>{notice}</StatusNotice> : null}
       <div className="today-layout">
         <div className="file-panel">
