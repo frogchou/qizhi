@@ -2,6 +2,7 @@ use crate::{
     contracts::MaskedServiceConfig,
     database::{AppError, Database},
 };
+use rusqlite::OptionalExtension;
 
 #[derive(Clone)]
 pub struct ConfigRepository {
@@ -24,6 +25,25 @@ impl ConfigRepository {
         self.database.with_connection(|connection| {
             let mut statement = connection.prepare("SELECT service, endpoint, api_key_mask, credential_reference FROM app_config ORDER BY service")?;
             statement.query_map([], |row| Ok(MaskedServiceConfig { service: row.get(0)?, endpoint: row.get(1)?, api_key_mask: row.get(2)?, credential_reference: row.get(3)? }))?.collect()
+        })
+    }
+
+    pub fn find(&self, service: &str) -> Result<Option<MaskedServiceConfig>, AppError> {
+        self.database.with_connection(|connection| {
+            connection
+                .query_row(
+                    "SELECT service, endpoint, api_key_mask, credential_reference FROM app_config WHERE service = ?1",
+                    [service],
+                    |row| {
+                        Ok(MaskedServiceConfig {
+                            service: row.get(0)?,
+                            endpoint: row.get(1)?,
+                            api_key_mask: row.get(2)?,
+                            credential_reference: row.get(3)?,
+                        })
+                    },
+                )
+                .optional()
         })
     }
 }

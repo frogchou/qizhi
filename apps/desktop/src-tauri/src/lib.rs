@@ -4,6 +4,7 @@ pub mod config;
 pub mod contracts;
 pub mod database;
 pub mod discovery;
+pub mod ragflow;
 pub mod scan;
 pub mod system;
 pub mod telemetry;
@@ -47,6 +48,8 @@ pub fn run() {
             commands::today::get_today_snapshot,
             commands::today::refresh_today,
             commands::today::reveal_in_explorer,
+            commands::knowledge::list_ragflow_chats,
+            commands::knowledge::ask_ragflow_chat,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
