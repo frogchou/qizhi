@@ -69,3 +69,25 @@ fn parses_datasets_agents_retrieval_chunks_and_native_agent_answers() {
     assert_eq!(answer.answer, "Agent 回答");
     assert_eq!(answer.session_id, "session-1");
 }
+
+#[test]
+fn parses_a_successful_dataset_list_when_ragflow_omits_message() {
+    let datasets = RagflowClient::parse_dataset_list(
+        r#"{"code":0,"data":[{"id":"kb-1","name":"项目资料","description":"项目文档"}],"total_datasets":1}"#,
+    )
+    .expect("RAGFlow dataset responses may omit the optional message field");
+
+    assert_eq!(datasets.len(), 1);
+    assert_eq!(datasets[0].id, "kb-1");
+}
+
+#[test]
+fn parses_agents_when_the_agent_endpoint_omits_the_canvas_type() {
+    let agents = RagflowClient::parse_agent_list(
+        r#"{"code":0,"message":"success","data":{"canvas":[{"id":"agent-1","title":"项目助手","description":"分析项目"}],"total":1}}"#,
+    )
+    .expect("the agent listing endpoint already contains only agents");
+
+    assert_eq!(agents.len(), 1);
+    assert_eq!(agents[0].name, "项目助手");
+}

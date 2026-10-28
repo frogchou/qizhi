@@ -61,6 +61,7 @@ pub struct RagflowAgentAnswer {
 #[derive(Deserialize)]
 struct Envelope {
     code: i64,
+    #[serde(default)]
     message: String,
     data: Value,
 }
@@ -277,7 +278,7 @@ impl RagflowClient {
         Ok(page
             .canvas
             .into_iter()
-            .filter(|item| item.item_type == "agent")
+            .filter(|item| item.item_type.is_empty() || item.item_type == "agent")
             .map(|item| RagflowAgent {
                 id: item.id,
                 name: if item.title.is_empty() {
