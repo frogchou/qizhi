@@ -4,6 +4,10 @@ import { describe, expect, it, vi } from "vitest";
 import type { QizhiCommands } from "../../lib/tauri";
 import { KnowledgePage } from "./KnowledgePage";
 
+const { saveDialog } = vi.hoisted(() => ({ saveDialog: vi.fn() }));
+
+vi.mock("@tauri-apps/plugin-dialog", () => ({ save: saveDialog }));
+
 function response() {
   return {
     chunks: [
@@ -11,6 +15,8 @@ function response() {
         id: "chunk-1",
         content: "周报中提到项目进度。",
         documentName: "周报.docx",
+        documentId: "document-1",
+        datasetId: "kb-work",
         similarity: 0.91,
       },
     ],
@@ -46,6 +52,9 @@ function commands(): QizhiCommands {
       { id: "agent-review", name: "评审助手", description: "风险分析" },
     ]),
     queryRagflowKnowledge: vi.fn().mockResolvedValue(response()),
+    downloadRagflowDocument: vi.fn().mockResolvedValue({
+      savedPath: "C:\\Users\\fcc\\Downloads\\周报.docx",
+    }),
   };
 }
 
@@ -61,6 +70,7 @@ async function selectResources() {
 describe("KnowledgePage", () => {
   it("keeps retrieval and multiple Agent results in one conversation turn", async () => {
     const client = commands();
+    saveDialog.mockResolvedValue("C:\\Users\\fcc\\Downloads\\周报.docx");
     render(<KnowledgePage commands={client} />);
 
     expect(
@@ -88,6 +98,24 @@ describe("KnowledgePage", () => {
     expect(screen.getByText("引用来源（1）")).toBeInTheDocument();
     fireEvent.click(screen.getByText("引用来源（1）"));
     expect(screen.getByText("周报中提到项目进度。")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "下载 周报.docx" }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "下载 周报.docx" }));
+    await waitFor(() =>
+      expect(client.downloadRagflowDocument).toHaveBeenCalledWith({
+        datasetId: "kb-work",
+        documentId: "document-1",
+        savePath: "C:\\Users\\fcc\\Downloads\\周报.docx",
+      }),
+    );
+  });
+
+  it("keeps the composer available at the bottom before a conversation starts", async () => {
+    render(<KnowledgePage commands={commands()} />);
+
+    await screen.findByText("工作知识库");
+    expect(document.querySelector(".conversation-follow-up")).toBeTruthy();
   });
 
   it("adds a follow-up question instead of replacing the existing conversation", async () => {

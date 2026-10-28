@@ -56,10 +56,12 @@ fn parses_datasets_agents_retrieval_chunks_and_native_agent_answers() {
     assert_eq!(agents[0].name, "项目助手");
 
     let chunks = RagflowClient::parse_retrieval(
-        r#"{"code":0,"message":"success","data":{"chunks":[{"id":"chunk-1","content":"相关内容","document_keyword":"周报.docx","similarity":0.92}]}}"#,
+        r#"{"code":0,"message":"success","data":{"chunks":[{"id":"chunk-1","content":"相关内容","document_keyword":"周报.docx","document_id":"document-1","dataset_id":"dataset-1","similarity":0.92}]}}"#,
     )
     .expect("retrieval parses");
     assert_eq!(chunks[0].document_name, "周报.docx");
+    assert_eq!(chunks[0].document_id, "document-1");
+    assert_eq!(chunks[0].dataset_id, "dataset-1");
 
     let answer = RagflowClient::parse_agent_answer(
         "agent-1",
@@ -90,4 +92,18 @@ fn parses_agents_when_the_agent_endpoint_omits_the_canvas_type() {
 
     assert_eq!(agents.len(), 1);
     assert_eq!(agents[0].name, "项目助手");
+}
+
+#[test]
+fn explains_when_an_agent_cannot_reach_its_own_model_service() {
+    let error = RagflowClient::parse_agent_answer(
+        "agent-1",
+        r#"{"code":102,"message":"无法连接 Base URL，请检查网络、地址和代理设置。","data":{}}"#,
+    )
+    .expect_err("an Agent model connection failure must name the failing layer");
+
+    assert_eq!(
+        error,
+        "所选 Agent 无法连接其配置的大模型服务，请在 RAGFlow 中检查该 Agent 的模型 Base URL、密钥和代理设置。"
+    );
 }

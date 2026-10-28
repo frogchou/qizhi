@@ -5,6 +5,11 @@ pub struct HttpResponse {
     pub body: String,
 }
 
+pub struct HttpBytesResponse {
+    pub status: u16,
+    pub body: Vec<u8>,
+}
+
 pub struct HttpClient {
     client: reqwest::blocking::Client,
 }
@@ -43,5 +48,25 @@ impl HttpClient {
             .text()
             .map_err(|_| "无法读取服务返回的数据。".to_owned())?;
         Ok(HttpResponse { status, body })
+    }
+
+    pub fn request_bearer_bytes(
+        &self,
+        method: reqwest::Method,
+        url: &str,
+        api_key: &str,
+    ) -> Result<HttpBytesResponse, String> {
+        let response = self
+            .client
+            .request(method, url)
+            .bearer_auth(api_key)
+            .send()
+            .map_err(|_| "无法连接 Base URL，请检查网络、地址和代理设置。".to_owned())?;
+        let status = response.status().as_u16();
+        let body = response
+            .bytes()
+            .map_err(|_| "无法读取服务返回的文件。".to_owned())?
+            .to_vec();
+        Ok(HttpBytesResponse { status, body })
     }
 }

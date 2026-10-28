@@ -47,6 +47,8 @@ pub struct RagflowChunk {
     pub id: String,
     pub content: String,
     pub document_name: String,
+    pub document_id: String,
+    pub dataset_id: String,
     pub similarity: f64,
 }
 
@@ -122,6 +124,10 @@ struct RetrievalChunkData {
     document_keyword: String,
     #[serde(default)]
     docnm_kwd: String,
+    #[serde(default)]
+    document_id: String,
+    #[serde(default)]
+    dataset_id: String,
     #[serde(default)]
     similarity: f64,
 }
@@ -212,6 +218,31 @@ impl RagflowClient {
         .to_string();
         let url = self.api_url("/api/v1/agents/chat/completions")?;
         Self::parse_agent_answer(agent_id, &self.request("POST", url, Some(body))?)
+    }
+
+    pub fn download_document(
+        &self,
+        dataset_id: &str,
+        document_id: &str,
+    ) -> Result<Vec<u8>, String> {
+        if !is_resource_id(dataset_id) || !is_resource_id(document_id) {
+            return Err("RAGFlow 文档标识无效，无法下载。".to_owned());
+        }
+        let url = self.api_url(&format!(
+            "/api/v1/datasets/{dataset_id}/documents/{document_id}"
+        ))?;
+        let transport = HttpClient::with_timeout(Duration::from_secs(90))?.request_bearer_bytes(
+            reqwest::Method::GET,
+            &url,
+            &self.api_key,
+        )?;
+        if !(200..300).contains(&transport.status) {
+            return Err(format!("RAGFlow 下载未通过（HTTP {}）。", transport.status));
+        }
+        if transport.body.is_empty() {
+            return Err("RAGFlow 未返回可下载的文件。".to_owned());
+        }
+        Ok(transport.body)
     }
 
     pub fn ask(&self, chat_id: &str, question: &str) -> Result<RagflowAnswer, String> {
@@ -306,13 +337,15 @@ impl RagflowClient {
                 } else {
                     chunk.document_keyword
                 },
+                document_id: chunk.document_id,
+                dataset_id: chunk.dataset_id,
                 similarity: chunk.similarity,
             })
             .collect())
     }
 
     pub fn parse_agent_answer(agent_id: &str, body: &str) -> Result<RagflowAgentAnswer, String> {
-        let envelope = parse_envelope(body)?;
+        let envelope = parse_envelope(body).map_err(agent_execution_error)?;
         let session_id = envelope
             .data
             .get("session_id")
@@ -356,6 +389,19 @@ impl RagflowClient {
             return Err(format!("RAGFlow 连接未通过（HTTP {}）。", transport.status));
         }
         Ok(transport.body)
+    }
+}
+
+fn is_resource_id(value: &str) -> bool {
+    !value.trim().is_empty() && !value.contains(['/', '\\', '\0'])
+}
+
+fn agent_execution_error(error: String) -> String {
+    if error.contains("Base URL") {
+        "所选 Agent 无法连接其配置的大模型服务，请在 RAGFlow 中检查该 Agent 的模型 Base URL、密钥和代理设置。"
+            .to_owned()
+    } else {
+        error
     }
 }
 

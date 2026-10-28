@@ -1,4 +1,5 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { save } from "@tauri-apps/plugin-dialog";
 
 import { StatusNotice } from "../../components/StatusNotice";
 import type {
@@ -44,6 +45,16 @@ function SendIcon() {
     <svg aria-hidden="true" viewBox="0 0 24 24">
       <path d="m4 4 16 8-16 8 3-8-3-8Z" />
       <path d="M7 12h12" />
+    </svg>
+  );
+}
+
+function DownloadIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24">
+      <path d="M12 3.5v11" />
+      <path d="m7.8 10.8 4.2 4.2 4.2-4.2" />
+      <path d="M4.5 18.5v1.2c0 .7.6 1.3 1.3 1.3h12.4c.7 0 1.3-.6 1.3-1.3v-1.2" />
     </svg>
   );
 }
@@ -205,9 +216,13 @@ function ResourceSelector({
 function ConversationAnswer({
   turn,
   agents,
+  downloadingChunkId,
+  onDownload,
 }: {
   turn: ConversationTurn;
   agents: RagflowAgent[];
+  downloadingChunkId: string | null;
+  onDownload: (chunk: RagflowKnowledgeQuery["chunks"][number]) => void;
 }) {
   if (turn.status === "pending") {
     return (
@@ -272,12 +287,28 @@ function ConversationAnswer({
             <div className="citation-list">
               {chunks.map((chunk) => (
                 <article className="citation-card" key={chunk.id}>
-                  <header>
-                    <FolderIcon />
-                    <strong>{chunk.documentName || "未命名来源"}</strong>
-                  </header>
-                  <p>{chunk.content}</p>
-                  <small>相关度 {Math.round(chunk.similarity * 100)}%</small>
+                  <div className="citation-main">
+                    <header>
+                      <FolderIcon />
+                      <strong>{chunk.documentName || "未命名来源"}</strong>
+                    </header>
+                    <p>{chunk.content}</p>
+                    <small>相关度 {Math.round(chunk.similarity * 100)}%</small>
+                  </div>
+                  {chunk.datasetId && chunk.documentId ? (
+                    <button
+                      aria-label={`下载 ${chunk.documentName || "资料来源"}`}
+                      className="citation-download"
+                      disabled={downloadingChunkId === chunk.id}
+                      onClick={() => onDownload(chunk)}
+                      type="button"
+                    >
+                      <DownloadIcon />
+                      {downloadingChunkId === chunk.id ? "下载中" : "下载"}
+                    </button>
+                  ) : (
+                    <span className="citation-unavailable">仅来源片段</span>
+                  )}
                 </article>
               ))}
             </div>
@@ -297,6 +328,10 @@ export function KnowledgePage({ commands }: { commands: QizhiCommands }) {
   const [turns, setTurns] = useState<ConversationTurn[]>([]);
   const [recentQuestions, setRecentQuestions] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [downloadFeedback, setDownloadFeedback] = useState<string | null>(null);
+  const [downloadingChunkId, setDownloadingChunkId] = useState<string | null>(
+    null,
+  );
   const [loading, setLoading] = useState(true);
   const [querying, setQuerying] = useState(false);
 
@@ -383,6 +418,36 @@ export function KnowledgePage({ commands }: { commands: QizhiCommands }) {
     }
   }
 
+  async function downloadSource(
+    chunk: RagflowKnowledgeQuery["chunks"][number],
+  ) {
+    const download = commands.downloadRagflowDocument;
+    if (!download || !chunk.datasetId || !chunk.documentId) {
+      setDownloadFeedback("该来源未提供可下载的原文件标识。");
+      return;
+    }
+    const fallbackName = "ragflow-document";
+    const savePath = await save({
+      defaultPath: chunk.documentName || fallbackName,
+      title: "保存 RAGFlow 原文件",
+    });
+    if (typeof savePath !== "string" || !savePath) return;
+    setDownloadingChunkId(chunk.id);
+    setDownloadFeedback(null);
+    try {
+      const result = await download({
+        datasetId: chunk.datasetId,
+        documentId: chunk.documentId,
+        savePath,
+      });
+      setDownloadFeedback(`已下载：${result.savedPath}`);
+    } catch (downloadError) {
+      setDownloadFeedback(errorText(downloadError));
+    } finally {
+      setDownloadingChunkId(null);
+    }
+  }
+
   return (
     <section className="page knowledge-page" aria-labelledby="knowledge-title">
       <header className="knowledge-header">
@@ -408,15 +473,7 @@ export function KnowledgePage({ commands }: { commands: QizhiCommands }) {
           <div className="conversation-scroll" aria-live="polite">
             {!turns.length ? (
               <div className="conversation-start">
-                <Composer
-                  question={question}
-                  querying={querying}
-                  hasResources={hasResources}
-                  onChange={setQuestion}
-                  onSubmit={() => void query()}
-                  followUp={false}
-                />
-                <p>在右侧选择资料范围后，输入问题即可开始检索和对话。</p>
+                <p>在右侧选择资料范围后，在底部输入问题即可开始检索和对话。</p>
               </div>
             ) : (
               <div className="conversation-turns">
@@ -429,24 +486,29 @@ export function KnowledgePage({ commands }: { commands: QizhiCommands }) {
                     <ConversationAnswer
                       turn={turn}
                       agents={Array.from(agentById.values())}
+                      downloadingChunkId={downloadingChunkId}
+                      onDownload={(chunk) => void downloadSource(chunk)}
                     />
                   </div>
                 ))}
               </div>
             )}
           </div>
-          {turns.length ? (
-            <div className="conversation-follow-up">
-              <Composer
-                question={question}
-                querying={querying}
-                hasResources={hasResources}
-                onChange={setQuestion}
-                onSubmit={() => void query()}
-                followUp
-              />
-            </div>
-          ) : null}
+          <div className="conversation-follow-up">
+            {downloadFeedback ? (
+              <p className="conversation-feedback" role="status">
+                {downloadFeedback}
+              </p>
+            ) : null}
+            <Composer
+              question={question}
+              querying={querying}
+              hasResources={hasResources}
+              onChange={setQuestion}
+              onSubmit={() => void query()}
+              followUp={turns.length > 0}
+            />
+          </div>
         </section>
         <aside aria-label="检索范围" className="knowledge-rail">
           <section className="rail-card scope-card">

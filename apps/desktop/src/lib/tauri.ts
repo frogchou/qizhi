@@ -40,6 +40,11 @@ export interface QizhiCommands {
     datasetIds: string[];
     agentIds: string[];
   }): Promise<RagflowKnowledgeQuery>;
+  downloadRagflowDocument?(input: {
+    datasetId: string;
+    documentId: string;
+    savePath: string;
+  }): Promise<{ savedPath: string }>;
 }
 
 export type ConnectionStatus = { available: boolean; message: string };
@@ -108,6 +113,8 @@ export type RagflowChunk = {
   id: string;
   content: string;
   documentName: string;
+  documentId: string;
+  datasetId: string;
   similarity: number;
 };
 export type RagflowAgentResult = {
@@ -204,4 +211,6 @@ export const tauriCommands: QizhiCommands = {
   listRagflowAgents: () => invoke("list_ragflow_agents"),
   queryRagflowKnowledge: (input) =>
     invoke("query_ragflow_knowledge", { input }),
+  downloadRagflowDocument: (input) =>
+    invoke("download_ragflow_document", { input }),
 };

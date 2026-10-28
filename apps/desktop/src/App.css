@@ -679,22 +679,28 @@ h2 {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  position: relative;
 }
 .conversation-scroll {
+  flex: 1;
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 4px 16px 24px 0;
+  padding: 4px 16px 18px 0;
 }
 .conversation-start {
-  margin: 4px auto 0;
+  align-items: center;
+  display: flex;
+  height: 100%;
+  justify-content: center;
+  margin: 0 auto;
   max-width: 890px;
-  padding-top: 4px;
+  text-align: center;
 }
 .conversation-start > p {
   color: #8a968f;
   font-size: 13px;
-  margin: 14px 16px;
+  margin: 0 16px 70px;
 }
 .knowledge-composer {
   align-items: center;
@@ -765,9 +771,9 @@ h2 {
 }
 .conversation-turns {
   border-top: 1px solid #e6ebe7;
-  margin: 25px auto 0;
+  margin: 0 auto;
   max-width: 890px;
-  padding-top: 18px;
+  padding-top: 22px;
 }
 .conversation-turn + .conversation-turn {
   border-top: 1px solid #e7ece8;
@@ -833,8 +839,8 @@ h2 {
 .assistant-failure > p {
   background: #fff;
   border: 1px solid #e3e9e4;
-  border-radius: 11px;
-  box-shadow: 0 7px 18px rgb(23 50 40 / 3%);
+  border-radius: 10px 14px 14px 14px;
+  box-shadow: 0 8px 22px rgb(23 50 40 / 4%);
   color: #274036;
   flex: 1;
   min-width: 0;
@@ -909,14 +915,21 @@ h2 {
 .citation-list {
   display: grid;
   gap: 10px;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: 1fr;
   margin-top: 12px;
 }
 .citation-card {
+  align-items: center;
   background: #fbfdfb;
   border: 1px solid #e4ebe5;
   border-radius: 8px;
-  padding: 11px;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  padding: 11px 12px;
+}
+.citation-main {
+  min-width: 0;
 }
 .citation-card header {
   align-items: center;
@@ -952,9 +965,49 @@ h2 {
   color: #70877d;
   font-size: 11px;
 }
+.citation-download {
+  align-items: center;
+  background: #f0f7f3;
+  border: 1px solid #d4e5db;
+  border-radius: 7px;
+  color: #216653;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 700;
+  gap: 5px;
+  min-height: 31px;
+  padding: 0 10px;
+}
+.citation-download:hover:not(:disabled) {
+  background: #e2f1e9;
+}
+.citation-download svg {
+  fill: none;
+  height: 15px;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+  width: 15px;
+}
+.citation-unavailable {
+  color: #89968f;
+  flex: 0 0 auto;
+  font-size: 11px;
+}
 .conversation-follow-up {
-  background: #f7faf8;
-  padding: 17px 16px 0 0;
+  background: linear-gradient(to bottom, rgb(247 250 248 / 0%), #f7faf8 20%);
+  flex: 0 0 auto;
+  padding: 24px 16px 0 0;
+}
+.conversation-feedback {
+  color: #46665a;
+  font-size: 12px;
+  margin: 0 0 7px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .knowledge-rail {
   min-height: 0;
