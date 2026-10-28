@@ -115,6 +115,30 @@ describe("TodayPage", () => {
     completeRefresh?.({ state: "ready", files: [], clusters: [] });
   });
 
+  it("follows an already-running scan instead of reporting a refresh failure", async () => {
+    const client = commands({ state: "ready", files: [], clusters: [] });
+    client.refreshToday = vi.fn().mockRejectedValue({
+      remediation: "已有今日扫描正在进行，请等待它完成。",
+    });
+    client.getTodayScanStatus = vi.fn().mockResolvedValue({
+      state: "scanning",
+      directoriesScanned: 12,
+      candidatesFound: 2,
+      startedAtUtcMs: 1,
+      completedAtUtcMs: null,
+      message: null,
+    });
+
+    render(<TodayPage commands={client} />);
+
+    expect(
+      await screen.findByText("另一轮扫描正在进行，完成后将自动更新。"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("刷新未完成，请检查扫描范围和文件访问权限。"),
+    ).not.toBeInTheDocument();
+  });
+
   it("shows live scan counts while the background discovery is running", async () => {
     let completeRefresh: ((value: TodaySnapshot) => void) | undefined;
     const client = commands({ state: "ready", files: [], clusters: [] });

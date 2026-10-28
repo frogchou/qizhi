@@ -58,6 +58,7 @@ export function SettingsPage({ commands }: SettingsPageProps) {
   const [everything, setEverything] = useState<EverythingStatus | null>(null);
   const [roots, setRoots] = useState<string[]>([]);
   const [exclusions, setExclusions] = useState<string[]>([]);
+  const [scanRulesNotice, setScanRulesNotice] = useState<string | null>(null);
   const [fileCategories, setFileCategories] = useState<FileCategory[]>([
     "documents",
     "sourceCode",
@@ -109,13 +110,20 @@ export function SettingsPage({ commands }: SettingsPageProps) {
 
   async function saveScanRules() {
     setError(null);
+    setScanRulesNotice(null);
     try {
-      await commands.saveScanRules({
+      const savedRules = await commands.saveScanRules({
         allowedRoots: roots,
         customExclusions: exclusions,
         fileCategories,
         esCliPath: null,
       });
+      setRoots(savedRules.allowedRoots);
+      setExclusions(savedRules.customExclusions);
+      setFileCategories(savedRules.fileCategories);
+      setScanRulesNotice(
+        `扫描规则已保存：${savedRules.allowedRoots.length} 个扫描范围，${savedRules.customExclusions.length} 个排除目录。`,
+      );
       setEverything((await commands.getEverythingStatus?.()) ?? null);
     } catch {
       setError("扫描范围未保存，请检查选择的文件夹。");
@@ -284,6 +292,11 @@ export function SettingsPage({ commands }: SettingsPageProps) {
         >
           保存扫描范围
         </button>
+        {scanRulesNotice ? (
+          <p className="settings-success" role="status">
+            {scanRulesNotice}
+          </p>
+        ) : null}
       </section>
 
       <section className="settings-block" aria-labelledby="services-title">

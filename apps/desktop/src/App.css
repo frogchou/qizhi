@@ -499,6 +499,11 @@ h2 {
   color: #a24737;
   margin: 12px 0;
 }
+.settings-success {
+  color: #0a855a;
+  font-size: 13px;
+  margin: 12px 0 0;
+}
 .knowledge-layout {
   display: grid;
   gap: 18px;

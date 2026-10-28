@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { StatusNotice } from "../../components/StatusNotice";
 import type {
@@ -44,7 +44,22 @@ function wildcardMatches(value: string, query: string) {
 type FileMenu = { id: number; x: number; y: number };
 
 function readableError(error: unknown, fallback: string) {
-  return typeof error === "string" && error.trim() ? error : fallback;
+  if (error instanceof Error && error.message.trim()) return error.message;
+  if (typeof error === "string" && error.trim()) return error;
+  if (
+    error &&
+    typeof error === "object" &&
+    "remediation" in error &&
+    typeof error.remediation === "string" &&
+    error.remediation.trim()
+  ) {
+    return error.remediation;
+  }
+  return fallback;
+}
+
+function isExistingScan(message: string) {
+  return message.includes("已有今日扫描正在进行");
 }
 
 const SOURCE_EXTENSIONS = new Set([
@@ -96,6 +111,8 @@ export function TodayPage({ commands }: { commands: QizhiCommands }) {
   );
   const [sort, setSort] = useState("time-desc");
   const [fileMenu, setFileMenu] = useState<FileMenu | null>(null);
+  const [followingExistingScan, setFollowingExistingScan] = useState(false);
+  const completingExistingScan = useRef(false);
 
   useEffect(() => {
     commands
@@ -116,18 +133,46 @@ export function TodayPage({ commands }: { commands: QizhiCommands }) {
   useEffect(() => {
     if (!busy || !commands.getTodayScanStatus) return;
     let active = true;
-    const loadStatus = () =>
-      commands
-        .getTodayScanStatus?.()
-        .then((status) => active && setScanStatus(status))
-        .catch(() => undefined);
+    const loadStatus = async () => {
+      try {
+        const status = await commands.getTodayScanStatus?.();
+        if (!active || !status) return;
+        setScanStatus(status);
+        if (
+          followingExistingScan &&
+          status.state !== "scanning" &&
+          !completingExistingScan.current
+        ) {
+          completingExistingScan.current = true;
+          try {
+            setSnapshot(await commands.getTodaySnapshot());
+            setNotice(
+              status.state === "completed"
+                ? "扫描完成，已按当前扫描与排除规则更新列表。"
+                : (status.message ??
+                    "扫描未完成，请检查扫描范围和文件访问权限。"),
+            );
+          } catch {
+            setNotice("扫描结束后无法读取今日文件。请稍后重新打开今日页面。");
+          } finally {
+            if (active) {
+              setFollowingExistingScan(false);
+              setBusy(false);
+            }
+            completingExistingScan.current = false;
+          }
+        }
+      } catch {
+        // The next interval may succeed; the normal refresh error state remains visible.
+      }
+    };
     void loadStatus();
     const timer = window.setInterval(loadStatus, 1000);
     return () => {
       active = false;
       window.clearInterval(timer);
     };
-  }, [busy, commands]);
+  }, [busy, commands, followingExistingScan]);
   useEffect(() => {
     if (!fileMenu) return;
     const close = () => setFileMenu(null);
@@ -138,14 +183,24 @@ export function TodayPage({ commands }: { commands: QizhiCommands }) {
     setBusy(true);
     setNotice(null);
     setScanStatus(null);
+    setFollowingExistingScan(false);
+    let followExistingScan = false;
     try {
       setSnapshot(await commands.refreshToday());
     } catch (error) {
-      setNotice(
-        readableError(error, "刷新未完成，请检查扫描范围和文件访问权限。"),
+      const message = readableError(
+        error,
+        "刷新未完成，请检查扫描范围和文件访问权限。",
       );
+      if (isExistingScan(message)) {
+        followExistingScan = true;
+        setFollowingExistingScan(true);
+        setNotice("另一轮扫描正在进行，完成后将自动更新。");
+      } else {
+        setNotice(message);
+      }
     } finally {
-      setBusy(false);
+      if (!followExistingScan) setBusy(false);
     }
   }
 

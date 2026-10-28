@@ -142,7 +142,14 @@ describe("SettingsPage", () => {
         esCliPath: null,
         lockedExclusions: [],
       }),
-      saveScanRules: vi.fn().mockResolvedValue({}),
+      saveScanRules: vi.fn().mockResolvedValue({
+        allowedRoots: ["D:\\Work"],
+        customExclusions: [],
+        fileCategories: ["documents"],
+        everythingSdkPath: null,
+        esCliPath: null,
+        lockedExclusions: [],
+      }),
     };
 
     render(<SettingsPage commands={commands} />);
@@ -158,6 +165,9 @@ describe("SettingsPage", () => {
         esCliPath: null,
       }),
     );
+    expect(
+      await screen.findByText("扫描规则已保存：1 个扫描范围，0 个排除目录。"),
+    ).toBeInTheDocument();
   });
 
   it("saves RAGFlow as a separately masked connection", async () => {
