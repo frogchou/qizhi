@@ -158,6 +158,12 @@ mod tests {
     }
 
     #[test]
+    fn folder_selection_never_starts_a_command_shell() {
+        let source = include_str!("settings.rs").to_ascii_lowercase();
+        assert!(!source.contains(&["power", "shell.exe"].concat()));
+    }
+
+    #[test]
     fn rejects_a_ragflow_business_error_with_an_http_success_status() {
         assert!(!connection_is_usable(
             "ragflow",
@@ -170,24 +176,6 @@ mod tests {
             r#"{"code":0,"message":"success","data":[]}"#,
         ));
     }
-}
-
-#[tauri::command]
-pub fn pick_folder() -> Result<Option<String>, String> {
-    let output = std::process::Command::new("powershell.exe")
-        .args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            "Add-Type -AssemblyName System.Windows.Forms; $dialog = New-Object System.Windows.Forms.FolderBrowserDialog; if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.Write($dialog.SelectedPath) }",
-        ])
-        .output()
-        .map_err(|_| "folder_picker_unavailable".to_owned())?;
-    if !output.status.success() {
-        return Err("folder_picker_unavailable".to_owned());
-    }
-    let path = String::from_utf8(output.stdout).map_err(|_| "folder_picker_invalid".to_owned())?;
-    Ok((!path.trim().is_empty()).then_some(path.trim().to_owned()))
 }
 
 #[derive(Serialize)]

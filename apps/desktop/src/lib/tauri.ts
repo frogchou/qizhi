@@ -3,6 +3,7 @@ import type {
   ServiceConfigurationInput,
 } from "./contracts";
 import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 
 export interface QizhiCommands {
   getSettings(): Promise<MaskedServiceConfig[]>;
@@ -154,7 +155,14 @@ export const tauriCommands: QizhiCommands = {
   saveSettings: (input) => invoke("save_settings", { input }),
   testServiceConnection: (input) =>
     invoke("test_service_connection", { input }),
-  pickFolder: () => invoke("pick_folder"),
+  pickFolder: async () => {
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      title: "选择文件夹",
+    });
+    return typeof selected === "string" ? selected : null;
+  },
   getEverythingStatus: () => invoke("get_everything_status"),
   getTodaySnapshot: () => invoke("get_today_snapshot"),
   getTodayScanStatus: () => invoke("get_today_scan_status"),

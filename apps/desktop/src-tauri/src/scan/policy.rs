@@ -52,6 +52,20 @@ impl ScanPolicy {
                 .any(|root| canonical.0.starts_with(&root.0))
     }
 
+    /// Applies the same privacy and scan-root boundary to an already stored
+    /// file path. Unlike `is_allowed`, it does not require the file to still
+    /// exist, so a rule change immediately hides old cached records.
+    pub fn is_cached_path_allowed(&self, path: &Path) -> bool {
+        if self.is_denied(path) {
+            return false;
+        }
+        self.allowed_roots.is_empty()
+            || self
+                .allowed_roots
+                .iter()
+                .any(|root| path.starts_with(&root.0))
+    }
+
     /// Used while walking below an already approved root. It avoids resolving
     /// every directory again while still applying all locked and user-defined
     /// exclusions. Reparse points are handled by the walker from metadata.

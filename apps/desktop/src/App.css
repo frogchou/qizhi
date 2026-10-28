@@ -204,7 +204,7 @@ h2 {
   display: flex;
   font-size: 13px;
   justify-content: space-between;
-  padding: 16px 18px;
+  padding: 12px 16px;
 }
 .file-controls {
   display: grid;
@@ -213,7 +213,7 @@ h2 {
       145px,
       auto
     );
-  padding: 12px 14px;
+  padding: 9px 12px;
 }
 .file-controls input,
 .file-controls select {
@@ -223,7 +223,7 @@ h2 {
   color: #30443a;
   font: inherit;
   min-width: 0;
-  padding: 8px 10px;
+  padding: 7px 9px;
 }
 .file-list {
   flex: 1;
@@ -240,9 +240,9 @@ h2 {
   border: 0;
   border-bottom: 1px solid #edf0ec;
   display: grid;
-  gap: 13px;
+  gap: 10px;
   grid-template-columns: 22px minmax(0, 1fr) 58px 55px;
-  padding: 16px 18px;
+  padding: 10px 16px;
   text-align: left;
   width: 100%;
 }
@@ -252,11 +252,11 @@ h2 {
 }
 .file-icon {
   color: #28705d;
-  font-size: 19px;
+  font-size: 17px;
 }
 .file-name {
   display: grid;
-  gap: 4px;
+  gap: 2px;
   min-width: 0;
 }
 .file-name strong {
@@ -267,14 +267,14 @@ h2 {
 .file-name small,
 .file-row time {
   color: #7d8a84;
-  font-size: 12px;
+  font-size: 11px;
 }
 .tag {
   background: #f3eee1;
   border-radius: 99px;
   color: #8b733a;
   font-size: 11px;
-  padding: 4px 7px;
+  padding: 3px 6px;
   white-space: nowrap;
 }
 .detail-panel {

@@ -149,11 +149,13 @@ fn cached_snapshot_for_range(
     start_utc_ms: i64,
     end_utc_ms: i64,
     file_filter: &FileTypeFilter,
+    policy: &ScanPolicy,
 ) -> Result<TodayReady, AppError> {
     let files = files
         .list_for_local_day(LocalDayRange::new(start_utc_ms, end_utc_ms))?
         .into_iter()
         .filter(|file| file_filter.allows(std::path::Path::new(&file.canonical_path)))
+        .filter(|file| policy.is_cached_path_allowed(std::path::Path::new(&file.canonical_path)))
         .collect();
     Ok(ready_from_files(files))
 }
@@ -200,12 +202,10 @@ pub async fn get_today_snapshot(
     state: State<'_, AppState>,
 ) -> Result<TodayReady, TodayUnavailable> {
     let (start, end) = bounds();
-    let file_filter = state
-        .scan_rules
-        .get()
-        .map(|rules| FileTypeFilter::new(rules.file_categories))
-        .map_err(|_| unavailable("无法读取本地扫描规则。"))?;
-    cached_snapshot_for_range(state.database.files(), start, end, &file_filter)
+    let (roots, exclusions, file_categories) = rules(&state)?;
+    let file_filter = FileTypeFilter::new(file_categories);
+    let policy = ScanPolicy::for_roots(exclusions, roots);
+    cached_snapshot_for_range(state.database.files(), start, end, &file_filter, &policy)
         .map_err(|_| unavailable("无法读取已发现的今日文件。"))
 }
 #[tauri::command]
@@ -270,7 +270,9 @@ mod tests {
     use chrono::{Local, TimeZone, Timelike};
 
     use crate::{
-        contracts::FileRecordInput, database::Database, scan::file_filter::FileTypeFilter,
+        contracts::FileRecordInput,
+        database::Database,
+        scan::{file_filter::FileTypeFilter, policy::ScanPolicy},
     };
 
     use super::{bounds, cached_snapshot_for_range, today_discovery};
@@ -324,9 +326,14 @@ mod tests {
             })
             .expect("persist today file");
 
-        let snapshot =
-            cached_snapshot_for_range(database.files(), start, end, &FileTypeFilter::default())
-                .expect("read persisted snapshot");
+        let snapshot = cached_snapshot_for_range(
+            database.files(),
+            start,
+            end,
+            &FileTypeFilter::default(),
+            &ScanPolicy::new(vec![]),
+        )
+        .expect("read persisted snapshot");
 
         assert_eq!(snapshot.files.len(), 1);
         assert_eq!(snapshot.files[0].canonical_path, r"D:\\work\\today.txt");
@@ -358,12 +365,55 @@ mod tests {
                 .expect("persist today file");
         }
 
-        let snapshot =
-            cached_snapshot_for_range(database.files(), start, end, &FileTypeFilter::default())
-                .expect("read persisted snapshot");
+        let snapshot = cached_snapshot_for_range(
+            database.files(),
+            start,
+            end,
+            &FileTypeFilter::default(),
+            &ScanPolicy::new(vec![]),
+        )
+        .expect("read persisted snapshot");
 
         assert_eq!(snapshot.files.len(), 1);
         assert_eq!(snapshot.files[0].canonical_path, r"D:\\work\\notes.md");
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn cached_snapshot_hides_records_inside_a_newly_excluded_directory() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock after epoch")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("qizhi-exclusion-{nonce}"));
+        let excluded = root.join("private");
+        std::fs::create_dir_all(&excluded).expect("create excluded directory");
+        let file = excluded.join("notes.md");
+        std::fs::write(&file, b"private notes").expect("write test file");
+        let database = Database::open(std::path::Path::new(":memory:")).expect("database");
+        let (start, end) = bounds();
+        database
+            .files()
+            .upsert(&FileRecordInput {
+                canonical_path: file.to_string_lossy().to_string(),
+                file_identity: "private-notes".to_owned(),
+                modified_at_utc_ms: start + 1,
+                size_bytes: 13,
+                source: "本机文件".to_owned(),
+            })
+            .expect("persist today file");
+
+        let snapshot = cached_snapshot_for_range(
+            database.files(),
+            start,
+            end,
+            &FileTypeFilter::default(),
+            &ScanPolicy::new(vec![excluded]),
+        )
+        .expect("read persisted snapshot");
+
+        assert!(snapshot.files.is_empty());
+        let _ = std::fs::remove_file(file);
+        let _ = std::fs::remove_dir_all(root);
     }
 }
