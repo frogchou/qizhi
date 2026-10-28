@@ -1,5 +1,6 @@
 pub mod es_cli;
 pub mod everything_sdk;
+pub mod native_fs;
 pub mod port;
 pub mod selector;
 pub mod unavailable;
