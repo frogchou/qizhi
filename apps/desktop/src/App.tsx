@@ -3,6 +3,7 @@ import { useState } from "react";
 import "./App.css";
 import { AppSidebar, type AppRoute } from "./components/AppSidebar";
 import { SettingsPage } from "./features/settings/SettingsPage";
+import { KnowledgePage } from "./features/knowledge/KnowledgePage";
 import { TodayPage } from "./features/today/TodayPage";
 import { unavailableCommands, type QizhiCommands } from "./lib/tauri";
 
@@ -31,13 +32,7 @@ function App({ commands = unavailableCommands }: { commands?: QizhiCommands }) {
         <SettingsPage commands={commands} />
       </section>
     );
-  if (route === "knowledge")
-    content = (
-      <ComingSoon
-        title="知识库问答"
-        description="连接 RAGFlow 后，你将在这里检索并提问自己的知识库。"
-      />
-    );
+  if (route === "knowledge") content = <KnowledgePage commands={commands} />;
   if (route === "codex")
     content = (
       <ComingSoon

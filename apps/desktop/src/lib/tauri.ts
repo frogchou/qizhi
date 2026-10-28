@@ -19,6 +19,11 @@ export interface QizhiCommands {
   saveScanRules(
     input: Pick<ScanRules, "allowedRoots" | "customExclusions" | "esCliPath">,
   ): Promise<ScanRules>;
+  listRagflowChats?(): Promise<RagflowChat[]>;
+  askRagflowChat?(input: {
+    chatId: string;
+    question: string;
+  }): Promise<RagflowAnswer>;
 }
 
 export type ConnectionStatus = { available: boolean; message: string };
@@ -57,6 +62,17 @@ export type ScanRules = {
   everythingSdkPath: string | null;
   esCliPath: string | null;
   lockedExclusions: string[];
+};
+
+export type RagflowChat = {
+  id: string;
+  name: string;
+  description: string;
+};
+
+export type RagflowAnswer = {
+  answer: string;
+  sessionId: string;
 };
 
 export const unavailableCommands: QizhiCommands = {
@@ -112,4 +128,6 @@ export const tauriCommands: QizhiCommands = {
   revealInExplorer: (id) => invoke("reveal_in_explorer", { id }),
   listScanRules: () => invoke("list_scan_rules"),
   saveScanRules: (input) => invoke("save_scan_rules", { input }),
+  listRagflowChats: () => invoke("list_ragflow_chats"),
+  askRagflowChat: (input) => invoke("ask_ragflow_chat", { input }),
 };
