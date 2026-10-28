@@ -1,28 +1,39 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { StatusNotice } from "../../components/StatusNotice";
-import type { QizhiCommands, RagflowChat } from "../../lib/tauri";
+import type {
+  QizhiCommands,
+  RagflowAgent,
+  RagflowDataset,
+  RagflowKnowledgeQuery,
+} from "../../lib/tauri";
 
 const setupMessage = "请先在设置中保存 RAGFlow Base URL 和 API Key。";
-
-function readableError(error: unknown) {
+function errorText(error: unknown) {
   if (error instanceof Error && error.message.trim()) return error.message;
   if (typeof error === "string" && error.trim()) return error;
-  return "无法读取 RAGFlow 问答机器人，请稍后重试。";
+  return "无法读取 RAGFlow 资源，请稍后重试。";
+}
+function toggle(items: string[], id: string) {
+  return items.includes(id)
+    ? items.filter((item) => item !== id)
+    : [...items, id];
 }
 
 export function KnowledgePage({ commands }: { commands: QizhiCommands }) {
-  const [chats, setChats] = useState<RagflowChat[]>([]);
-  const [selectedChatId, setSelectedChatId] = useState("");
+  const [datasets, setDatasets] = useState<RagflowDataset[]>([]);
+  const [agents, setAgents] = useState<RagflowAgent[]>([]);
+  const [datasetIds, setDatasetIds] = useState<string[]>([]);
+  const [agentIds, setAgentIds] = useState<string[]>([]);
   const [question, setQuestion] = useState("");
-  const [answer, setAnswer] = useState<string | null>(null);
+  const [result, setResult] = useState<RagflowKnowledgeQuery | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [asking, setAsking] = useState(false);
-
-  const loadChats = useCallback(async () => {
-    const listChats = commands.listRagflowChats;
-    if (!listChats) {
+  const [querying, setQuerying] = useState(false);
+  const load = useCallback(async () => {
+    const listDatasets = commands.listRagflowDatasets;
+    const listAgents = commands.listRagflowAgents;
+    if (!listDatasets || !listAgents) {
       setError(setupMessage);
       setLoading(false);
       return;
@@ -30,120 +41,179 @@ export function KnowledgePage({ commands }: { commands: QizhiCommands }) {
     setLoading(true);
     setError(null);
     try {
-      const items = await listChats();
-      setChats(items);
-      setSelectedChatId((current) =>
-        items.some((item) => item.id === current)
-          ? current
-          : (items[0]?.id ?? ""),
-      );
-    } catch (error) {
-      setChats([]);
-      setSelectedChatId("");
-      setError(readableError(error));
+      const [nextDatasets, nextAgents] = await Promise.all([
+        listDatasets(),
+        listAgents(),
+      ]);
+      setDatasets(nextDatasets);
+      setAgents(nextAgents);
+    } catch (loadError) {
+      setError(errorText(loadError));
     } finally {
       setLoading(false);
     }
   }, [commands]);
-
   useEffect(() => {
-    void loadChats();
-  }, [loadChats]);
-
-  async function ask() {
-    const askChat = commands.askRagflowChat;
-    if (!askChat || !selectedChatId || !question.trim()) return;
-    setAsking(true);
+    void load();
+  }, [load]);
+  async function query() {
+    const runQuery = commands.queryRagflowKnowledge;
+    if (
+      !runQuery ||
+      !question.trim() ||
+      (datasetIds.length === 0 && agentIds.length === 0)
+    )
+      return;
+    setQuerying(true);
     setError(null);
-    setAnswer(null);
+    setResult(null);
     try {
-      const response = await askChat({
-        chatId: selectedChatId,
-        question: question.trim(),
-      });
-      setAnswer(response.answer);
-    } catch {
-      setError("本次问答未完成，请检查 RAGFlow 连接或稍后重试。");
+      setResult(
+        await runQuery({ question: question.trim(), datasetIds, agentIds }),
+      );
+    } catch (queryError) {
+      setError(errorText(queryError));
     } finally {
-      setAsking(false);
+      setQuerying(false);
     }
   }
-
   return (
     <section className="page knowledge-page" aria-labelledby="knowledge-title">
       <header className="page-header">
         <div>
-          <p className="eyebrow">RAGFlow 问答</p>
+          <p className="eyebrow">RAGFlow 工作台</p>
           <h1 id="knowledge-title">知识库</h1>
-          <p className="muted">选择已有问答机器人，栖知不会修改知识库内容。</p>
+          <p className="muted">检索相关内容，并向选中的 Agents 同时提问。</p>
         </div>
         <button
-          type="button"
           className="button secondary"
-          onClick={() => void loadChats()}
+          type="button"
+          onClick={() => void load()}
           disabled={loading}
         >
-          {loading ? "正在加载…" : "重新加载机器人"}
+          {loading ? "正在加载…" : "重新加载资源"}
         </button>
       </header>
       {error ? <StatusNotice>{error}</StatusNotice> : null}
-      <div className="knowledge-layout">
-        <section className="knowledge-card">
-          <label>
-            选择问答机器人
-            <select
-              aria-label="选择问答机器人"
-              value={selectedChatId}
-              disabled={loading || chats.length === 0}
-              onChange={(event) => {
-                setSelectedChatId(event.currentTarget.value);
-                setAnswer(null);
-              }}
-            >
-              {chats.length === 0 ? (
-                <option value="">暂无可用机器人</option>
-              ) : null}
-              {chats.map((chat) => (
-                <option value={chat.id} key={chat.id}>
-                  {chat.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          {selectedChatId ? (
-            <p className="muted knowledge-description">
-              {chats.find((chat) => chat.id === selectedChatId)?.description ||
-                "使用该机器人的知识库配置进行问答。"}
-            </p>
-          ) : null}
-          <label>
-            问题
+      <div className="knowledge-workspace">
+        <section className="knowledge-card knowledge-controls">
+          <div className="resource-columns">
+            <fieldset disabled={loading}>
+              <legend>选择知识库</legend>
+              {datasets.length ? (
+                datasets.map((dataset) => (
+                  <label className="resource-option" key={dataset.id}>
+                    <input
+                      aria-label={dataset.name}
+                      type="checkbox"
+                      checked={datasetIds.includes(dataset.id)}
+                      onChange={() =>
+                        setDatasetIds((items) => toggle(items, dataset.id))
+                      }
+                    />
+                    <span>
+                      <strong>{dataset.name}</strong>
+                      <small>
+                        {dataset.description || "用于直接检索相关片段"}
+                      </small>
+                    </span>
+                  </label>
+                ))
+              ) : (
+                <p className="empty">暂无可访问知识库。</p>
+              )}
+            </fieldset>
+            <fieldset disabled={loading}>
+              <legend>选择 Agents</legend>
+              {agents.length ? (
+                agents.map((agent) => (
+                  <label className="resource-option" key={agent.id}>
+                    <input
+                      aria-label={agent.name}
+                      type="checkbox"
+                      checked={agentIds.includes(agent.id)}
+                      onChange={() =>
+                        setAgentIds((items) => toggle(items, agent.id))
+                      }
+                    />
+                    <span>
+                      <strong>{agent.name}</strong>
+                      <small>{agent.description || "RAGFlow Agent"}</small>
+                    </span>
+                  </label>
+                ))
+              ) : (
+                <p className="empty">暂无可访问 Agents。</p>
+              )}
+            </fieldset>
+          </div>
+          <label className="question-input">
+            关键词或问题
             <textarea
-              aria-label="问题"
+              aria-label="关键词或问题"
               value={question}
-              disabled={loading || !selectedChatId}
-              placeholder="例如：帮我梳理这项工作的关键要求"
+              placeholder="例如：项目进度和当前风险"
               onChange={(event) => setQuestion(event.currentTarget.value)}
             />
           </label>
           <div className="knowledge-actions">
             <button
-              type="button"
               className="button primary"
-              disabled={asking || !selectedChatId || !question.trim()}
-              onClick={ask}
+              type="button"
+              disabled={
+                querying ||
+                !question.trim() ||
+                (datasetIds.length === 0 && agentIds.length === 0)
+              }
+              onClick={query}
             >
-              {asking ? "正在提问…" : "发送"}
+              {querying ? "正在查询…" : "查询"}
             </button>
           </div>
         </section>
-        <section className="knowledge-card answer-card" aria-live="polite">
-          <p className="eyebrow">回答</p>
-          {answer ? (
-            <p className="knowledge-answer">{answer}</p>
-          ) : (
-            <p className="empty">选择机器人并发送问题后，回答将显示在这里。</p>
-          )}
+        <section className="knowledge-results" aria-live="polite">
+          <article className="knowledge-card">
+            <p className="eyebrow">相关内容</p>
+            {result?.chunks.length ? (
+              result.chunks.map((chunk) => (
+                <div className="result-item" key={chunk.id}>
+                  <strong>{chunk.documentName || "未命名来源"}</strong>
+                  <p>{chunk.content}</p>
+                  <small>相关度 {Math.round(chunk.similarity * 100)}%</small>
+                </div>
+              ))
+            ) : (
+              <p className="empty">
+                选择知识库并查询后，相关片段将显示在这里。
+              </p>
+            )}
+          </article>
+          <article className="knowledge-card">
+            <p className="eyebrow">Agent 回答</p>
+            {result?.agentResults.length ? (
+              result.agentResults.map((agentResult) => {
+                const agent = agents.find(
+                  (item) => item.id === agentResult.agentId,
+                );
+                return (
+                  <div className="result-item" key={agentResult.agentId}>
+                    <strong>{agent?.name ?? agentResult.agentId}</strong>
+                    <p
+                      className={
+                        agentResult.error ? "agent-error" : "knowledge-answer"
+                      }
+                    >
+                      {agentResult.error ?? agentResult.answer}
+                    </p>
+                  </div>
+                );
+              })
+            ) : (
+              <p className="empty">
+                选择 Agents 并查询后，每个回答将独立显示在这里。
+              </p>
+            )}
+          </article>
         </section>
       </div>
     </section>

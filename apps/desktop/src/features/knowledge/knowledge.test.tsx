@@ -19,92 +19,65 @@ function commands(): QizhiCommands {
     deleteFile: vi.fn(),
     listScanRules: vi.fn(),
     saveScanRules: vi.fn(),
-    listRagflowChats: vi.fn().mockResolvedValue([
-      { id: "chat-work", name: "工作知识库", description: "工作资料问答" },
-      { id: "chat-policy", name: "制度知识库", description: "制度问答" },
+    listRagflowDatasets: vi
+      .fn()
+      .mockResolvedValue([
+        { id: "kb-work", name: "工作知识库", description: "项目资料" },
+      ]),
+    listRagflowAgents: vi.fn().mockResolvedValue([
+      { id: "agent-work", name: "工作助手", description: "项目分析" },
+      { id: "agent-review", name: "评审助手", description: "风险分析" },
     ]),
-    askRagflowChat: vi.fn().mockResolvedValue({
-      answer: "这是来自工作知识库的回答。",
-      sessionId: "session-1",
+    queryRagflowKnowledge: vi.fn().mockResolvedValue({
+      chunks: [
+        {
+          id: "chunk-1",
+          content: "周报中提到项目进度。",
+          documentName: "周报.docx",
+          similarity: 0.91,
+        },
+      ],
+      agentResults: [
+        { agentId: "agent-work", answer: "工作助手的回答", error: null },
+        { agentId: "agent-review", answer: null, error: "Agent 暂不可用" },
+      ],
     }),
   };
 }
 
 describe("KnowledgePage", () => {
-  it("selects a RAGFlow assistant and sends a question", async () => {
+  it("queries selected datasets and multiple Agents in one workspace", async () => {
     const client = commands();
     render(<KnowledgePage commands={client} />);
-
-    expect(await screen.findByText("工作知识库")).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("问题"), {
-      target: { value: "今天的工作重点是什么？" },
+    expect(await screen.findByText("工作助手")).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("工作知识库"));
+    fireEvent.click(screen.getByLabelText("工作助手"));
+    fireEvent.click(screen.getByLabelText("评审助手"));
+    fireEvent.change(screen.getByLabelText("关键词或问题"), {
+      target: { value: "项目进度" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
-
+    fireEvent.click(screen.getByRole("button", { name: "查询" }));
     await waitFor(() =>
-      expect(client.askRagflowChat).toHaveBeenCalledWith({
-        chatId: "chat-work",
-        question: "今天的工作重点是什么？",
+      expect(client.queryRagflowKnowledge).toHaveBeenCalledWith({
+        question: "项目进度",
+        datasetIds: ["kb-work"],
+        agentIds: ["agent-work", "agent-review"],
       }),
     );
-    expect(
-      await screen.findByText("这是来自工作知识库的回答。"),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("周报中提到项目进度。")).toBeInTheDocument();
+    expect(await screen.findByText("工作助手的回答")).toBeInTheDocument();
+    expect(await screen.findByText("Agent 暂不可用")).toBeInTheDocument();
   });
-
   it("explains how to continue when RAGFlow is not configured", async () => {
     const client = commands();
-    client.listRagflowChats = vi
+    client.listRagflowDatasets = vi
       .fn()
       .mockRejectedValue(
         new Error("请先在设置中保存 RAGFlow Base URL 和 API Key。"),
       );
     render(<KnowledgePage commands={client} />);
-
     expect(
       await screen.findByText("请先在设置中保存 RAGFlow Base URL 和 API Key。"),
     ).toBeInTheDocument();
-  });
-
-  it("shows the actual RAGFlow error and lets the user retry loading assistants", async () => {
-    const client = commands();
-    const listChats = vi
-      .fn()
-      .mockRejectedValueOnce(new Error("RAGFlow 连接未通过（HTTP 401）。"))
-      .mockResolvedValueOnce([
-        { id: "chat-work", name: "工作知识库", description: "工作资料问答" },
-      ]);
-    client.listRagflowChats = listChats;
-    render(<KnowledgePage commands={client} />);
-
-    expect(
-      await screen.findByText("RAGFlow 连接未通过（HTTP 401）。"),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByText("请先在设置中保存 RAGFlow Base URL 和 API Key。"),
-    ).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "重新加载机器人" }));
-    await waitFor(() => expect(listChats).toHaveBeenCalledTimes(2));
-    expect(await screen.findByText("工作知识库")).toBeInTheDocument();
-  });
-
-  it("clears an answer when the user changes the selected assistant", async () => {
-    const client = commands();
-    render(<KnowledgePage commands={client} />);
-    await screen.findByText("工作知识库");
-    fireEvent.change(screen.getByLabelText("问题"), {
-      target: { value: "先问一次" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
-    await screen.findByText("这是来自工作知识库的回答。");
-
-    fireEvent.change(screen.getByLabelText("选择问答机器人"), {
-      target: { value: "chat-policy" },
-    });
-
-    expect(
-      screen.queryByText("这是来自工作知识库的回答。"),
-    ).not.toBeInTheDocument();
   });
 });

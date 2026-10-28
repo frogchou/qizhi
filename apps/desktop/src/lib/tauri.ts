@@ -33,6 +33,13 @@ export interface QizhiCommands {
     chatId: string;
     question: string;
   }): Promise<RagflowAnswer>;
+  listRagflowDatasets?(): Promise<RagflowDataset[]>;
+  listRagflowAgents?(): Promise<RagflowAgent[]>;
+  queryRagflowKnowledge?(input: {
+    question: string;
+    datasetIds: string[];
+    agentIds: string[];
+  }): Promise<RagflowKnowledgeQuery>;
 }
 
 export type ConnectionStatus = { available: boolean; message: string };
@@ -94,6 +101,23 @@ export type RagflowChat = {
 export type RagflowAnswer = {
   answer: string;
   sessionId: string;
+};
+export type RagflowDataset = { id: string; name: string; description: string };
+export type RagflowAgent = { id: string; name: string; description: string };
+export type RagflowChunk = {
+  id: string;
+  content: string;
+  documentName: string;
+  similarity: number;
+};
+export type RagflowAgentResult = {
+  agentId: string;
+  answer: string | null;
+  error: string | null;
+};
+export type RagflowKnowledgeQuery = {
+  chunks: RagflowChunk[];
+  agentResults: RagflowAgentResult[];
 };
 
 export const unavailableCommands: QizhiCommands = {
@@ -176,4 +200,8 @@ export const tauriCommands: QizhiCommands = {
   saveScanRules: (input) => invoke("save_scan_rules", { input }),
   listRagflowChats: () => invoke("list_ragflow_chats"),
   askRagflowChat: (input) => invoke("ask_ragflow_chat", { input }),
+  listRagflowDatasets: () => invoke("list_ragflow_datasets"),
+  listRagflowAgents: () => invoke("list_ragflow_agents"),
+  queryRagflowKnowledge: (input) =>
+    invoke("query_ragflow_knowledge", { input }),
 };

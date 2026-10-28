@@ -131,6 +131,7 @@ struct RetrievalData {
     chunks: Vec<RetrievalChunkData>,
 }
 
+#[derive(Clone)]
 pub struct RagflowClient {
     base_url: Url,
     api_key: String,
