@@ -124,5 +124,6 @@ describe("KnowledgePage", () => {
     expect(
       await screen.findByText("请先在设置中保存 RAGFlow Base URL 和 API Key。"),
     ).toBeInTheDocument();
+    expect(screen.getByText("RAGFlow 连接需要检查")).toBeInTheDocument();
   });
 });

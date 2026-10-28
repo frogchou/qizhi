@@ -301,6 +301,7 @@ export function KnowledgePage({ commands }: { commands: QizhiCommands }) {
   const [querying, setQuerying] = useState(false);
 
   const hasResources = datasetIds.length > 0 || agentIds.length > 0;
+  const ragflowConnected = !loading && !error;
   const agentById = useMemo(
     () => new Map(agents.map((agent) => [agent.id, agent])),
     [agents],
@@ -470,11 +471,23 @@ export function KnowledgePage({ commands }: { commands: QizhiCommands }) {
               onToggle={(id) => setAgentIds((items) => toggle(items, id))}
             />
           </section>
-          <section className="rail-card connection-card">
+          <section
+            className={
+              ragflowConnected
+                ? "rail-card connection-card"
+                : "rail-card connection-card connection-card-offline"
+            }
+          >
             <span className="connection-dot" />
             <div>
-              <strong>RAGFlow 已连接</strong>
-              <small>本地部署 · 已使用安全凭据</small>
+              <strong>
+                {ragflowConnected ? "RAGFlow 已连接" : "RAGFlow 连接需要检查"}
+              </strong>
+              <small>
+                {ragflowConnected
+                  ? "本地部署 · 已使用安全凭据"
+                  : "请在设置中检查服务地址与 API Key"}
+              </small>
             </div>
             <ChevronIcon />
           </section>
