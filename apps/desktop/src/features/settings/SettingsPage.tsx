@@ -94,12 +94,17 @@ export function SettingsPage({ commands }: SettingsPageProps) {
   }, [commands]);
 
   async function chooseFolder(target: "roots" | "exclusions") {
-    const selected = await commands.pickFolder();
-    if (!selected) return;
-    const update = target === "roots" ? setRoots : setExclusions;
-    update((current) =>
-      current.includes(selected) ? current : [...current, selected],
-    );
+    setError(null);
+    try {
+      const selected = await commands.pickFolder();
+      if (!selected) return;
+      const update = target === "roots" ? setRoots : setExclusions;
+      update((current) =>
+        current.includes(selected) ? current : [...current, selected],
+      );
+    } catch {
+      setError("无法打开文件夹选择窗口，请重启栖知后重试。");
+    }
   }
 
   async function saveScanRules() {

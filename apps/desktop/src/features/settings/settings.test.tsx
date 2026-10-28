@@ -90,6 +90,37 @@ describe("SettingsPage", () => {
     ).toBeInTheDocument();
   });
 
+  it("adds a folder selected from the system picker to the scan roots", async () => {
+    const commands: QizhiCommands = {
+      getSettings: vi.fn().mockResolvedValue([]),
+      saveSettings: vi.fn(),
+      testServiceConnection: vi.fn(),
+      pickFolder: vi.fn().mockResolvedValue("D:\\Work"),
+      getTodaySnapshot: vi.fn(),
+      refreshToday: vi.fn(),
+      revealInExplorer: vi.fn(),
+      openFile: vi.fn(),
+      openFileInTextEditor: vi.fn(),
+      copyFileToClipboard: vi.fn(),
+      deleteFile: vi.fn(),
+      listScanRules: vi.fn().mockResolvedValue({
+        allowedRoots: [],
+        customExclusions: [],
+        fileCategories: ["documents", "sourceCode"],
+        everythingSdkPath: null,
+        esCliPath: null,
+        lockedExclusions: [],
+      }),
+      saveScanRules: vi.fn(),
+    };
+
+    render(<SettingsPage commands={commands} />);
+    fireEvent.click(screen.getAllByRole("button", { name: "添加文件夹" })[0]);
+
+    expect(commands.pickFolder).toHaveBeenCalledOnce();
+    expect(await screen.findByText("D:\\Work")).toBeInTheDocument();
+  });
+
   it("saves the selected supported file categories as part of scan rules", async () => {
     const commands: QizhiCommands = {
       getSettings: vi.fn().mockResolvedValue([]),
