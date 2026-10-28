@@ -68,13 +68,13 @@ pub struct ConnectionStatus {
 
 #[tauri::command]
 pub fn test_service_connection(input: SaveSettingsInput) -> ConnectionStatus {
-    if input.service != "openai"
+    if !matches!(input.service.as_str(), "openai" | "ragflow")
         || input.api_key.trim().is_empty()
         || input.api_key.contains(['\r', '\n', '"'])
     {
         return ConnectionStatus {
             available: false,
-            message: "请先填写 OpenAI Base URL 和 API Key。".to_owned(),
+            message: "请先填写服务 Base URL 和 API Key。".to_owned(),
         };
     }
     let Ok(mut base_url) = url::Url::parse(input.endpoint.trim()) else {
@@ -84,7 +84,14 @@ pub fn test_service_connection(input: SaveSettingsInput) -> ConnectionStatus {
         };
     };
     let base_path = base_url.path().trim_end_matches('/');
-    base_url.set_path(&format!("{base_path}/models"));
+    match input.service.as_str() {
+        "openai" => base_url.set_path(&format!("{base_path}/models")),
+        "ragflow" => {
+            base_url.set_path(&format!("{base_path}/api/v1/chats"));
+            base_url.set_query(Some("page=1&page_size=1"));
+        }
+        _ => unreachable!("service validated above"),
+    }
     let config = format!(
         "silent\nshow-error\noutput = \"NUL\"\nwrite-out = \"%{{http_code}}\"\nmax-time = 10\nheader = \"Authorization: Bearer {}\"\nurl = \"{}\"\n",
         input.api_key, base_url
@@ -119,7 +126,11 @@ pub fn test_service_connection(input: SaveSettingsInput) -> ConnectionStatus {
     match child.wait_with_output() {
         Ok(value) if value.status.success() && value.stdout == b"200" => ConnectionStatus {
             available: true,
-            message: "OpenAI API 连接正常。".to_owned(),
+            message: match input.service.as_str() {
+                "openai" => "OpenAI API 连接正常。".to_owned(),
+                "ragflow" => "RAGFlow API 连接正常。".to_owned(),
+                _ => unreachable!("service validated above"),
+            },
         },
         Ok(value) => ConnectionStatus {
             available: false,

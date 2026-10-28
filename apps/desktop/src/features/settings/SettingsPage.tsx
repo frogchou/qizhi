@@ -38,8 +38,15 @@ export function SettingsPage({ commands }: SettingsPageProps) {
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [saved, setSaved] = useState<MaskedServiceConfig | null>(null);
+  const [ragflowBaseUrl, setRagflowBaseUrl] = useState("");
+  const [ragflowApiKey, setRagflowApiKey] = useState("");
+  const [ragflowSaved, setRagflowSaved] = useState<MaskedServiceConfig | null>(
+    null,
+  );
   const [error, setError] = useState<string | null>(null);
   const [connection, setConnection] = useState<ConnectionState>(null);
+  const [ragflowConnection, setRagflowConnection] =
+    useState<ConnectionState>(null);
   const [everything, setEverything] = useState<EverythingStatus | null>(null);
   const [roots, setRoots] = useState<string[]>([]);
   const [exclusions, setExclusions] = useState<string[]>([]);
@@ -56,6 +63,11 @@ export function SettingsPage({ commands }: SettingsPageProps) {
         if (openai) {
           setBaseUrl(openai.endpoint);
           setSaved(openai);
+        }
+        const ragflow = configs.find((config) => config.service === "ragflow");
+        if (ragflow) {
+          setRagflowBaseUrl(ragflow.endpoint);
+          setRagflowSaved(ragflow);
         }
       })
       .catch(() => undefined);
@@ -114,6 +126,33 @@ export function SettingsPage({ commands }: SettingsPageProps) {
         service: "openai",
         endpoint: baseUrl,
         apiKey,
+      }),
+    );
+  }
+
+  async function saveRagflow() {
+    setError(null);
+    try {
+      const config = await commands.saveSettings({
+        service: "ragflow",
+        endpoint: ragflowBaseUrl,
+        apiKey: ragflowApiKey,
+      });
+      setRagflowSaved(config);
+      setRagflowApiKey("");
+    } catch {
+      setError("RAGFlow 设置未保存，请检查 Base URL 和本机凭据服务。");
+      setRagflowApiKey("");
+    }
+  }
+
+  async function testRagflow() {
+    setRagflowConnection(null);
+    setRagflowConnection(
+      await commands.testServiceConnection({
+        service: "ragflow",
+        endpoint: ragflowBaseUrl,
+        apiKey: ragflowApiKey,
       }),
     );
   }
@@ -278,13 +317,69 @@ export function SettingsPage({ commands }: SettingsPageProps) {
             </div>
           </div>
         </article>
-        <article className="service-card muted-service">
+        <article className="service-card openai-card">
           <div className="service-name">
             <span className="service-icon">≡</span>
             <div>
               <h3>RAGFlow</h3>
-              <p>知识库管理与问答将在下一阶段启用。</p>
+              <p>用于选择已有问答机器人并检索知识库。</p>
             </div>
+          </div>
+          <div className="service-form">
+            <label>
+              Base URL
+              <input
+                aria-label="RAGFlow Base URL"
+                value={ragflowBaseUrl}
+                placeholder="http://ragflow.example.com"
+                onChange={(event) =>
+                  setRagflowBaseUrl(event.currentTarget.value)
+                }
+              />
+            </label>
+            <label>
+              API Key
+              <input
+                aria-label="RAGFlow API Key"
+                type="password"
+                value={ragflowApiKey}
+                placeholder={
+                  ragflowSaved ? ragflowSaved.apiKeyMask : "填写后可测试"
+                }
+                onChange={(event) =>
+                  setRagflowApiKey(event.currentTarget.value)
+                }
+              />
+            </label>
+            <div className="service-actions">
+              <button
+                type="button"
+                className="button outline"
+                onClick={testRagflow}
+                disabled={!ragflowBaseUrl || !ragflowApiKey}
+              >
+                测试连接
+              </button>
+              <button
+                type="button"
+                className="button primary"
+                onClick={saveRagflow}
+                disabled={!ragflowBaseUrl || !ragflowApiKey}
+              >
+                保存 RAGFlow
+              </button>
+            </div>
+            {ragflowConnection ? (
+              <p
+                className={
+                  ragflowConnection.available
+                    ? "connection-result ready"
+                    : "connection-result"
+                }
+              >
+                {ragflowConnection.message}
+              </p>
+            ) : null}
           </div>
         </article>
         <article className="service-card muted-service">

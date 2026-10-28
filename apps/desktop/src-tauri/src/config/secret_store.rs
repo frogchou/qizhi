@@ -6,6 +6,7 @@ use std::{
 
 pub trait SecretStore: Clone + Send + Sync + 'static {
     fn put(&self, reference: &str, secret: &str) -> Result<(), AppError>;
+    fn get(&self, reference: &str) -> Result<String, AppError>;
     fn delete(&self, reference: &str) -> Result<(), AppError>;
     fn exists(&self, reference: &str) -> Result<bool, AppError>;
 }
@@ -23,6 +24,11 @@ impl SecretStore for WindowsCredentialStore {
     fn put(&self, reference: &str, secret: &str) -> Result<(), AppError> {
         Self::entry(reference)?
             .set_password(secret)
+            .map_err(|_| AppError::Storage)
+    }
+    fn get(&self, reference: &str) -> Result<String, AppError> {
+        Self::entry(reference)?
+            .get_password()
             .map_err(|_| AppError::Storage)
     }
     fn delete(&self, reference: &str) -> Result<(), AppError> {
@@ -49,6 +55,14 @@ impl SecretStore for FakeSecretStore {
             .map_err(|_| AppError::Storage)?
             .insert(reference.to_owned(), secret.to_owned());
         Ok(())
+    }
+    fn get(&self, reference: &str) -> Result<String, AppError> {
+        self.0
+            .lock()
+            .map_err(|_| AppError::Storage)?
+            .get(reference)
+            .cloned()
+            .ok_or(AppError::Storage)
     }
     fn delete(&self, reference: &str) -> Result<(), AppError> {
         self.0

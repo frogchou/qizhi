@@ -79,4 +79,49 @@ describe("SettingsPage", () => {
       screen.getByText("不会影响“今日”发现本地文件。"),
     ).toBeInTheDocument();
   });
+
+  it("saves RAGFlow as a separately masked connection", async () => {
+    const commands: QizhiCommands = {
+      getSettings: vi.fn().mockResolvedValue([]),
+      saveSettings: vi.fn().mockResolvedValue({
+        service: "ragflow",
+        endpoint: "http://ragflow.example.test",
+        apiKeyMask: "••••••••",
+        credentialReference: "qizhi/ragflow/default",
+      }),
+      testServiceConnection: vi.fn(),
+      pickFolder: vi.fn(),
+      getTodaySnapshot: vi.fn(),
+      refreshToday: vi.fn(),
+      revealInExplorer: vi.fn(),
+      listScanRules: vi.fn().mockResolvedValue({
+        allowedRoots: [],
+        customExclusions: [],
+        everythingSdkPath: null,
+        esCliPath: null,
+        lockedExclusions: [],
+      }),
+      saveScanRules: vi.fn(),
+    };
+
+    render(<SettingsPage commands={commands} />);
+    fireEvent.change(screen.getByLabelText("RAGFlow Base URL"), {
+      target: { value: "http://ragflow.example.test" },
+    });
+    fireEvent.change(screen.getByLabelText("RAGFlow API Key"), {
+      target: { value: "ragflow-secret-never-rendered" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存 RAGFlow" }));
+
+    await waitFor(() =>
+      expect(commands.saveSettings).toHaveBeenCalledWith({
+        service: "ragflow",
+        endpoint: "http://ragflow.example.test",
+        apiKey: "ragflow-secret-never-rendered",
+      }),
+    );
+    expect(
+      screen.queryByDisplayValue("ragflow-secret-never-rendered"),
+    ).not.toBeInTheDocument();
+  });
 });

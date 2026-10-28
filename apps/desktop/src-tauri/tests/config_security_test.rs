@@ -1,7 +1,7 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use qizhi_desktop_lib::{
-    config::{ConfigService, FakeSecretStore, ServiceConfigurationInput},
+    config::{ConfigService, FakeSecretStore, SecretStore, ServiceConfigurationInput},
     database::Database,
     telemetry::redact_message,
 };
@@ -13,6 +13,37 @@ fn temporary_database_path() -> std::path::PathBuf {
         .as_nanos();
 
     std::env::temp_dir().join(format!("qizhi-config-{nonce}.sqlite"))
+}
+
+#[test]
+fn stores_a_ragflow_key_only_in_the_secret_store() {
+    let path = temporary_database_path();
+    let database = Database::open(&path).expect("database opens");
+    let secrets = FakeSecretStore::default();
+    let service = ConfigService::new(database.configs(), secrets.clone());
+    let secret = "ragflow-secret-never-persisted";
+
+    let masked = service
+        .save_masked(ServiceConfigurationInput {
+            service: "ragflow".to_owned(),
+            endpoint: "http://ragflow.example.test".to_owned(),
+            api_key: secret.to_owned(),
+        })
+        .expect("RAGFlow configuration saves");
+
+    assert_eq!(masked.credential_reference, "qizhi/ragflow/default");
+    assert_eq!(
+        secrets.get("qizhi/ragflow/default").expect("secret reads"),
+        secret
+    );
+    assert!(
+        !database
+            .debug_values()
+            .expect("database values read")
+            .contains(secret)
+    );
+
+    let _ = std::fs::remove_file(path);
 }
 
 #[test]
