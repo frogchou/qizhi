@@ -34,6 +34,8 @@ pub fn run() {
                 database,
                 scan_rules,
                 everything_sdk_path,
+                today_scan_progress: scan::progress::TodayScanProgress::new(),
+                logger: telemetry::AppLogger::new(&data_dir),
             });
             Ok(())
         })
@@ -46,6 +48,7 @@ pub fn run() {
             commands::settings::list_scan_rules,
             commands::settings::save_scan_rules,
             commands::today::get_today_snapshot,
+            commands::today::get_today_scan_status,
             commands::today::refresh_today,
             commands::today::reveal_in_explorer,
             commands::knowledge::list_ragflow_chats,

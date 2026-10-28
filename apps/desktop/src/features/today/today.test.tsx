@@ -31,6 +31,7 @@ function commands(snapshot: TodaySnapshot = readySnapshot): QizhiCommands {
     listScanRules: vi.fn().mockResolvedValue({
       allowedRoots: [],
       customExclusions: [],
+      fileCategories: ["documents", "sourceCode"],
       everythingSdkPath: null,
       esCliPath: null,
       lockedExclusions: [],
@@ -107,6 +108,34 @@ describe("TodayPage", () => {
     ).toBeInTheDocument();
     await waitFor(() => expect(client.refreshToday).toHaveBeenCalledTimes(1));
     expect(screen.getByRole("button", { name: "刷新中…" })).toBeDisabled();
+    completeRefresh?.({ state: "ready", files: [], clusters: [] });
+  });
+
+  it("shows live scan counts while the background discovery is running", async () => {
+    let completeRefresh: ((value: TodaySnapshot) => void) | undefined;
+    const client = commands({ state: "ready", files: [], clusters: [] });
+    client.getTodayScanStatus = vi.fn().mockResolvedValue({
+      state: "scanning",
+      directoriesScanned: 42,
+      candidatesFound: 3,
+      startedAtUtcMs: 1,
+      completedAtUtcMs: null,
+      message: null,
+    });
+    client.refreshToday = vi.fn(
+      () =>
+        new Promise<TodaySnapshot>((resolve) => {
+          completeRefresh = resolve;
+        }),
+    );
+
+    render(<TodayPage commands={client} />);
+
+    expect(
+      await screen.findByText(
+        "正在扫描：已检查 42 个文件夹，发现 3 个今日文件。",
+      ),
+    ).toBeInTheDocument();
     completeRefresh?.({ state: "ready", files: [], clusters: [] });
   });
 });

@@ -1,7 +1,11 @@
 import { useEffect, useState } from "react";
 
 import { StatusNotice } from "../../components/StatusNotice";
-import type { QizhiCommands, TodaySnapshot } from "../../lib/tauri";
+import type {
+  QizhiCommands,
+  TodayScanStatus,
+  TodaySnapshot,
+} from "../../lib/tauri";
 
 function filename(path: string) {
   const parts = path.replace(/\//g, "\\").split("\\");
@@ -24,6 +28,7 @@ export function TodayPage({ commands }: { commands: QizhiCommands }) {
   const [selected, setSelected] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [scanStatus, setScanStatus] = useState<TodayScanStatus | null>(null);
 
   useEffect(() => {
     commands
@@ -41,9 +46,25 @@ export function TodayPage({ commands }: { commands: QizhiCommands }) {
         }),
       );
   }, [commands]);
+  useEffect(() => {
+    if (!busy || !commands.getTodayScanStatus) return;
+    let active = true;
+    const loadStatus = () =>
+      commands
+        .getTodayScanStatus?.()
+        .then((status) => active && setScanStatus(status))
+        .catch(() => undefined);
+    void loadStatus();
+    const timer = window.setInterval(loadStatus, 1000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [busy, commands]);
   async function refresh() {
     setBusy(true);
     setNotice(null);
+    setScanStatus(null);
     try {
       setSnapshot(await commands.refreshToday());
     } catch {
@@ -51,6 +72,16 @@ export function TodayPage({ commands }: { commands: QizhiCommands }) {
     } finally {
       setBusy(false);
     }
+  }
+
+  function scanNotice() {
+    if (scanStatus?.state === "scanning") {
+      return `正在扫描：已检查 ${scanStatus.directoriesScanned} 个文件夹，发现 ${scanStatus.candidatesFound} 个今日文件。`;
+    }
+    if (scanStatus?.state === "failed") {
+      return scanStatus.message ?? "扫描未完成，请检查扫描范围和文件访问权限。";
+    }
+    return "正在准备扫描允许目录；你仍可浏览已发现的文件。";
   }
   async function locate() {
     if (selected === null) return;
@@ -104,11 +135,7 @@ export function TodayPage({ commands }: { commands: QizhiCommands }) {
           </button>
         </div>
       </header>
-      {busy ? (
-        <StatusNotice>
-          正在后台扫描允许目录；你仍可浏览已发现的文件。
-        </StatusNotice>
-      ) : null}
+      {busy ? <StatusNotice>{scanNotice()}</StatusNotice> : null}
       {notice ? <StatusNotice>{notice}</StatusNotice> : null}
       <div className="today-layout">
         <div className="file-panel">

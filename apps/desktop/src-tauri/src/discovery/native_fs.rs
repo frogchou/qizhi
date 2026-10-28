@@ -6,7 +6,11 @@ use std::{
 
 use crate::{
     database::AppError,
-    scan::policy::{AllowedRoot, ScanPolicy},
+    scan::{
+        file_filter::FileTypeFilter,
+        policy::{AllowedRoot, ScanPolicy},
+        progress::TodayScanProgress,
+    },
 };
 
 use super::port::{DiscoveredFile, DiscoveryHealth, FileDiscovery};
@@ -18,12 +22,28 @@ const RESULT_LIMIT: usize = 500;
 /// scan policy.
 pub struct NativeFileDiscovery {
     directory_policy: ScanPolicy,
+    progress: TodayScanProgress,
+    file_filter: FileTypeFilter,
 }
 
 impl NativeFileDiscovery {
     pub fn new(exclusions: Vec<PathBuf>) -> Self {
         Self {
             directory_policy: ScanPolicy::new(exclusions),
+            progress: TodayScanProgress::new(),
+            file_filter: FileTypeFilter::default(),
+        }
+    }
+
+    pub fn with_progress(
+        exclusions: Vec<PathBuf>,
+        progress: TodayScanProgress,
+        file_filter: FileTypeFilter,
+    ) -> Self {
+        Self {
+            directory_policy: ScanPolicy::new(exclusions),
+            progress,
+            file_filter,
         }
     }
 }
@@ -57,9 +77,10 @@ impl FileDiscovery for NativeFileDiscovery {
         let mut found = Vec::new();
 
         while let Some(directory) = pending.pop() {
-            if self.directory_policy.validate_root(&directory).is_err() {
+            if self.directory_policy.is_directory_denied(&directory) {
                 continue;
             }
+            self.progress.directory_scanned();
             let entries = match fs::read_dir(directory) {
                 Ok(entries) => entries,
                 Err(_) => continue,
@@ -80,6 +101,9 @@ impl FileDiscovery for NativeFileDiscovery {
                 if !metadata.is_file() {
                     continue;
                 }
+                if !self.file_filter.allows(&path) {
+                    continue;
+                }
                 let modified_at_utc_ms = match metadata.modified().ok().and_then(unix_milliseconds)
                 {
                     Some(value) if value >= start_utc_ms && value < end_utc_ms => value,
@@ -91,6 +115,7 @@ impl FileDiscovery for NativeFileDiscovery {
                         .map_err(|_| AppError::DiscoveryInvalidData)?,
                     modified_at_utc_ms,
                 });
+                self.progress.candidate_found();
                 if found.len() > RESULT_LIMIT * 2 {
                     keep_newest(&mut found);
                 }

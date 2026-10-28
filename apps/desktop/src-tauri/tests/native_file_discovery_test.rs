@@ -67,3 +67,26 @@ fn skips_custom_excluded_directories_during_discovery() {
     assert!(found[0].path.ends_with("work.txt"));
     fs::remove_dir_all(root).expect("remove temporary directory");
 }
+
+#[test]
+fn keeps_only_supported_documents_and_source_files() {
+    let nonce = milliseconds_now();
+    let root = test_root(&format!("qizhi-native-file-types-{nonce}"));
+    fs::create_dir_all(&root).expect("create test directory");
+    let start = milliseconds_now() - 2_000;
+    fs::write(root.join("notes.md"), "work notes").expect("write document");
+    fs::write(root.join("main.rs"), "fn main() {}").expect("write source file");
+    fs::write(root.join("vacation.jpg"), "image").expect("write unsupported file");
+    let end = milliseconds_now() + 1_000;
+    let allowed_root = AllowedRoot(fs::canonicalize(&root).expect("canonical temporary root"));
+
+    let found = NativeFileDiscovery::new(vec![])
+        .find_modified_between(&[allowed_root], start, end)
+        .expect("discover local files");
+
+    assert_eq!(found.len(), 2);
+    assert!(found.iter().any(|file| file.path.ends_with("notes.md")));
+    assert!(found.iter().any(|file| file.path.ends_with("main.rs")));
+    assert!(!found.iter().any(|file| file.path.ends_with("vacation.jpg")));
+    fs::remove_dir_all(root).expect("remove temporary directory");
+}

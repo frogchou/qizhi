@@ -34,6 +34,7 @@ test.beforeEach(async ({ page }) => {
           return Promise.resolve({
             allowedRoots: [],
             customExclusions: [],
+            fileCategories: ["documents", "sourceCode"],
             everythingSdkPath: null,
             esCliPath: null,
             lockedExclusions: [],

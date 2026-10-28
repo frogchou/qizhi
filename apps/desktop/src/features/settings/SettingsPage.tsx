@@ -1,7 +1,11 @@
 import { useEffect, useState } from "react";
 
 import type { MaskedServiceConfig } from "../../lib/contracts";
-import type { EverythingStatus, QizhiCommands } from "../../lib/tauri";
+import type {
+  EverythingStatus,
+  FileCategory,
+  QizhiCommands,
+} from "../../lib/tauri";
 
 type SettingsPageProps = { commands: QizhiCommands };
 type ConnectionState = { available: boolean; message: string } | null;
@@ -50,6 +54,10 @@ export function SettingsPage({ commands }: SettingsPageProps) {
   const [everything, setEverything] = useState<EverythingStatus | null>(null);
   const [roots, setRoots] = useState<string[]>([]);
   const [exclusions, setExclusions] = useState<string[]>([]);
+  const [fileCategories, setFileCategories] = useState<FileCategory[]>([
+    "documents",
+    "sourceCode",
+  ]);
 
   useEffect(() => {
     commands
@@ -76,6 +84,7 @@ export function SettingsPage({ commands }: SettingsPageProps) {
       .then((rules) => {
         setRoots(rules.allowedRoots);
         setExclusions(rules.customExclusions);
+        setFileCategories(rules.fileCategories ?? ["documents", "sourceCode"]);
       })
       .catch(() => undefined);
   }, [commands]);
@@ -95,12 +104,22 @@ export function SettingsPage({ commands }: SettingsPageProps) {
       await commands.saveScanRules({
         allowedRoots: roots,
         customExclusions: exclusions,
+        fileCategories,
         esCliPath: null,
       });
       setEverything((await commands.getEverythingStatus?.()) ?? null);
     } catch {
       setError("扫描范围未保存，请检查选择的文件夹。");
     }
+  }
+
+  function toggleFileCategory(category: FileCategory, checked: boolean) {
+    setFileCategories((current) => {
+      if (checked) {
+        return current.includes(category) ? current : [...current, category];
+      }
+      return current.filter((item) => item !== category);
+    });
   }
 
   async function saveOpenAi() {
@@ -217,6 +236,33 @@ export function SettingsPage({ commands }: SettingsPageProps) {
               }
             />
           </div>
+        </div>
+        <div className="path-section file-types">
+          <h3>文件类型</h3>
+          <p>
+            仅展示后续可安全提取和分析的办公文档、文本和源代码；图片、视频、压缩包、程序等不会进入今日列表。
+          </p>
+          <label>
+            <input
+              type="checkbox"
+              checked={fileCategories.includes("documents")}
+              onChange={(event) =>
+                toggleFileCategory("documents", event.currentTarget.checked)
+              }
+            />
+            常见文档与文本（PDF、Office、Markdown、CSV、JSON 等）
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={fileCategories.includes("sourceCode")}
+              onChange={(event) =>
+                toggleFileCategory("sourceCode", event.currentTarget.checked)
+              }
+            />
+            常见编程语言源码（Python、JavaScript/TypeScript、Java、C/C++、Go、Rust
+            等）
+          </label>
         </div>
         <button
           type="button"
@@ -377,7 +423,9 @@ export function SettingsPage({ commands }: SettingsPageProps) {
                     : "connection-result"
                 }
               >
-                {ragflowConnection.message}
+                {ragflowConnection.available
+                  ? `${ragflowConnection.message}；请点击“保存 RAGFlow”后在知识库中使用。`
+                  : ragflowConnection.message}
               </p>
             ) : null}
           </div>

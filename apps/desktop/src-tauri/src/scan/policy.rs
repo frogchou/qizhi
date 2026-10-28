@@ -15,14 +15,14 @@ pub struct ScanPolicy {
 impl ScanPolicy {
     pub fn new(exclusions: Vec<PathBuf>) -> Self {
         Self {
-            exclusions,
+            exclusions: normalized_exclusions(exclusions),
             allowed_roots: vec![],
         }
     }
 
     pub fn for_roots(exclusions: Vec<PathBuf>, allowed_roots: Vec<AllowedRoot>) -> Self {
         Self {
-            exclusions,
+            exclusions: normalized_exclusions(exclusions),
             allowed_roots,
         }
     }
@@ -52,6 +52,13 @@ impl ScanPolicy {
                 .any(|root| canonical.0.starts_with(&root.0))
     }
 
+    /// Used while walking below an already approved root. It avoids resolving
+    /// every directory again while still applying all locked and user-defined
+    /// exclusions. Reparse points are handled by the walker from metadata.
+    pub fn is_directory_denied(&self, path: &Path) -> bool {
+        self.is_denied(path)
+    }
+
     fn is_denied(&self, path: &Path) -> bool {
         let raw = path.to_string_lossy().to_ascii_lowercase();
         let value = raw.strip_prefix(r"\\?\").unwrap_or(&raw);
@@ -67,14 +74,21 @@ impl ScanPolicy {
             || value.contains(r"\appdata\")
             || self.exclusions.iter().any(|excluded| {
                 is_path_prefix(value, &excluded.to_string_lossy().to_ascii_lowercase())
-                    || std::fs::canonicalize(excluded).is_ok_and(|canonical_exclusion| {
-                        is_path_prefix(
-                            value,
-                            &canonical_exclusion.to_string_lossy().to_ascii_lowercase(),
-                        )
-                    })
             })
     }
+}
+
+fn normalized_exclusions(exclusions: Vec<PathBuf>) -> Vec<PathBuf> {
+    let mut normalized = Vec::new();
+    for exclusion in exclusions {
+        normalized.push(exclusion.clone());
+        if let Ok(canonical) = std::fs::canonicalize(&exclusion)
+            && !normalized.iter().any(|existing| existing == &canonical)
+        {
+            normalized.push(canonical);
+        }
+    }
+    normalized
 }
 
 fn is_path_prefix(value: &str, prefix: &str) -> bool {

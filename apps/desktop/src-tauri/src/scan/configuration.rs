@@ -1,4 +1,7 @@
-use crate::{database::AppError, scan::policy::ScanPolicy};
+use crate::{
+    database::AppError,
+    scan::{file_filter::{FileCategory, default_file_categories}, policy::ScanPolicy},
+};
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
@@ -14,13 +17,27 @@ pub const LOCKED_EXCLUSIONS: &[&str] = &[
     r"C:\$Recycle.Bin",
 ];
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScanRules {
     pub allowed_roots: Vec<String>,
     pub custom_exclusions: Vec<String>,
+    #[serde(default = "default_file_categories")]
+    pub file_categories: Vec<FileCategory>,
     pub everything_sdk_path: Option<String>,
     pub es_cli_path: Option<String>,
+}
+
+impl Default for ScanRules {
+    fn default() -> Self {
+        Self {
+            allowed_roots: vec![],
+            custom_exclusions: vec![],
+            file_categories: default_file_categories(),
+            everything_sdk_path: None,
+            es_cli_path: None,
+        }
+    }
 }
 
 impl ScanRules {

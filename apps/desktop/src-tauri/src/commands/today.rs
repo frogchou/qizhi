@@ -9,8 +9,10 @@ use crate::{
     database::{AppError, repositories::FileRepository},
     discovery::{native_fs::NativeFileDiscovery, port::FileDiscovery},
     scan::{
+        file_filter::{FileCategory, FileTypeFilter},
         file_stability::MetadataStability,
         policy::{AllowedRoot, ScanPolicy},
+        progress::TodayScanStatus,
         service::ScanService,
     },
     system::explorer::{ExplorerLauncher, WindowsProcessLauncher},
@@ -56,20 +58,24 @@ fn unavailable(message: impl Into<String>) -> TodayUnavailable {
         clusters: vec![],
     }
 }
-type ActiveRules = (Vec<AllowedRoot>, Vec<PathBuf>);
+type ActiveRules = (Vec<AllowedRoot>, Vec<PathBuf>, Vec<FileCategory>);
 fn rules(state: &AppState) -> Result<ActiveRules, TodayUnavailable> {
     let rules = state
         .scan_rules
         .get()
         .map_err(|_| unavailable("无法读取本地扫描规则。"))?;
-    let exclusions = rules
-        .custom_exclusions
+    let crate::scan::configuration::ScanRules {
+        allowed_roots,
+        custom_exclusions,
+        file_categories,
+        ..
+    } = rules;
+    let exclusions = custom_exclusions
         .into_iter()
         .map(PathBuf::from)
         .collect::<Vec<_>>();
     let policy = ScanPolicy::new(exclusions.clone());
-    let roots = rules
-        .allowed_roots
+    let roots = allowed_roots
         .into_iter()
         .map(PathBuf::from)
         .map(|root| policy.validate_root(&root))
@@ -78,7 +84,7 @@ fn rules(state: &AppState) -> Result<ActiveRules, TodayUnavailable> {
     if roots.is_empty() {
         return Err(unavailable("请先在设置中添加允许扫描的工作目录。"));
     }
-    Ok((roots, exclusions))
+    Ok((roots, exclusions, file_categories))
 }
 fn bounds() -> (i64, i64) {
     let now = Local::now();
@@ -95,17 +101,43 @@ fn bounds() -> (i64, i64) {
     (start.timestamp_millis(), end.timestamp_millis())
 }
 fn refresh(state: &AppState) -> Result<TodayReady, TodayUnavailable> {
-    let (roots, exclusions) = rules(state)?;
-    let (start, end) = bounds();
-    let snapshot = ScanService::new(
-        today_discovery(exclusions.clone()),
-        ScanPolicy::for_roots(exclusions, roots.clone()),
-        state.database.files(),
-        Arc::new(MetadataStability),
-    )
-    .refresh_for_range(roots, start, end)
-    .map_err(|_| unavailable("刷新未完成，请检查扫描范围和文件访问权限。"))?;
-    Ok(ready_from_files(snapshot.files))
+    if !state.today_scan_progress.start() {
+        return Err(unavailable("已有今日扫描正在进行，请等待它完成。"));
+    }
+    state.logger.info("today-scan", "today file scan started");
+    let result: Result<TodayReady, TodayUnavailable> = (|| {
+        let (roots, exclusions, file_categories) = rules(state)?;
+        let (start, end) = bounds();
+        let snapshot = ScanService::new(
+            today_discovery(
+                exclusions.clone(),
+                state.today_scan_progress.clone(),
+                FileTypeFilter::new(file_categories),
+            ),
+            ScanPolicy::for_roots(exclusions, roots.clone()),
+            state.database.files(),
+            Arc::new(MetadataStability),
+        )
+        .refresh_for_range(roots, start, end)
+        .map_err(|_| unavailable("刷新未完成，请检查扫描范围和文件访问权限。"))?;
+        Ok(ready_from_files(snapshot.files))
+    })();
+    match &result {
+        Ok(snapshot) => {
+            state.today_scan_progress.complete();
+            state.logger.info(
+                "today-scan",
+                &format!("today file scan completed with {} files", snapshot.files.len()),
+            );
+        }
+        Err(error) => {
+            state.today_scan_progress.fail(&error.remediation);
+            state
+                .logger
+                .error("today-scan", &format!("today file scan failed: {}", error.remediation));
+        }
+    }
+    result
 }
 
 fn cached_snapshot_for_range(
@@ -142,8 +174,12 @@ fn ready_from_files(files: Vec<FileRecord>) -> TodayReady {
     }
 }
 
-fn today_discovery(exclusions: Vec<PathBuf>) -> Arc<dyn FileDiscovery> {
-    Arc::new(NativeFileDiscovery::new(exclusions))
+fn today_discovery(
+    exclusions: Vec<PathBuf>,
+    progress: crate::scan::progress::TodayScanProgress,
+    file_filter: FileTypeFilter,
+) -> Arc<dyn FileDiscovery> {
+    Arc::new(NativeFileDiscovery::with_progress(exclusions, progress, file_filter))
 }
 
 #[tauri::command]
@@ -155,6 +191,10 @@ pub async fn get_today_snapshot(
         .map_err(|_| unavailable("无法读取已发现的今日文件。"))
 }
 #[tauri::command]
+pub fn get_today_scan_status(state: State<'_, AppState>) -> TodayScanStatus {
+    state.today_scan_progress.snapshot()
+}
+#[tauri::command]
 pub async fn refresh_today(state: State<'_, AppState>) -> Result<TodayReady, TodayUnavailable> {
     let state = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || refresh(&state))
@@ -163,7 +203,7 @@ pub async fn refresh_today(state: State<'_, AppState>) -> Result<TodayReady, Tod
 }
 #[tauri::command]
 pub fn reveal_in_explorer(state: State<'_, AppState>, id: i64) -> Result<(), String> {
-    let (roots, exclusions) = rules(&state).map_err(|value| value.remediation)?;
+    let (roots, exclusions, _) = rules(&state).map_err(|value| value.remediation)?;
     ExplorerLauncher::new(
         state.database.files(),
         ScanPolicy::for_roots(exclusions, roots),
@@ -179,7 +219,11 @@ mod tests {
 
     use chrono::{Local, TimeZone, Timelike};
 
-    use crate::{contracts::FileRecordInput, database::Database};
+    use crate::{
+        contracts::FileRecordInput,
+        database::Database,
+        scan::file_filter::FileTypeFilter,
+    };
 
     use super::{bounds, cached_snapshot_for_range, today_discovery};
 
@@ -201,7 +245,15 @@ mod tests {
 
     #[test]
     fn uses_native_discovery_without_an_everything_connection() {
-        assert_eq!(today_discovery(vec![]).name(), "native-file-system");
+        assert_eq!(
+            today_discovery(
+                vec![],
+                crate::scan::progress::TodayScanProgress::new(),
+                FileTypeFilter::default(),
+            )
+            .name(),
+            "native-file-system"
+        );
     }
 
     #[test]

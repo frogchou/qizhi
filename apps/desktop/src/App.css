@@ -358,6 +358,27 @@ h2 {
   font-size: 13px;
   margin: 16px 0 0;
 }
+.file-types {
+  display: grid;
+  gap: 10px;
+  margin: 0 0 20px;
+}
+.file-types h3 {
+  font-size: 16px;
+  margin: 0;
+}
+.file-types label {
+  align-items: flex-start;
+  color: #3d5148;
+  display: flex;
+  font-size: 13px;
+  gap: 9px;
+  line-height: 1.45;
+}
+.file-types input {
+  accent-color: #176650;
+  margin-top: 3px;
+}
 .service-card {
   align-items: flex-start;
   border: 1px solid #e4eae5;

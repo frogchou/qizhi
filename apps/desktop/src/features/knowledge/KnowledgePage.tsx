@@ -1,9 +1,15 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { StatusNotice } from "../../components/StatusNotice";
 import type { QizhiCommands, RagflowChat } from "../../lib/tauri";
 
 const setupMessage = "请先在设置中保存 RAGFlow Base URL 和 API Key。";
+
+function readableError(error: unknown) {
+  if (error instanceof Error && error.message.trim()) return error.message;
+  if (typeof error === "string" && error.trim()) return error;
+  return "无法读取 RAGFlow 问答机器人，请稍后重试。";
+}
 
 export function KnowledgePage({ commands }: { commands: QizhiCommands }) {
   const [chats, setChats] = useState<RagflowChat[]>([]);
@@ -14,21 +20,35 @@ export function KnowledgePage({ commands }: { commands: QizhiCommands }) {
   const [loading, setLoading] = useState(true);
   const [asking, setAsking] = useState(false);
 
-  useEffect(() => {
+  const loadChats = useCallback(async () => {
     const listChats = commands.listRagflowChats;
     if (!listChats) {
       setError(setupMessage);
       setLoading(false);
       return;
     }
-    listChats()
-      .then((items) => {
-        setChats(items);
-        setSelectedChatId(items[0]?.id ?? "");
-      })
-      .catch(() => setError(setupMessage))
-      .finally(() => setLoading(false));
+    setLoading(true);
+    setError(null);
+    try {
+      const items = await listChats();
+      setChats(items);
+      setSelectedChatId((current) =>
+        items.some((item) => item.id === current)
+          ? current
+          : (items[0]?.id ?? ""),
+      );
+    } catch (error) {
+      setChats([]);
+      setSelectedChatId("");
+      setError(readableError(error));
+    } finally {
+      setLoading(false);
+    }
   }, [commands]);
+
+  useEffect(() => {
+    void loadChats();
+  }, [loadChats]);
 
   async function ask() {
     const askChat = commands.askRagflowChat;
@@ -57,6 +77,14 @@ export function KnowledgePage({ commands }: { commands: QizhiCommands }) {
           <h1 id="knowledge-title">知识库</h1>
           <p className="muted">选择已有问答机器人，栖知不会修改知识库内容。</p>
         </div>
+        <button
+          type="button"
+          className="button secondary"
+          onClick={() => void loadChats()}
+          disabled={loading}
+        >
+          {loading ? "正在加载…" : "重新加载机器人"}
+        </button>
       </header>
       {error ? <StatusNotice>{error}</StatusNotice> : null}
       <div className="knowledge-layout">

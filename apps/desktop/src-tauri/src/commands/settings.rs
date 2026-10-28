@@ -5,7 +5,11 @@ use crate::{
     app_state::AppState,
     config::{ConfigService, ServiceConfigurationInput, secret_store::WindowsCredentialStore},
     discovery::selector::select_discovery_with_paths,
-    scan::{configuration::ScanRules, policy::ScanPolicy},
+    scan::{
+        configuration::ScanRules,
+        file_filter::{FileCategory, default_file_categories},
+        policy::ScanPolicy,
+    },
 };
 
 #[derive(Deserialize)]
@@ -245,6 +249,8 @@ pub fn get_everything_status(state: State<'_, AppState>) -> EverythingStatus {
 pub struct SaveScanRulesInput {
     allowed_roots: Vec<String>,
     custom_exclusions: Vec<String>,
+    #[serde(default = "default_file_categories")]
+    file_categories: Vec<FileCategory>,
     es_cli_path: Option<String>,
 }
 
@@ -253,6 +259,7 @@ pub struct SaveScanRulesInput {
 pub struct ScanRulesOutput {
     allowed_roots: Vec<String>,
     custom_exclusions: Vec<String>,
+    file_categories: Vec<FileCategory>,
     everything_sdk_path: Option<String>,
     es_cli_path: Option<String>,
     locked_exclusions: Vec<String>,
@@ -262,6 +269,7 @@ fn rules_output(value: ScanRules) -> ScanRulesOutput {
     ScanRulesOutput {
         allowed_roots: value.allowed_roots,
         custom_exclusions: value.custom_exclusions,
+        file_categories: value.file_categories,
         everything_sdk_path: value.everything_sdk_path,
         es_cli_path: value.es_cli_path,
         locked_exclusions: ScanRules::default().locked_exclusions(),
@@ -306,6 +314,7 @@ pub fn save_scan_rules(
                 .map(|root| root.0.to_string_lossy().to_string())
                 .collect(),
             custom_exclusions: input.custom_exclusions,
+            file_categories: input.file_categories,
             everything_sdk_path: None,
             es_cli_path: input.es_cli_path,
         })

@@ -52,12 +52,37 @@ describe("KnowledgePage", () => {
     const client = commands();
     client.listRagflowChats = vi
       .fn()
-      .mockRejectedValue(new Error("not configured"));
+      .mockRejectedValue(
+        new Error("请先在设置中保存 RAGFlow Base URL 和 API Key。"),
+      );
     render(<KnowledgePage commands={client} />);
 
     expect(
       await screen.findByText("请先在设置中保存 RAGFlow Base URL 和 API Key。"),
     ).toBeInTheDocument();
+  });
+
+  it("shows the actual RAGFlow error and lets the user retry loading assistants", async () => {
+    const client = commands();
+    const listChats = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("RAGFlow 连接未通过（HTTP 401）。"))
+      .mockResolvedValueOnce([
+        { id: "chat-work", name: "工作知识库", description: "工作资料问答" },
+      ]);
+    client.listRagflowChats = listChats;
+    render(<KnowledgePage commands={client} />);
+
+    expect(
+      await screen.findByText("RAGFlow 连接未通过（HTTP 401）。"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("请先在设置中保存 RAGFlow Base URL 和 API Key。"),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "重新加载机器人" }));
+    await waitFor(() => expect(listChats).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("工作知识库")).toBeInTheDocument();
   });
 
   it("clears an answer when the user changes the selected assistant", async () => {

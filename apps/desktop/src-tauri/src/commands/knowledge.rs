@@ -58,9 +58,19 @@ pub async fn list_ragflow_chats(
 ) -> Result<Vec<RagflowChatOutput>, String> {
     let state = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        client(&state)?
-            .list_chats()
-            .map(|chats| chats.into_iter().map(RagflowChatOutput::from).collect())
+        let result = client(&state).and_then(|client| {
+            client
+                .list_chats()
+                .map(|chats| chats.into_iter().map(RagflowChatOutput::from).collect::<Vec<_>>())
+        });
+        match &result {
+            Ok(chats) => state.logger.info(
+                "ragflow",
+                &format!("loaded {} RAGFlow chat assistants", chats.len()),
+            ),
+            Err(error) => state.logger.error("ragflow", &format!("loading chat assistants failed: {error}")),
+        }
+        result
     })
     .await
     .map_err(|_| "读取 RAGFlow 问答机器人时发生意外错误。".to_owned())?
@@ -73,9 +83,14 @@ pub async fn ask_ragflow_chat(
 ) -> Result<RagflowAnswerOutput, String> {
     let state = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        client(&state)?
-            .ask(&input.chat_id, &input.question)
-            .map(RagflowAnswerOutput::from)
+        let result = client(&state)
+            .and_then(|client| client.ask(&input.chat_id, &input.question))
+            .map(RagflowAnswerOutput::from);
+        match &result {
+            Ok(_) => state.logger.info("ragflow", "RAGFlow question completed"),
+            Err(error) => state.logger.error("ragflow", &format!("RAGFlow question failed: {error}")),
+        }
+        result
     })
     .await
     .map_err(|_| "RAGFlow 问答时发生意外错误。".to_owned())?

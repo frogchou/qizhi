@@ -13,11 +13,15 @@ export interface QizhiCommands {
   pickFolder(): Promise<string | null>;
   getEverythingStatus?(): Promise<EverythingStatus>;
   getTodaySnapshot(): Promise<TodaySnapshot>;
+  getTodayScanStatus?(): Promise<TodayScanStatus>;
   refreshToday(): Promise<TodaySnapshot>;
   revealInExplorer(id: number): Promise<void>;
   listScanRules(): Promise<ScanRules>;
   saveScanRules(
-    input: Pick<ScanRules, "allowedRoots" | "customExclusions" | "esCliPath">,
+    input: Pick<
+      ScanRules,
+      "allowedRoots" | "customExclusions" | "fileCategories" | "esCliPath"
+    >,
   ): Promise<ScanRules>;
   listRagflowChats?(): Promise<RagflowChat[]>;
   askRagflowChat?(input: {
@@ -56,13 +60,25 @@ export type TodaySnapshot =
       clusters: { label: string; fileIds: number[] }[];
     };
 
+export type TodayScanStatus = {
+  state: "idle" | "scanning" | "completed" | "failed";
+  directoriesScanned: number;
+  candidatesFound: number;
+  startedAtUtcMs: number | null;
+  completedAtUtcMs: number | null;
+  message: string | null;
+};
+
 export type ScanRules = {
   allowedRoots: string[];
   customExclusions: string[];
+  fileCategories: FileCategory[];
   everythingSdkPath: string | null;
   esCliPath: string | null;
   lockedExclusions: string[];
 };
+
+export type FileCategory = "documents" | "sourceCode";
 
 export type RagflowChat = {
   id: string;
@@ -106,6 +122,7 @@ export const unavailableCommands: QizhiCommands = {
     return {
       allowedRoots: [],
       customExclusions: [],
+      fileCategories: ["documents", "sourceCode"],
       everythingSdkPath: null,
       esCliPath: null,
       lockedExclusions: [],
@@ -124,6 +141,7 @@ export const tauriCommands: QizhiCommands = {
   pickFolder: () => invoke("pick_folder"),
   getEverythingStatus: () => invoke("get_everything_status"),
   getTodaySnapshot: () => invoke("get_today_snapshot"),
+  getTodayScanStatus: () => invoke("get_today_scan_status"),
   refreshToday: () => invoke("refresh_today"),
   revealInExplorer: (id) => invoke("reveal_in_explorer", { id }),
   listScanRules: () => invoke("list_scan_rules"),

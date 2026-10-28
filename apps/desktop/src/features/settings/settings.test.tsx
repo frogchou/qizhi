@@ -22,6 +22,7 @@ describe("SettingsPage", () => {
       listScanRules: vi.fn().mockResolvedValue({
         allowedRoots: [],
         customExclusions: [],
+        fileCategories: ["documents", "sourceCode"],
         everythingSdkPath: null,
         esCliPath: null,
         lockedExclusions: [],
@@ -57,6 +58,7 @@ describe("SettingsPage", () => {
       listScanRules: vi.fn().mockResolvedValue({
         allowedRoots: [],
         customExclusions: [],
+        fileCategories: ["documents", "sourceCode"],
         everythingSdkPath: null,
         esCliPath: null,
         lockedExclusions: [],
@@ -80,6 +82,41 @@ describe("SettingsPage", () => {
     ).toBeInTheDocument();
   });
 
+  it("saves the selected supported file categories as part of scan rules", async () => {
+    const commands: QizhiCommands = {
+      getSettings: vi.fn().mockResolvedValue([]),
+      saveSettings: vi.fn(),
+      testServiceConnection: vi.fn(),
+      pickFolder: vi.fn(),
+      getTodaySnapshot: vi.fn(),
+      refreshToday: vi.fn(),
+      revealInExplorer: vi.fn(),
+      listScanRules: vi.fn().mockResolvedValue({
+        allowedRoots: ["D:\\Work"],
+        customExclusions: [],
+        fileCategories: ["documents", "sourceCode"],
+        everythingSdkPath: null,
+        esCliPath: null,
+        lockedExclusions: [],
+      }),
+      saveScanRules: vi.fn().mockResolvedValue({}),
+    };
+
+    render(<SettingsPage commands={commands} />);
+    await screen.findByText("文件类型");
+    fireEvent.click(screen.getByLabelText(/常见编程语言源码/));
+    fireEvent.click(screen.getByRole("button", { name: "保存扫描范围" }));
+
+    await waitFor(() =>
+      expect(commands.saveScanRules).toHaveBeenCalledWith({
+        allowedRoots: ["D:\\Work"],
+        customExclusions: [],
+        fileCategories: ["documents"],
+        esCliPath: null,
+      }),
+    );
+  });
+
   it("saves RAGFlow as a separately masked connection", async () => {
     const commands: QizhiCommands = {
       getSettings: vi.fn().mockResolvedValue([]),
@@ -97,6 +134,7 @@ describe("SettingsPage", () => {
       listScanRules: vi.fn().mockResolvedValue({
         allowedRoots: [],
         customExclusions: [],
+        fileCategories: ["documents", "sourceCode"],
         everythingSdkPath: null,
         esCliPath: null,
         lockedExclusions: [],
