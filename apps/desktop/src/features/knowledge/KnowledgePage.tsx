@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import { StatusNotice } from "../../components/StatusNotice";
 import type {
@@ -9,15 +9,283 @@ import type {
 } from "../../lib/tauri";
 
 const setupMessage = "请先在设置中保存 RAGFlow Base URL 和 API Key。";
+
+type ConversationTurn = {
+  id: string;
+  question: string;
+  status: "pending" | "completed" | "failed";
+  result?: RagflowKnowledgeQuery;
+  error?: string;
+};
+
 function errorText(error: unknown) {
   if (error instanceof Error && error.message.trim()) return error.message;
   if (typeof error === "string" && error.trim()) return error;
   return "无法读取 RAGFlow 资源，请稍后重试。";
 }
+
 function toggle(items: string[], id: string) {
   return items.includes(id)
     ? items.filter((item) => item !== id)
     : [...items, id];
+}
+
+function SearchIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24">
+      <circle cx="10.8" cy="10.8" r="6.5" />
+      <path d="m16 16 4.2 4.2" />
+    </svg>
+  );
+}
+
+function SendIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24">
+      <path d="m4 4 16 8-16 8 3-8-3-8Z" />
+      <path d="M7 12h12" />
+    </svg>
+  );
+}
+
+function FolderIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24">
+      <path d="M3.8 7.6c0-1 .8-1.8 1.8-1.8h4l1.7 2h7.1c1 0 1.8.8 1.8 1.8v7.1c0 1-.8 1.8-1.8 1.8H5.6c-1 0-1.8-.8-1.8-1.8V7.6Z" />
+    </svg>
+  );
+}
+
+function AgentIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24">
+      <path d="M12 3.5 14 9l5.5 2-5.5 2L12 18.5 10 13l-5.5-2 5.5-2L12 3.5Z" />
+    </svg>
+  );
+}
+
+function HistoryIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24">
+      <path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3" />
+      <path d="M4.5 5.8v4.5H9" />
+      <path d="M12 8v4.3l2.8 1.7" />
+    </svg>
+  );
+}
+
+function ChevronIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24">
+      <path d="m9 5 7 7-7 7" />
+    </svg>
+  );
+}
+
+function Composer({
+  question,
+  querying,
+  hasResources,
+  onChange,
+  onSubmit,
+  followUp,
+}: {
+  question: string;
+  querying: boolean;
+  hasResources: boolean;
+  onChange: (value: string) => void;
+  onSubmit: () => void;
+  followUp: boolean;
+}) {
+  const label = followUp ? "继续提问" : "询问你的工作知识库";
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    onSubmit();
+  }
+  return (
+    <form className="knowledge-composer" onSubmit={submit}>
+      <SearchIcon />
+      <label
+        className="sr-only"
+        htmlFor={followUp ? "follow-up" : "initial-question"}
+      >
+        {label}
+      </label>
+      <textarea
+        aria-label={label}
+        id={followUp ? "follow-up" : "initial-question"}
+        onChange={(event) => onChange(event.currentTarget.value)}
+        placeholder={
+          followUp
+            ? "继续提问，或针对以上内容进一步深入…"
+            : "询问你的工作知识库"
+        }
+        rows={1}
+        value={question}
+      />
+      <button
+        aria-label="发送问题"
+        className="composer-send"
+        disabled={querying || !question.trim() || !hasResources}
+        type="submit"
+      >
+        {querying ? (
+          <span className="composer-loading">···</span>
+        ) : (
+          <SendIcon />
+        )}
+      </button>
+    </form>
+  );
+}
+
+function ResourceSelector({
+  title,
+  items,
+  selectedIds,
+  icon,
+  loading,
+  emptyText,
+  onToggle,
+}: {
+  title: string;
+  items: Array<RagflowDataset | RagflowAgent>;
+  selectedIds: string[];
+  icon: "folder" | "agent";
+  loading: boolean;
+  emptyText: string;
+  onToggle: (id: string) => void;
+}) {
+  return (
+    <details className="resource-selector">
+      <summary>
+        <span className="resource-summary-icon">
+          {icon === "folder" ? <FolderIcon /> : <AgentIcon />}
+        </span>
+        <span>
+          <strong>
+            {title}（{selectedIds.length}）
+          </strong>
+          <small>
+            {selectedIds.length ? `已选择 ${selectedIds.length} 项` : "可多选"}
+          </small>
+        </span>
+        <ChevronIcon />
+      </summary>
+      <div className="resource-dropdown">
+        {loading ? <p className="resource-empty">正在加载资源…</p> : null}
+        {!loading && !items.length ? (
+          <p className="resource-empty">{emptyText}</p>
+        ) : null}
+        {items.map((item) => (
+          <label className="resource-row" key={item.id}>
+            <input
+              aria-label={item.name}
+              checked={selectedIds.includes(item.id)}
+              onChange={() => onToggle(item.id)}
+              type="checkbox"
+            />
+            <span className="resource-row-icon">
+              {icon === "folder" ? <FolderIcon /> : <AgentIcon />}
+            </span>
+            <span>
+              <strong>{item.name}</strong>
+              <small>
+                {item.description ||
+                  (icon === "folder" ? "用于资料检索" : "RAGFlow Agent")}
+              </small>
+            </span>
+          </label>
+        ))}
+      </div>
+    </details>
+  );
+}
+
+function ConversationAnswer({
+  turn,
+  agents,
+}: {
+  turn: ConversationTurn;
+  agents: RagflowAgent[];
+}) {
+  if (turn.status === "pending") {
+    return (
+      <article className="assistant-panel pending-answer">
+        <div className="assistant-avatar">
+          <AgentIcon />
+        </div>
+        <p>正在检索资料并向已选择的 Agents 提问…</p>
+      </article>
+    );
+  }
+  if (turn.status === "failed") {
+    return (
+      <article className="assistant-panel assistant-failure">
+        <div className="assistant-avatar">
+          <AgentIcon />
+        </div>
+        <p>{turn.error}</p>
+      </article>
+    );
+  }
+  const result = turn.result;
+  const answers = result?.agentResults ?? [];
+  const chunks = result?.chunks ?? [];
+  return (
+    <article className="assistant-panel">
+      <div className="assistant-avatar">
+        <AgentIcon />
+      </div>
+      <div className="assistant-content">
+        {answers.length ? (
+          answers.map((agentResult) => {
+            const agent = agents.find(
+              (item) => item.id === agentResult.agentId,
+            );
+            return (
+              <section className="agent-answer" key={agentResult.agentId}>
+                <header>
+                  <strong>{agent?.name ?? agentResult.agentId}</strong>
+                  <span>{agentResult.error ? "未完成" : "已回答"}</span>
+                </header>
+                <p
+                  className={
+                    agentResult.error ? "agent-error" : "knowledge-answer"
+                  }
+                >
+                  {agentResult.error ??
+                    agentResult.answer ??
+                    "未返回回答内容。"}
+                </p>
+              </section>
+            );
+          })
+        ) : (
+          <p className="retrieval-summary">
+            已从所选知识库中找到 {chunks.length} 条相关资料。
+          </p>
+        )}
+        {chunks.length ? (
+          <details className="citation-disclosure">
+            <summary>引用来源（{chunks.length}）</summary>
+            <div className="citation-list">
+              {chunks.map((chunk) => (
+                <article className="citation-card" key={chunk.id}>
+                  <header>
+                    <FolderIcon />
+                    <strong>{chunk.documentName || "未命名来源"}</strong>
+                  </header>
+                  <p>{chunk.content}</p>
+                  <small>相关度 {Math.round(chunk.similarity * 100)}%</small>
+                </article>
+              ))}
+            </div>
+          </details>
+        ) : null}
+      </div>
+    </article>
+  );
 }
 
 export function KnowledgePage({ commands }: { commands: QizhiCommands }) {
@@ -26,10 +294,18 @@ export function KnowledgePage({ commands }: { commands: QizhiCommands }) {
   const [datasetIds, setDatasetIds] = useState<string[]>([]);
   const [agentIds, setAgentIds] = useState<string[]>([]);
   const [question, setQuestion] = useState("");
-  const [result, setResult] = useState<RagflowKnowledgeQuery | null>(null);
+  const [turns, setTurns] = useState<ConversationTurn[]>([]);
+  const [recentQuestions, setRecentQuestions] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [querying, setQuerying] = useState(false);
+
+  const hasResources = datasetIds.length > 0 || agentIds.length > 0;
+  const agentById = useMemo(
+    () => new Map(agents.map((agent) => [agent.id, agent])),
+    [agents],
+  );
+
   const load = useCallback(async () => {
     const listDatasets = commands.listRagflowDatasets;
     const listAgents = commands.listRagflowAgents;
@@ -47,174 +323,186 @@ export function KnowledgePage({ commands }: { commands: QizhiCommands }) {
       ]);
       setDatasets(nextDatasets);
       setAgents(nextAgents);
+      setDatasetIds((items) =>
+        items.filter((id) => nextDatasets.some((item) => item.id === id)),
+      );
+      setAgentIds((items) =>
+        items.filter((id) => nextAgents.some((item) => item.id === id)),
+      );
     } catch (loadError) {
       setError(errorText(loadError));
     } finally {
       setLoading(false);
     }
   }, [commands]);
+
   useEffect(() => {
     void load();
   }, [load]);
+
   async function query() {
     const runQuery = commands.queryRagflowKnowledge;
-    if (
-      !runQuery ||
-      !question.trim() ||
-      (datasetIds.length === 0 && agentIds.length === 0)
-    )
-      return;
+    const normalizedQuestion = question.trim();
+    if (!runQuery || !normalizedQuestion || !hasResources || querying) return;
+    const turnId = `${Date.now()}-${turns.length}`;
+    setTurns((items) => [
+      ...items,
+      { id: turnId, question: normalizedQuestion, status: "pending" },
+    ]);
+    setRecentQuestions((items) =>
+      [
+        normalizedQuestion,
+        ...items.filter((item) => item !== normalizedQuestion),
+      ].slice(0, 5),
+    );
+    setQuestion("");
     setQuerying(true);
     setError(null);
-    setResult(null);
     try {
-      setResult(
-        await runQuery({ question: question.trim(), datasetIds, agentIds }),
+      const result = await runQuery({
+        question: normalizedQuestion,
+        datasetIds,
+        agentIds,
+      });
+      setTurns((items) =>
+        items.map((turn) =>
+          turn.id === turnId ? { ...turn, status: "completed", result } : turn,
+        ),
       );
     } catch (queryError) {
-      setError(errorText(queryError));
+      setTurns((items) =>
+        items.map((turn) =>
+          turn.id === turnId
+            ? { ...turn, status: "failed", error: errorText(queryError) }
+            : turn,
+        ),
+      );
     } finally {
       setQuerying(false);
     }
   }
+
   return (
     <section className="page knowledge-page" aria-labelledby="knowledge-title">
-      <header className="page-header">
+      <header className="knowledge-header">
         <div>
-          <p className="eyebrow">RAGFlow 工作台</p>
-          <h1 id="knowledge-title">知识库</h1>
-          <p className="muted">检索相关内容，并向选中的 Agents 同时提问。</p>
+          <h1 id="knowledge-title">知识库问答</h1>
+          <p>
+            基于你选择的知识库，结合 RAGFlow
+            进行检索与生成，帮你快速获得可信、可追溯的答案。
+          </p>
         </div>
         <button
-          className="button secondary"
-          type="button"
-          onClick={() => void load()}
+          className="button secondary knowledge-reload"
           disabled={loading}
+          onClick={() => void load()}
+          type="button"
         >
           {loading ? "正在加载…" : "重新加载资源"}
         </button>
       </header>
       {error ? <StatusNotice>{error}</StatusNotice> : null}
-      <div className="knowledge-workspace">
-        <section className="knowledge-card knowledge-controls">
-          <div className="resource-columns">
-            <fieldset disabled={loading}>
-              <legend>选择知识库</legend>
-              {datasets.length ? (
-                datasets.map((dataset) => (
-                  <label className="resource-option" key={dataset.id}>
-                    <input
-                      aria-label={dataset.name}
-                      type="checkbox"
-                      checked={datasetIds.includes(dataset.id)}
-                      onChange={() =>
-                        setDatasetIds((items) => toggle(items, dataset.id))
-                      }
-                    />
-                    <span>
-                      <strong>{dataset.name}</strong>
-                      <small>
-                        {dataset.description || "用于直接检索相关片段"}
-                      </small>
-                    </span>
-                  </label>
-                ))
-              ) : (
-                <p className="empty">暂无可访问知识库。</p>
-              )}
-            </fieldset>
-            <fieldset disabled={loading}>
-              <legend>选择 Agents</legend>
-              {agents.length ? (
-                agents.map((agent) => (
-                  <label className="resource-option" key={agent.id}>
-                    <input
-                      aria-label={agent.name}
-                      type="checkbox"
-                      checked={agentIds.includes(agent.id)}
-                      onChange={() =>
-                        setAgentIds((items) => toggle(items, agent.id))
-                      }
-                    />
-                    <span>
-                      <strong>{agent.name}</strong>
-                      <small>{agent.description || "RAGFlow Agent"}</small>
-                    </span>
-                  </label>
-                ))
-              ) : (
-                <p className="empty">暂无可访问 Agents。</p>
-              )}
-            </fieldset>
-          </div>
-          <label className="question-input">
-            关键词或问题
-            <textarea
-              aria-label="关键词或问题"
-              value={question}
-              placeholder="例如：项目进度和当前风险"
-              onChange={(event) => setQuestion(event.currentTarget.value)}
-            />
-          </label>
-          <div className="knowledge-actions">
-            <button
-              className="button primary"
-              type="button"
-              disabled={
-                querying ||
-                !question.trim() ||
-                (datasetIds.length === 0 && agentIds.length === 0)
-              }
-              onClick={query}
-            >
-              {querying ? "正在查询…" : "查询"}
-            </button>
-          </div>
-        </section>
-        <section className="knowledge-results" aria-live="polite">
-          <article className="knowledge-card">
-            <p className="eyebrow">相关内容</p>
-            {result?.chunks.length ? (
-              result.chunks.map((chunk) => (
-                <div className="result-item" key={chunk.id}>
-                  <strong>{chunk.documentName || "未命名来源"}</strong>
-                  <p>{chunk.content}</p>
-                  <small>相关度 {Math.round(chunk.similarity * 100)}%</small>
-                </div>
-              ))
+      <div className="knowledge-layout-v2">
+        <section aria-label="知识库对话" className="knowledge-conversation">
+          <div className="conversation-scroll" aria-live="polite">
+            {!turns.length ? (
+              <div className="conversation-start">
+                <Composer
+                  question={question}
+                  querying={querying}
+                  hasResources={hasResources}
+                  onChange={setQuestion}
+                  onSubmit={() => void query()}
+                  followUp={false}
+                />
+                <p>在右侧选择资料范围后，输入问题即可开始检索和对话。</p>
+              </div>
             ) : (
-              <p className="empty">
-                选择知识库并查询后，相关片段将显示在这里。
-              </p>
-            )}
-          </article>
-          <article className="knowledge-card">
-            <p className="eyebrow">Agent 回答</p>
-            {result?.agentResults.length ? (
-              result.agentResults.map((agentResult) => {
-                const agent = agents.find(
-                  (item) => item.id === agentResult.agentId,
-                );
-                return (
-                  <div className="result-item" key={agentResult.agentId}>
-                    <strong>{agent?.name ?? agentResult.agentId}</strong>
-                    <p
-                      className={
-                        agentResult.error ? "agent-error" : "knowledge-answer"
-                      }
-                    >
-                      {agentResult.error ?? agentResult.answer}
-                    </p>
+              <div className="conversation-turns">
+                {turns.map((turn) => (
+                  <div className="conversation-turn" key={turn.id}>
+                    <article className="user-message">
+                      <span>你</span>
+                      <p>{turn.question}</p>
+                    </article>
+                    <ConversationAnswer
+                      turn={turn}
+                      agents={Array.from(agentById.values())}
+                    />
                   </div>
-                );
-              })
-            ) : (
-              <p className="empty">
-                选择 Agents 并查询后，每个回答将独立显示在这里。
-              </p>
+                ))}
+              </div>
             )}
-          </article>
+          </div>
+          {turns.length ? (
+            <div className="conversation-follow-up">
+              <Composer
+                question={question}
+                querying={querying}
+                hasResources={hasResources}
+                onChange={setQuestion}
+                onSubmit={() => void query()}
+                followUp
+              />
+            </div>
+          ) : null}
         </section>
+        <aside aria-label="检索范围" className="knowledge-rail">
+          <section className="rail-card scope-card">
+            <h2>检索范围</h2>
+            <p>选择要检索的知识库，并向所选 Agents 同时提问。</p>
+            <ResourceSelector
+              title="知识库"
+              items={datasets}
+              selectedIds={datasetIds}
+              icon="folder"
+              loading={loading}
+              emptyText="暂无可访问知识库。"
+              onToggle={(id) => setDatasetIds((items) => toggle(items, id))}
+            />
+            <ResourceSelector
+              title="Agents"
+              items={agents}
+              selectedIds={agentIds}
+              icon="agent"
+              loading={loading}
+              emptyText="暂无可访问 Agents。"
+              onToggle={(id) => setAgentIds((items) => toggle(items, id))}
+            />
+          </section>
+          <section className="rail-card connection-card">
+            <span className="connection-dot" />
+            <div>
+              <strong>RAGFlow 已连接</strong>
+              <small>本地部署 · 已使用安全凭据</small>
+            </div>
+            <ChevronIcon />
+          </section>
+          <section className="rail-card recent-card">
+            <header>
+              <h2>近期检索内容</h2>
+              {recentQuestions.length ? (
+                <button onClick={() => setRecentQuestions([])} type="button">
+                  清空
+                </button>
+              ) : null}
+            </header>
+            {recentQuestions.length ? (
+              <ul>
+                {recentQuestions.map((item) => (
+                  <li key={item}>
+                    <HistoryIcon />
+                    <button onClick={() => setQuestion(item)} type="button">
+                      {item}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="recent-empty">本次会话的检索问题会显示在这里。</p>
+            )}
+          </section>
+        </aside>
       </div>
     </section>
   );
