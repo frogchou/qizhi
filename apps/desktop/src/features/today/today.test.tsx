@@ -76,4 +76,16 @@ describe("TodayPage", () => {
       await screen.findByText("请安装并启动 Everything。"),
     ).toBeInTheDocument();
   });
+
+  it("explains that an empty ready snapshot found no files in the approved scope", async () => {
+    render(
+      <TodayPage
+        commands={commands({ state: "ready", files: [], clusters: [] })}
+      />,
+    );
+
+    expect(
+      await screen.findByText("今天的扫描范围内还没有发现新文件。"),
+    ).toBeInTheDocument();
+  });
 });

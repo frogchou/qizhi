@@ -197,11 +197,9 @@ export function SettingsPage({ commands }: SettingsPageProps) {
           <div className="service-name">
             <span className="service-icon">⌕</span>
             <div>
-              <h3>Everything</h3>
-              <p>
-                使用随栖知安装的 SDK 查询本机文件；请保持 Everything
-                在后台运行。
-              </p>
+              <h3>Everything（可选）</h3>
+              <p>用于后续的全机文件名快速检索。</p>
+              <p>不会影响“今日”发现本地文件。</p>
             </div>
           </div>
           <p
@@ -209,7 +207,7 @@ export function SettingsPage({ commands }: SettingsPageProps) {
               everything?.available ? "service-state ready" : "service-state"
             }
           >
-            {everything?.available ? "已连接" : "等待连接"}
+            {everything?.available ? "可选加速器已连接" : "可选加速器"}
           </p>
         </article>
         <article className="service-card openai-card">

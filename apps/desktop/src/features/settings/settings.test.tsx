@@ -45,7 +45,7 @@ describe("SettingsPage", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("shows the privacy boundary and a redacted Everything remediation", async () => {
+  it("shows the privacy boundary and identifies Everything as optional", async () => {
     const commands: QizhiCommands = {
       getSettings: vi.fn().mockResolvedValue([]),
       saveSettings: vi.fn(),
@@ -74,6 +74,9 @@ describe("SettingsPage", () => {
     expect(
       screen.getByText(/系统目录、AppData.*始终被排除/),
     ).toBeInTheDocument();
-    expect(await screen.findByText("等待连接")).toBeInTheDocument();
+    expect(await screen.findByText("可选加速器")).toBeInTheDocument();
+    expect(
+      screen.getByText("不会影响“今日”发现本地文件。"),
+    ).toBeInTheDocument();
   });
 });

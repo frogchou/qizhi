@@ -44,7 +44,7 @@ export function TodayPage({ commands }: { commands: QizhiCommands }) {
     try {
       setSnapshot(await commands.refreshToday());
     } catch {
-      setNotice("刷新未完成，请检查 Everything 状态和扫描范围。");
+      setNotice("刷新未完成，请检查扫描范围和文件访问权限。");
     } finally {
       setBusy(false);
     }
@@ -109,7 +109,7 @@ export function TodayPage({ commands }: { commands: QizhiCommands }) {
             <span>{snapshot.files.length} 项</span>
           </div>
           {snapshot.files.length === 0 ? (
-            <p className="empty">还没有可显示的今日文件。</p>
+            <p className="empty">今天的扫描范围内还没有发现新文件。</p>
           ) : (
             <ul className="file-list">
               {snapshot.files.map((file) => (

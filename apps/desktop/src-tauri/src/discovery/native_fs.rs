@@ -4,20 +4,27 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use crate::{database::AppError, scan::policy::AllowedRoot};
+use crate::{
+    database::AppError,
+    scan::policy::{AllowedRoot, ScanPolicy},
+};
 
 use super::port::{DiscoveredFile, DiscoveryHealth, FileDiscovery};
 
 const RESULT_LIMIT: usize = 500;
 
 /// Discovers today's file metadata directly from user-approved local folders.
-/// It never follows reparse points and leaves authorization checks to the
-/// existing scan policy before records are persisted.
-pub struct NativeFileDiscovery;
+/// It never follows reparse points or descends into paths rejected by the
+/// scan policy.
+pub struct NativeFileDiscovery {
+    directory_policy: ScanPolicy,
+}
 
 impl NativeFileDiscovery {
-    pub fn new() -> Self {
-        Self
+    pub fn new(exclusions: Vec<PathBuf>) -> Self {
+        Self {
+            directory_policy: ScanPolicy::new(exclusions),
+        }
     }
 }
 
@@ -50,6 +57,9 @@ impl FileDiscovery for NativeFileDiscovery {
         let mut found = Vec::new();
 
         while let Some(directory) = pending.pop() {
+            if self.directory_policy.validate_root(&directory).is_err() {
+                continue;
+            }
             let entries = match fs::read_dir(directory) {
                 Ok(entries) => entries,
                 Err(_) => continue,

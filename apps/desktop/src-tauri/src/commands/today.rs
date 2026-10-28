@@ -5,7 +5,7 @@ use tauri::State;
 
 use crate::{
     app_state::AppState,
-    discovery::selector::select_discovery_with_paths,
+    discovery::{native_fs::NativeFileDiscovery, port::FileDiscovery},
     scan::{
         file_stability::MetadataStability,
         policy::{AllowedRoot, ScanPolicy},
@@ -54,12 +54,7 @@ fn unavailable(message: impl Into<String>) -> TodayUnavailable {
         clusters: vec![],
     }
 }
-type ActiveRules = (
-    Vec<AllowedRoot>,
-    Vec<PathBuf>,
-    Option<PathBuf>,
-    Option<PathBuf>,
-);
+type ActiveRules = (Vec<AllowedRoot>, Vec<PathBuf>);
 fn rules(state: &AppState) -> Result<ActiveRules, TodayUnavailable> {
     let rules = state
         .scan_rules
@@ -81,12 +76,7 @@ fn rules(state: &AppState) -> Result<ActiveRules, TodayUnavailable> {
     if roots.is_empty() {
         return Err(unavailable("请先在设置中添加允许扫描的工作目录。"));
     }
-    Ok((
-        roots,
-        exclusions,
-        Some(state.everything_sdk_path.clone()),
-        rules.es_cli_path.map(PathBuf::from),
-    ))
+    Ok((roots, exclusions))
 }
 fn bounds() -> (i64, i64) {
     let now = Local::now();
@@ -103,20 +93,16 @@ fn bounds() -> (i64, i64) {
     (start.timestamp_millis(), end.timestamp_millis())
 }
 fn refresh(state: &AppState) -> Result<TodayReady, TodayUnavailable> {
-    let (roots, exclusions, sdk_path, cli_path) = rules(state)?;
-    let discovery = select_discovery_with_paths(sdk_path, cli_path);
-    if !discovery.health().available {
-        return Err(unavailable(discovery.health().remediation));
-    }
+    let (roots, exclusions) = rules(state)?;
     let (start, end) = bounds();
     let snapshot = ScanService::new(
-        Arc::from(discovery),
+        today_discovery(exclusions.clone()),
         ScanPolicy::for_roots(exclusions, roots.clone()),
         state.database.files(),
         Arc::new(MetadataStability),
     )
     .refresh_for_range(roots, start, end)
-    .map_err(|_| unavailable("刷新未完成，请检查 Everything 是否运行以及目录权限。"))?;
+    .map_err(|_| unavailable("刷新未完成，请检查扫描范围和文件访问权限。"))?;
     Ok(TodayReady {
         state: "ready",
         files: snapshot
@@ -142,17 +128,29 @@ fn refresh(state: &AppState) -> Result<TodayReady, TodayUnavailable> {
     })
 }
 
+fn today_discovery(exclusions: Vec<PathBuf>) -> Arc<dyn FileDiscovery> {
+    Arc::new(NativeFileDiscovery::new(exclusions))
+}
+
 #[tauri::command]
-pub fn get_today_snapshot(state: State<'_, AppState>) -> Result<TodayReady, TodayUnavailable> {
-    refresh(&state)
+pub async fn get_today_snapshot(
+    state: State<'_, AppState>,
+) -> Result<TodayReady, TodayUnavailable> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || refresh(&state))
+        .await
+        .map_err(|_| unavailable("读取今日文件时发生意外错误。"))?
 }
 #[tauri::command]
-pub fn refresh_today(state: State<'_, AppState>) -> Result<TodayReady, TodayUnavailable> {
-    refresh(&state)
+pub async fn refresh_today(state: State<'_, AppState>) -> Result<TodayReady, TodayUnavailable> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || refresh(&state))
+        .await
+        .map_err(|_| unavailable("刷新今日文件时发生意外错误。"))?
 }
 #[tauri::command]
 pub fn reveal_in_explorer(state: State<'_, AppState>, id: i64) -> Result<(), String> {
-    let (roots, exclusions, _, _) = rules(&state).map_err(|value| value.remediation)?;
+    let (roots, exclusions) = rules(&state).map_err(|value| value.remediation)?;
     ExplorerLauncher::new(
         state.database.files(),
         ScanPolicy::for_roots(exclusions, roots),
@@ -166,7 +164,7 @@ pub fn reveal_in_explorer(state: State<'_, AppState>, id: i64) -> Result<(), Str
 mod tests {
     use chrono::{Local, TimeZone, Timelike};
 
-    use super::bounds;
+    use super::{bounds, today_discovery};
 
     #[test]
     fn uses_local_calendar_midnights_for_today() {
@@ -182,5 +180,10 @@ mod tests {
         assert_eq!((start.hour(), start.minute(), start.second()), (0, 0, 0));
         assert_eq!((end.hour(), end.minute(), end.second()), (0, 0, 0));
         assert!(end > start);
+    }
+
+    #[test]
+    fn uses_native_discovery_without_an_everything_connection() {
+        assert_eq!(today_discovery(vec![]).name(), "native-file-system");
     }
 }
