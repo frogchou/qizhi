@@ -8,15 +8,20 @@ export interface QizhiCommands {
   getSettings(): Promise<MaskedServiceConfig[]>;
   saveSettings(input: ServiceConfigurationInput): Promise<MaskedServiceConfig>;
   testServiceConnection(
-    service: string,
-  ): Promise<{ available: boolean; message: string }>;
+    input: ServiceConfigurationInput,
+  ): Promise<ConnectionStatus>;
+  pickFolder(): Promise<string | null>;
   getEverythingStatus?(): Promise<EverythingStatus>;
   getTodaySnapshot(): Promise<TodaySnapshot>;
   refreshToday(): Promise<TodaySnapshot>;
   revealInExplorer(id: number): Promise<void>;
   listScanRules(): Promise<ScanRules>;
-  saveScanRules(input: Omit<ScanRules, "lockedExclusions">): Promise<ScanRules>;
+  saveScanRules(
+    input: Pick<ScanRules, "allowedRoots" | "customExclusions" | "esCliPath">,
+  ): Promise<ScanRules>;
 }
+
+export type ConnectionStatus = { available: boolean; message: string };
 
 export type EverythingStatus = {
   available: boolean;
@@ -64,6 +69,9 @@ export const unavailableCommands: QizhiCommands = {
   async testServiceConnection() {
     return { available: false, message: "桌面服务尚未连接" };
   },
+  async pickFolder() {
+    return null;
+  },
   async getTodaySnapshot() {
     return {
       state: "unavailable",
@@ -95,8 +103,9 @@ export const unavailableCommands: QizhiCommands = {
 export const tauriCommands: QizhiCommands = {
   getSettings: () => invoke("get_settings"),
   saveSettings: (input) => invoke("save_settings", { input }),
-  testServiceConnection: (service) =>
-    invoke("test_service_connection", { service }),
+  testServiceConnection: (input) =>
+    invoke("test_service_connection", { input }),
+  pickFolder: () => invoke("pick_folder"),
   getEverythingStatus: () => invoke("get_everything_status"),
   getTodaySnapshot: () => invoke("get_today_snapshot"),
   refreshToday: () => invoke("refresh_today"),

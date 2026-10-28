@@ -1,9 +1,12 @@
 import { defineConfig } from "@playwright/test";
 
+const port = Number(process.env.PLAYWRIGHT_PORT ?? 1420);
+const baseURL = `http://127.0.0.1:${port}`;
+
 export default defineConfig({
   testDir: "./e2e",
   use: {
-    baseURL: "http://127.0.0.1:1420",
+    baseURL,
     launchOptions: {
       executablePath:
         process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE ??
@@ -13,8 +16,8 @@ export default defineConfig({
     },
   },
   webServer: {
-    command: "pnpm exec vite --host 127.0.0.1",
-    url: "http://127.0.0.1:1420",
+    command: `pnpm exec vite --host 127.0.0.1 --port ${port}`,
+    url: baseURL,
     reuseExistingServer: !process.env.CI,
   },
 });

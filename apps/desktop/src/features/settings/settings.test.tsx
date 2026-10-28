@@ -15,6 +15,7 @@ describe("SettingsPage", () => {
         credentialReference: "qizhi/openai/default",
       }),
       testServiceConnection: vi.fn(),
+      pickFolder: vi.fn(),
       getTodaySnapshot: vi.fn(),
       refreshToday: vi.fn(),
       revealInExplorer: vi.fn(),
@@ -29,16 +30,16 @@ describe("SettingsPage", () => {
     };
 
     render(<SettingsPage commands={commands} />);
-    fireEvent.change(screen.getByLabelText("OpenAI API 地址"), {
+    fireEvent.change(screen.getByLabelText("OpenAI Base URL"), {
       target: { value: "https://example.test/v1" },
     });
     fireEvent.change(screen.getByLabelText("OpenAI API Key"), {
       target: { value: "test-secret-never-rendered" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "保存更改" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
 
     await waitFor(() => expect(commands.saveSettings).toHaveBeenCalledTimes(1));
-    expect(screen.getByText("••••••••")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("••••••••")).toBeInTheDocument();
     expect(
       screen.queryByDisplayValue("test-secret-never-rendered"),
     ).not.toBeInTheDocument();
@@ -49,6 +50,7 @@ describe("SettingsPage", () => {
       getSettings: vi.fn().mockResolvedValue([]),
       saveSettings: vi.fn(),
       testServiceConnection: vi.fn(),
+      pickFolder: vi.fn(),
       getTodaySnapshot: vi.fn(),
       refreshToday: vi.fn(),
       revealInExplorer: vi.fn(),
@@ -69,7 +71,9 @@ describe("SettingsPage", () => {
 
     render(<SettingsPage commands={commands} />);
 
-    expect(screen.getByText(/系统目录.*始终被排除/)).toBeInTheDocument();
-    expect(await screen.findByText(/未检测到 Everything/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/系统目录、AppData.*始终被排除/),
+    ).toBeInTheDocument();
+    expect(await screen.findByText("等待连接")).toBeInTheDocument();
   });
 });

@@ -19,12 +19,20 @@ pub fn run() {
             std::fs::create_dir_all(&data_dir).expect("create app data directory");
             let database =
                 database::Database::open(&data_dir.join("qizhi.db")).expect("open local database");
-            let scan_rules =
-                scan::configuration::ScanRuleStore::open(&data_dir.join("scan-rules.json"))
-                    .expect("open scan rules");
+            let scan_rules = scan::configuration::ScanRuleStore::open(
+                &data_dir.join("scan-rules.json"),
+                scan::configuration::ScanRules::defaults_for_current_user(),
+            )
+            .expect("open scan rules");
+            let everything_sdk_path = app
+                .path()
+                .resource_dir()
+                .expect("resource directory")
+                .join("Everything64.dll");
             app.manage(app_state::AppState {
                 database,
                 scan_rules,
+                everything_sdk_path,
             });
             Ok(())
         })
@@ -32,6 +40,7 @@ pub fn run() {
             commands::settings::get_settings,
             commands::settings::save_settings,
             commands::settings::test_service_connection,
+            commands::settings::pick_folder,
             commands::settings::get_everything_status,
             commands::settings::list_scan_rules,
             commands::settings::save_scan_rules,

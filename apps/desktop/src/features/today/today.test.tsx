@@ -24,6 +24,7 @@ function commands(snapshot: TodaySnapshot = readySnapshot): QizhiCommands {
     getSettings: vi.fn().mockResolvedValue([]),
     saveSettings: vi.fn(),
     testServiceConnection: vi.fn(),
+    pickFolder: vi.fn(),
     getTodaySnapshot: vi.fn().mockResolvedValue(snapshot),
     refreshToday: vi.fn().mockResolvedValue(snapshot),
     revealInExplorer: vi.fn().mockResolvedValue(undefined),

@@ -84,7 +84,7 @@ fn rules(state: &AppState) -> Result<ActiveRules, TodayUnavailable> {
     Ok((
         roots,
         exclusions,
-        rules.everything_sdk_path.map(PathBuf::from),
+        Some(state.everything_sdk_path.clone()),
         rules.es_cli_path.map(PathBuf::from),
     ))
 }

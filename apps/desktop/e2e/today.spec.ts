@@ -30,6 +30,15 @@ test.beforeEach(async ({ page }) => {
             remediation: "未检测到 Everything。",
           });
         if (command === "get_settings") return Promise.resolve([]);
+        if (command === "list_scan_rules")
+          return Promise.resolve({
+            allowedRoots: [],
+            customExclusions: [],
+            everythingSdkPath: null,
+            esCliPath: null,
+            lockedExclusions: [],
+          });
+        if (command === "pick_folder") return Promise.resolve(null);
         if (command === "reveal_in_explorer") return Promise.resolve();
         return Promise.resolve({ available: false, message: "后续版本启用" });
       },

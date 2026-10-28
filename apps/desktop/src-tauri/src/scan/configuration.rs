@@ -1,4 +1,4 @@
-use crate::database::AppError;
+use crate::{database::AppError, scan::policy::ScanPolicy};
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
@@ -24,6 +24,30 @@ pub struct ScanRules {
 }
 
 impl ScanRules {
+    pub fn defaults_for_current_user() -> Self {
+        let mut allowed_roots = Vec::new();
+        if let Some(profile) = std::env::var_os("USERPROFILE").map(PathBuf::from) {
+            for path in [
+                profile.join("Desktop"),
+                profile.join("Documents"),
+                profile.join("Pictures"),
+                profile,
+            ] {
+                if path.is_dir() {
+                    allowed_roots.push(path.to_string_lossy().to_string());
+                }
+            }
+        }
+        allowed_roots.extend(non_system_drive_roots());
+        allowed_roots.sort();
+        allowed_roots.dedup();
+        let policy = ScanPolicy::new(vec![]);
+        allowed_roots.retain(|root| policy.validate_root(Path::new(root)).is_ok());
+        Self {
+            allowed_roots,
+            ..Self::default()
+        }
+    }
     pub fn locked_exclusions(&self) -> Vec<String> {
         LOCKED_EXCLUSIONS
             .iter()
@@ -39,11 +63,14 @@ pub struct ScanRuleStore {
 }
 
 impl ScanRuleStore {
-    pub fn open(path: &Path) -> Result<Self, AppError> {
-        let rules = fs::read_to_string(path)
+    pub fn open(path: &Path, defaults: ScanRules) -> Result<Self, AppError> {
+        let mut rules = fs::read_to_string(path)
             .ok()
             .and_then(|value| serde_json::from_str(&value).ok())
-            .unwrap_or_default();
+            .unwrap_or_else(|| defaults.clone());
+        if rules.allowed_roots.is_empty() {
+            rules.allowed_roots = defaults.allowed_roots;
+        }
         Ok(Self {
             path: path.to_path_buf(),
             rules: Arc::new(Mutex::new(rules)),
@@ -61,4 +88,28 @@ impl ScanRuleStore {
         *self.rules.lock().map_err(|_| AppError::Storage)? = rules.clone();
         Ok(rules)
     }
+}
+
+#[cfg(windows)]
+fn non_system_drive_roots() -> Vec<String> {
+    unsafe extern "system" {
+        fn GetLogicalDrives() -> u32;
+    }
+    let mask = unsafe { GetLogicalDrives() };
+    (0..26)
+        .filter_map(|index| {
+            let bit = 1_u32 << index;
+            if mask & bit == 0 || index == 2 {
+                return None;
+            }
+            let letter = char::from_u32(u32::from(b'A') + index)?;
+            let root = format!("{letter}:\\");
+            Path::new(&root).is_dir().then_some(root)
+        })
+        .collect()
+}
+
+#[cfg(not(windows))]
+fn non_system_drive_roots() -> Vec<String> {
+    vec![]
 }

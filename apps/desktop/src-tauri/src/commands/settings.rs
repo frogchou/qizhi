@@ -67,11 +67,94 @@ pub struct ConnectionStatus {
 }
 
 #[tauri::command]
-pub fn test_service_connection(_state: State<'_, AppState>, _service: String) -> ConnectionStatus {
-    ConnectionStatus {
-        available: false,
-        message: "连接测试将在相应功能阶段启用。".to_owned(),
+pub fn test_service_connection(input: SaveSettingsInput) -> ConnectionStatus {
+    if input.service != "openai"
+        || input.api_key.trim().is_empty()
+        || input.api_key.contains(['\r', '\n', '"'])
+    {
+        return ConnectionStatus {
+            available: false,
+            message: "请先填写 OpenAI Base URL 和 API Key。".to_owned(),
+        };
     }
+    let Ok(mut base_url) = url::Url::parse(input.endpoint.trim()) else {
+        return ConnectionStatus {
+            available: false,
+            message: "Base URL 格式不正确。".to_owned(),
+        };
+    };
+    let base_path = base_url.path().trim_end_matches('/');
+    base_url.set_path(&format!("{base_path}/models"));
+    let config = format!(
+        "silent\nshow-error\noutput = \"NUL\"\nwrite-out = \"%{{http_code}}\"\nmax-time = 10\nheader = \"Authorization: Bearer {}\"\nurl = \"{}\"\n",
+        input.api_key, base_url
+    );
+    let mut child = match std::process::Command::new("curl.exe")
+        .arg("--config")
+        .arg("-")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+    {
+        Ok(value) => value,
+        Err(_) => {
+            return ConnectionStatus {
+                available: false,
+                message: "无法启动本机网络测试。".to_owned(),
+            };
+        }
+    };
+    use std::io::Write;
+    if child
+        .stdin
+        .take()
+        .is_none_or(|mut stdin| stdin.write_all(config.as_bytes()).is_err())
+    {
+        return ConnectionStatus {
+            available: false,
+            message: "无法安全写入连接测试请求。".to_owned(),
+        };
+    }
+    match child.wait_with_output() {
+        Ok(value) if value.status.success() && value.stdout == b"200" => ConnectionStatus {
+            available: true,
+            message: "OpenAI API 连接正常。".to_owned(),
+        },
+        Ok(value) => ConnectionStatus {
+            available: false,
+            message: format!(
+                "连接未通过{}。",
+                String::from_utf8_lossy(&value.stdout)
+                    .trim()
+                    .strip_prefix('0')
+                    .map(|code| format!("（HTTP {code}）"))
+                    .unwrap_or_default()
+            ),
+        },
+        Err(_) => ConnectionStatus {
+            available: false,
+            message: "无法连接 Base URL，请检查网络、地址和代理设置。".to_owned(),
+        },
+    }
+}
+
+#[tauri::command]
+pub fn pick_folder() -> Result<Option<String>, String> {
+    let output = std::process::Command::new("powershell.exe")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "Add-Type -AssemblyName System.Windows.Forms; $dialog = New-Object System.Windows.Forms.FolderBrowserDialog; if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.Write($dialog.SelectedPath) }",
+        ])
+        .output()
+        .map_err(|_| "folder_picker_unavailable".to_owned())?;
+    if !output.status.success() {
+        return Err("folder_picker_unavailable".to_owned());
+    }
+    let path = String::from_utf8(output.stdout).map_err(|_| "folder_picker_invalid".to_owned())?;
+    Ok((!path.trim().is_empty()).then_some(path.trim().to_owned()))
 }
 
 #[derive(Serialize)]
@@ -94,7 +177,7 @@ pub fn get_everything_status(state: State<'_, AppState>) -> EverythingStatus {
         }
     };
     let adapter = select_discovery_with_paths(
-        rules.everything_sdk_path.map(std::path::PathBuf::from),
+        Some(state.everything_sdk_path.clone()),
         rules.es_cli_path.map(std::path::PathBuf::from),
     );
     let health = adapter.health();
@@ -110,7 +193,6 @@ pub fn get_everything_status(state: State<'_, AppState>) -> EverythingStatus {
 pub struct SaveScanRulesInput {
     allowed_roots: Vec<String>,
     custom_exclusions: Vec<String>,
-    everything_sdk_path: Option<String>,
     es_cli_path: Option<String>,
 }
 
@@ -172,7 +254,7 @@ pub fn save_scan_rules(
                 .map(|root| root.0.to_string_lossy().to_string())
                 .collect(),
             custom_exclusions: input.custom_exclusions,
-            everything_sdk_path: input.everything_sdk_path,
+            everything_sdk_path: None,
             es_cli_path: input.es_cli_path,
         })
         .map(rules_output)
