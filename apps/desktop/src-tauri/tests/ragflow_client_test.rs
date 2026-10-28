@@ -107,3 +107,8 @@ fn explains_when_an_agent_cannot_reach_its_own_model_service() {
         "所选 Agent 无法连接其配置的大模型服务，请在 RAGFlow 中检查该 Agent 的模型 Base URL、密钥和代理设置。"
     );
 }
+
+#[test]
+fn gives_agent_workflows_a_longer_response_window_than_simple_api_calls() {
+    assert_eq!(RagflowClient::agent_request_timeout().as_secs(), 120);
+}

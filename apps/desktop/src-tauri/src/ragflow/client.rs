@@ -217,7 +217,10 @@ impl RagflowClient {
         })
         .to_string();
         let url = self.api_url("/api/v1/agents/chat/completions")?;
-        Self::parse_agent_answer(agent_id, &self.request("POST", url, Some(body))?)
+        Self::parse_agent_answer(
+            agent_id,
+            &self.request_with_timeout("POST", url, Some(body), Self::agent_request_timeout())?,
+        )
     }
 
     pub fn download_document(
@@ -367,6 +370,10 @@ impl RagflowClient {
         })
     }
 
+    pub fn agent_request_timeout() -> Duration {
+        Duration::from_secs(120)
+    }
+
     fn api_url(&self, suffix: &str) -> Result<String, String> {
         let mut url = self.base_url.clone();
         let (path, query) = suffix.split_once('?').unwrap_or((suffix, ""));
@@ -377,14 +384,20 @@ impl RagflowClient {
     }
 
     fn request(&self, method: &str, url: String, body: Option<String>) -> Result<String, String> {
+        self.request_with_timeout(method, url, body, Duration::from_secs(30))
+    }
+
+    fn request_with_timeout(
+        &self,
+        method: &str,
+        url: String,
+        body: Option<String>,
+        timeout: Duration,
+    ) -> Result<String, String> {
         let method = reqwest::Method::from_bytes(method.as_bytes())
             .map_err(|_| "RAGFlow 请求方法无效。".to_owned())?;
-        let transport = HttpClient::with_timeout(Duration::from_secs(30))?.request_bearer(
-            method,
-            &url,
-            &self.api_key,
-            body,
-        )?;
+        let transport =
+            HttpClient::with_timeout(timeout)?.request_bearer(method, &url, &self.api_key, body)?;
         if !(200..300).contains(&transport.status) {
             return Err(format!("RAGFlow 连接未通过（HTTP {}）。", transport.status));
         }

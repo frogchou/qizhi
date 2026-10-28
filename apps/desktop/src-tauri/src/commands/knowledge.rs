@@ -307,6 +307,20 @@ pub async fn query_ragflow_knowledge(
                     .iter()
                     .filter(|item| item.error.is_some())
                     .count();
+                for agent_result in output
+                    .agent_results
+                    .iter()
+                    .filter(|item| item.error.is_some())
+                {
+                    state.logger.error(
+                        "ragflow",
+                        &format!(
+                            "RAGFlow Agent {} failed: {}",
+                            agent_result.agent_id,
+                            agent_result.error.as_deref().unwrap_or_default()
+                        ),
+                    );
+                }
                 state.logger.info(
                     "ragflow",
                     &format!(

@@ -40,9 +40,7 @@ impl HttpClient {
                 .header(reqwest::header::CONTENT_TYPE, "application/json")
                 .body(body);
         }
-        let response = request
-            .send()
-            .map_err(|_| "无法连接 Base URL，请检查网络、地址和代理设置。".to_owned())?;
+        let response = request.send().map_err(transport_error)?;
         let status = response.status().as_u16();
         let body = response
             .text()
@@ -61,12 +59,20 @@ impl HttpClient {
             .request(method, url)
             .bearer_auth(api_key)
             .send()
-            .map_err(|_| "无法连接 Base URL，请检查网络、地址和代理设置。".to_owned())?;
+            .map_err(transport_error)?;
         let status = response.status().as_u16();
         let body = response
             .bytes()
             .map_err(|_| "无法读取服务返回的文件。".to_owned())?
             .to_vec();
         Ok(HttpBytesResponse { status, body })
+    }
+}
+
+fn transport_error(error: reqwest::Error) -> String {
+    if error.is_timeout() {
+        "RAGFlow 请求超时，请稍后重试。".to_owned()
+    } else {
+        "无法连接 Base URL，请检查网络、地址和代理设置。".to_owned()
     }
 }
