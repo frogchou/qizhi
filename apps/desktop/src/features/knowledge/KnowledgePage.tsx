@@ -1,6 +1,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
 
+import { BreakableText } from "../../components/BreakableText";
 import { StatusNotice } from "../../components/StatusNotice";
 import type {
   QizhiCommands,
@@ -269,9 +270,13 @@ function ConversationAnswer({
                     agentResult.error ? "agent-error" : "knowledge-answer"
                   }
                 >
-                  {agentResult.error ??
-                    agentResult.answer ??
-                    "未返回回答内容。"}
+                  <BreakableText
+                    value={
+                      agentResult.error ??
+                      agentResult.answer ??
+                      "未返回回答内容。"
+                    }
+                  />
                 </p>
               </section>
             );

@@ -95,6 +95,30 @@ describe("TodayPage", () => {
     ).toBeInTheDocument();
   });
 
+  it("keeps a long selected filename inside the detail panel", async () => {
+    const longName = `${"x".repeat(120)}.txt`;
+    render(
+      <TodayPage
+        commands={commands({
+          ...readySnapshot,
+          files: [
+            {
+              ...readySnapshot.files[0],
+              canonicalPath: `D:\\工作\\${longName}`,
+            },
+          ],
+        })}
+      />,
+    );
+
+    fireEvent.click(await screen.findByText(longName));
+    const detailName = document.querySelector(".detail-panel h2");
+    if (!detailName) throw new Error("未渲染文件详情标题");
+    expect(detailName).toHaveAttribute("title", longName);
+    expect(detailName.textContent).toBe(longName);
+    expect(detailName.querySelectorAll("wbr")).toHaveLength(2);
+  });
+
   it("keeps the cached today view usable while a background refresh is running", async () => {
     let completeRefresh: ((value: TodaySnapshot) => void) | undefined;
     const client = commands({ state: "ready", files: [], clusters: [] });

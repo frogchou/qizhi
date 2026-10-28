@@ -277,10 +277,16 @@ h2 {
   white-space: nowrap;
 }
 .detail-panel {
+  min-width: 0;
+  overflow: hidden;
   padding: 22px;
 }
 .detail-panel h2 {
   line-height: 1.35;
+}
+.detail-file-name {
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .empty {
   color: #77837c;
@@ -679,11 +685,14 @@ h2 {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  min-width: 0;
   position: relative;
 }
 .conversation-scroll {
   flex: 1;
   min-height: 0;
+  min-width: 0;
+  overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: 4px 16px 18px 0;
@@ -773,7 +782,13 @@ h2 {
   border-top: 1px solid #e6ebe7;
   margin: 0 auto;
   max-width: 890px;
+  min-width: 0;
   padding-top: 22px;
+}
+.conversation-turn,
+.assistant-panel,
+.agent-answer {
+  min-width: 0;
 }
 .conversation-turn + .conversation-turn {
   border-top: 1px solid #e7ece8;
@@ -880,6 +895,7 @@ h2 {
   font-size: 14px;
   line-height: 1.8;
   margin: 8px 0 0;
+  overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
 .agent-error {

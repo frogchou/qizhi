@@ -118,6 +118,32 @@ describe("KnowledgePage", () => {
     expect(document.querySelector(".conversation-follow-up")).toBeTruthy();
   });
 
+  it("wraps an unbroken Agent response without adding a horizontal conversation scrollbar", async () => {
+    const client = commands();
+    const longResponse = "x".repeat(120);
+    client.queryRagflowKnowledge = vi.fn().mockResolvedValue({
+      chunks: [],
+      agentResults: [
+        { agentId: "agent-work", answer: longResponse, error: null },
+      ],
+    });
+    render(<KnowledgePage commands={client} />);
+    await selectResources();
+
+    fireEvent.change(screen.getByLabelText("询问你的工作知识库"), {
+      target: { value: "超长回答" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "发送问题" }));
+
+    await waitFor(() =>
+      expect(document.querySelector(".knowledge-answer")).toBeInTheDocument(),
+    );
+    const answer = document.querySelector(".knowledge-answer");
+    if (!answer) throw new Error("未渲染 Agent 回答");
+    expect(answer.textContent).toBe(longResponse);
+    expect(answer.querySelectorAll("wbr")).toHaveLength(2);
+  });
+
   it("adds a follow-up question instead of replacing the existing conversation", async () => {
     const client = commands();
     render(<KnowledgePage commands={client} />);

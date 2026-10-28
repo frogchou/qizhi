@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { BreakableText } from "../../components/BreakableText";
 import { StatusNotice } from "../../components/StatusNotice";
 import type {
   QizhiCommands,
@@ -247,6 +248,13 @@ export function TodayPage({ commands }: { commands: QizhiCommands }) {
         return factor * (left.modifiedAtUtcMs - right.modifiedAtUtcMs);
       });
   }, [category, query, snapshot, sort]);
+  const selectedFilename =
+    selected === null
+      ? null
+      : filename(
+          snapshot?.files.find((file) => file.id === selected)?.canonicalPath ??
+            "",
+        );
   async function locate() {
     if (selected === null) return;
     try {
@@ -416,13 +424,11 @@ export function TodayPage({ commands }: { commands: QizhiCommands }) {
         </div>
         <aside className="detail-panel">
           <p className="eyebrow">选择文件</p>
-          <h2>
-            {selected === null
-              ? "查看文件上下文"
-              : filename(
-                  snapshot.files.find((file) => file.id === selected)
-                    ?.canonicalPath ?? "",
-                )}
+          <h2
+            className="detail-file-name"
+            title={selectedFilename ?? undefined}
+          >
+            <BreakableText value={selectedFilename ?? "查看文件上下文"} />
           </h2>
           <p className="muted">
             本版本只记录安全的文件元信息，不读取或上传内容。
