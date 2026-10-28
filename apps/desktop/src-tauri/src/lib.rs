@@ -4,6 +4,7 @@ pub mod config;
 pub mod contracts;
 pub mod database;
 pub mod discovery;
+pub mod network;
 pub mod ragflow;
 pub mod scan;
 pub mod system;
@@ -51,6 +52,10 @@ pub fn run() {
             commands::today::get_today_scan_status,
             commands::today::refresh_today,
             commands::today::reveal_in_explorer,
+            commands::today::open_file,
+            commands::today::open_file_in_text_editor,
+            commands::today::copy_file_to_clipboard,
+            commands::today::delete_file,
             commands::knowledge::list_ragflow_chats,
             commands::knowledge::ask_ragflow_chat,
         ])

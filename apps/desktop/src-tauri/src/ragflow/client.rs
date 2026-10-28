@@ -1,4 +1,4 @@
-use std::{io::Write, process::Stdio};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -7,6 +7,7 @@ use url::Url;
 use crate::{
     config::{SecretStore, secret_store::WindowsCredentialStore},
     database::repositories::ConfigRepository,
+    network::http::HttpClient,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -131,62 +132,19 @@ impl RagflowClient {
     }
 
     fn request(&self, method: &str, url: String, body: Option<String>) -> Result<String, String> {
-        let payload = serde_json::json!({
-            "method": method,
-            "url": url,
-            "api_key": self.api_key,
-            "body": body,
-        })
-        .to_string();
-        let script = r#"
-$payload = [Console]::In.ReadToEnd() | ConvertFrom-Json
-$client = New-Object System.Net.Http.HttpClient
-try {
-  $client.Timeout = [TimeSpan]::FromSeconds(30)
-  $request = New-Object System.Net.Http.HttpRequestMessage($payload.method, $payload.url)
-  $request.Headers.TryAddWithoutValidation('Authorization', "Bearer $($payload.api_key)") | Out-Null
-  if ($null -ne $payload.body) {
-    $request.Content = New-Object System.Net.Http.StringContent($payload.body, [Text.Encoding]::UTF8, 'application/json')
-  }
-  $response = $client.SendAsync($request).GetAwaiter().GetResult()
-  $result = @{ status = [int]$response.StatusCode; body = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult() } | ConvertTo-Json -Compress
-  [Console]::Out.Write($result)
-} finally {
-  $client.Dispose()
-}
-"#;
-        let mut child = std::process::Command::new("powershell.exe")
-            .args(["-NoProfile", "-NonInteractive", "-Command", script])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .map_err(|_| "无法启动 RAGFlow 网络请求。".to_owned())?;
-        child
-            .stdin
-            .take()
-            .ok_or_else(|| "无法安全发送 RAGFlow 请求。".to_owned())?
-            .write_all(payload.as_bytes())
-            .map_err(|_| "无法安全发送 RAGFlow 请求。".to_owned())?;
-        let output = child
-            .wait_with_output()
-            .map_err(|_| "RAGFlow 请求未完成。".to_owned())?;
-        if !output.status.success() {
-            return Err("RAGFlow 请求未完成。".to_owned());
-        }
-        let transport = serde_json::from_slice::<TransportResult>(&output.stdout)
-            .map_err(|_| "RAGFlow 返回了无法识别的网络响应。".to_owned())?;
+        let method = reqwest::Method::from_bytes(method.as_bytes())
+            .map_err(|_| "RAGFlow 请求方法无效。".to_owned())?;
+        let transport = HttpClient::with_timeout(Duration::from_secs(30))?.request_bearer(
+            method,
+            &url,
+            &self.api_key,
+            body,
+        )?;
         if !(200..300).contains(&transport.status) {
             return Err(format!("RAGFlow 连接未通过（HTTP {}）。", transport.status));
         }
         Ok(transport.body)
     }
-}
-
-#[derive(Deserialize)]
-struct TransportResult {
-    status: u16,
-    body: String,
 }
 
 fn parse_envelope(body: &str) -> Result<Envelope, String> {
@@ -196,4 +154,14 @@ fn parse_envelope(body: &str) -> Result<Envelope, String> {
         return Err(format!("RAGFlow：{}", envelope.message));
     }
     Ok(envelope)
+}
+
+#[cfg(test)]
+mod transport_tests {
+    #[test]
+    fn ragflow_transport_never_starts_a_shell_process() {
+        let source = include_str!("client.rs").to_ascii_lowercase();
+        assert!(!source.contains(&["power", "shell.exe"].concat()));
+        assert!(!source.contains(&["command", "::new"].concat()));
+    }
 }

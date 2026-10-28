@@ -41,6 +41,8 @@ function wildcardMatches(value: string, query: string) {
   return new RegExp(`^${pattern}$`, "i").test(value);
 }
 
+type FileMenu = { id: number; x: number; y: number };
+
 const SOURCE_EXTENSIONS = new Set([
   "rs",
   "py",
@@ -89,6 +91,7 @@ export function TodayPage({ commands }: { commands: QizhiCommands }) {
     "all",
   );
   const [sort, setSort] = useState("time-desc");
+  const [fileMenu, setFileMenu] = useState<FileMenu | null>(null);
 
   useEffect(() => {
     commands
@@ -121,6 +124,12 @@ export function TodayPage({ commands }: { commands: QizhiCommands }) {
       window.clearInterval(timer);
     };
   }, [busy, commands]);
+  useEffect(() => {
+    if (!fileMenu) return;
+    const close = () => setFileMenu(null);
+    window.addEventListener("pointerdown", close);
+    return () => window.removeEventListener("pointerdown", close);
+  }, [fileMenu]);
   async function refresh() {
     setBusy(true);
     setNotice(null);
@@ -187,6 +196,43 @@ export function TodayPage({ commands }: { commands: QizhiCommands }) {
     }
   }
 
+  async function fileAction(
+    action: "open" | "text" | "reveal" | "copy" | "delete",
+    id: number,
+  ) {
+    setFileMenu(null);
+    try {
+      if (action === "open") await commands.openFile(id);
+      if (action === "text") await commands.openFileInTextEditor(id);
+      if (action === "reveal") await commands.revealInExplorer(id);
+      if (action === "copy") await commands.copyFileToClipboard(id);
+      if (action === "delete") {
+        if (!window.confirm("确定要永久删除这个文件吗？此操作无法撤销。"))
+          return;
+        await commands.deleteFile(id);
+        setSelected(null);
+        setSnapshot(await commands.getTodaySnapshot());
+      }
+      setNotice(
+        action === "open"
+          ? "已使用系统默认程序打开文件。"
+          : action === "text"
+            ? "已使用文本编辑器打开文件。"
+            : action === "reveal"
+              ? "已在资源管理器中定位文件。"
+              : action === "copy"
+                ? "文件已复制到剪贴板。"
+                : "文件已删除。",
+      );
+    } catch {
+      setNotice(
+        action === "delete"
+          ? "无法删除该文件，它可能已移动、被占用或不再允许访问。"
+          : "无法完成文件操作，它可能已移动或不再允许访问。",
+      );
+    }
+  }
+
   if (!snapshot)
     return (
       <section className="page loading">
@@ -209,7 +255,7 @@ export function TodayPage({ commands }: { commands: QizhiCommands }) {
       </section>
     );
   return (
-    <section className="page">
+    <section className="page today-page">
       <header className="page-header">
         <div>
           <p className="eyebrow">今日工作空间</p>
@@ -282,6 +328,15 @@ export function TodayPage({ commands }: { commands: QizhiCommands }) {
                       selected === file.id ? "file-row selected" : "file-row"
                     }
                     onClick={() => setSelected(file.id)}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      setSelected(file.id);
+                      setFileMenu({
+                        id: file.id,
+                        x: event.clientX,
+                        y: event.clientY,
+                      });
+                    }}
                   >
                     <span className="file-icon">▤</span>
                     <span className="file-name">
@@ -335,6 +390,46 @@ export function TodayPage({ commands }: { commands: QizhiCommands }) {
           </div>
         ))}
       </section>
+      {fileMenu ? (
+        <div
+          className="file-context-menu"
+          role="menu"
+          style={{ left: fileMenu.x, top: fileMenu.y }}
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <button
+            role="menuitem"
+            onClick={() => void fileAction("open", fileMenu.id)}
+          >
+            打开文件
+          </button>
+          <button
+            role="menuitem"
+            onClick={() => void fileAction("text", fileMenu.id)}
+          >
+            使用文本编辑器打开
+          </button>
+          <button
+            role="menuitem"
+            onClick={() => void fileAction("reveal", fileMenu.id)}
+          >
+            打开文件所在位置
+          </button>
+          <button
+            role="menuitem"
+            onClick={() => void fileAction("copy", fileMenu.id)}
+          >
+            复制文件
+          </button>
+          <button
+            className="danger"
+            role="menuitem"
+            onClick={() => void fileAction("delete", fileMenu.id)}
+          >
+            删除文件
+          </button>
+        </div>
+      ) : null}
     </section>
   );
 }

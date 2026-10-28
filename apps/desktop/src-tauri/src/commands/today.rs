@@ -221,14 +221,46 @@ pub async fn refresh_today(state: State<'_, AppState>) -> Result<TodayReady, Tod
 }
 #[tauri::command]
 pub fn reveal_in_explorer(state: State<'_, AppState>, id: i64) -> Result<(), String> {
+    launcher(&state)?
+        .reveal(id)
+        .map_err(|error| error.code().to_owned())
+}
+
+#[tauri::command]
+pub fn open_file(state: State<'_, AppState>, id: i64) -> Result<(), String> {
+    launcher(&state)?
+        .open(id)
+        .map_err(|error| error.code().to_owned())
+}
+
+#[tauri::command]
+pub fn open_file_in_text_editor(state: State<'_, AppState>, id: i64) -> Result<(), String> {
+    launcher(&state)?
+        .open_in_text_editor(id)
+        .map_err(|error| error.code().to_owned())
+}
+
+#[tauri::command]
+pub fn copy_file_to_clipboard(state: State<'_, AppState>, id: i64) -> Result<(), String> {
+    launcher(&state)?
+        .copy_to_clipboard(id)
+        .map_err(|error| error.code().to_owned())
+}
+
+#[tauri::command]
+pub fn delete_file(state: State<'_, AppState>, id: i64) -> Result<(), String> {
+    launcher(&state)?
+        .delete(id)
+        .map_err(|error| error.code().to_owned())
+}
+
+fn launcher(state: &AppState) -> Result<ExplorerLauncher, String> {
     let (roots, exclusions, _) = rules(&state).map_err(|value| value.remediation)?;
-    ExplorerLauncher::new(
+    Ok(ExplorerLauncher::new(
         state.database.files(),
         ScanPolicy::for_roots(exclusions, roots),
         Arc::new(WindowsProcessLauncher),
-    )
-    .reveal(id)
-    .map_err(|error| error.code().to_owned())
+    ))
 }
 
 #[cfg(test)]

@@ -1,10 +1,12 @@
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 use tauri::State;
 
 use crate::{
     app_state::AppState,
     config::{ConfigService, ServiceConfigurationInput, secret_store::WindowsCredentialStore},
     discovery::selector::select_discovery_with_paths,
+    network::http::HttpClient,
     scan::{
         configuration::ScanRules,
         file_filter::{FileCategory, default_file_categories},
@@ -96,41 +98,17 @@ pub fn test_service_connection(input: SaveSettingsInput) -> ConnectionStatus {
         }
         _ => unreachable!("service validated above"),
     }
-    let config = format!(
-        "silent\nshow-error\nwrite-out = \"\\n%{{http_code}}\"\nmax-time = 10\nheader = \"Authorization: Bearer {}\"\nurl = \"{}\"\n",
-        input.api_key, base_url
-    );
-    let mut child = match std::process::Command::new("curl.exe")
-        .arg("--config")
-        .arg("-")
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-    {
-        Ok(value) => value,
-        Err(_) => {
-            return ConnectionStatus {
-                available: false,
-                message: "无法启动本机网络测试。".to_owned(),
-            };
-        }
-    };
-    use std::io::Write;
-    if child
-        .stdin
-        .take()
-        .is_none_or(|mut stdin| stdin.write_all(config.as_bytes()).is_err())
-    {
-        return ConnectionStatus {
-            available: false,
-            message: "无法安全写入连接测试请求。".to_owned(),
-        };
-    }
-    match child.wait_with_output() {
-        Ok(value) => {
-            let (body, status) = split_connection_response(&value.stdout);
-            if value.status.success() && connection_is_usable(&input.service, status, body) {
+    match HttpClient::with_timeout(Duration::from_secs(10)).and_then(|client| {
+        client.request_bearer(
+            reqwest::Method::GET,
+            base_url.as_str(),
+            &input.api_key,
+            None,
+        )
+    }) {
+        Ok(response) => {
+            let status = response.status.to_string();
+            if connection_is_usable(&input.service, &status, &response.body) {
                 return ConnectionStatus {
                     available: true,
                     message: match input.service.as_str() {
@@ -151,18 +129,11 @@ pub fn test_service_connection(input: SaveSettingsInput) -> ConnectionStatus {
                 ),
             }
         }
-        Err(_) => ConnectionStatus {
+        Err(message) => ConnectionStatus {
             available: false,
-            message: "无法连接 Base URL，请检查网络、地址和代理设置。".to_owned(),
+            message,
         },
     }
-}
-
-fn split_connection_response(output: &[u8]) -> (&str, &str) {
-    let text = std::str::from_utf8(output).unwrap_or_default();
-    text.rsplit_once('\n')
-        .map(|(body, status)| (body, status.trim()))
-        .unwrap_or(("", text.trim()))
 }
 
 fn connection_is_usable(service: &str, status: &str, body: &str) -> bool {
@@ -179,6 +150,12 @@ fn connection_is_usable(service: &str, status: &str, body: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::connection_is_usable;
+
+    #[test]
+    fn connection_tests_do_not_delegate_http_to_curl() {
+        let source = include_str!("settings.rs").to_ascii_lowercase();
+        assert!(!source.contains(&["curl", ".exe"].concat()));
+    }
 
     #[test]
     fn rejects_a_ragflow_business_error_with_an_http_success_status() {

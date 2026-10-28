@@ -19,6 +19,10 @@ describe("SettingsPage", () => {
       getTodaySnapshot: vi.fn(),
       refreshToday: vi.fn(),
       revealInExplorer: vi.fn(),
+      openFile: vi.fn(),
+      openFileInTextEditor: vi.fn(),
+      copyFileToClipboard: vi.fn(),
+      deleteFile: vi.fn(),
       listScanRules: vi.fn().mockResolvedValue({
         allowedRoots: [],
         customExclusions: [],
@@ -55,6 +59,10 @@ describe("SettingsPage", () => {
       getTodaySnapshot: vi.fn(),
       refreshToday: vi.fn(),
       revealInExplorer: vi.fn(),
+      openFile: vi.fn(),
+      openFileInTextEditor: vi.fn(),
+      copyFileToClipboard: vi.fn(),
+      deleteFile: vi.fn(),
       listScanRules: vi.fn().mockResolvedValue({
         allowedRoots: [],
         customExclusions: [],
@@ -91,6 +99,10 @@ describe("SettingsPage", () => {
       getTodaySnapshot: vi.fn(),
       refreshToday: vi.fn(),
       revealInExplorer: vi.fn(),
+      openFile: vi.fn(),
+      openFileInTextEditor: vi.fn(),
+      copyFileToClipboard: vi.fn(),
+      deleteFile: vi.fn(),
       listScanRules: vi.fn().mockResolvedValue({
         allowedRoots: ["D:\\Work"],
         customExclusions: [],
@@ -131,6 +143,10 @@ describe("SettingsPage", () => {
       getTodaySnapshot: vi.fn(),
       refreshToday: vi.fn(),
       revealInExplorer: vi.fn(),
+      openFile: vi.fn(),
+      openFileInTextEditor: vi.fn(),
+      copyFileToClipboard: vi.fn(),
+      deleteFile: vi.fn(),
       listScanRules: vi.fn().mockResolvedValue({
         allowedRoots: [],
         customExclusions: [],

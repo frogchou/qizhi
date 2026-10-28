@@ -43,7 +43,13 @@ function App({ commands = unavailableCommands }: { commands?: QizhiCommands }) {
   return (
     <main className="app-shell">
       <AppSidebar active={route} onNavigate={setRoute} />
-      <div className="workspace">{content}</div>
+      <div
+        className={
+          route === "today" ? "workspace today-workspace" : "workspace"
+        }
+      >
+        {content}
+      </div>
     </main>
   );
 }

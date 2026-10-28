@@ -13,6 +13,10 @@ function commands(): QizhiCommands {
     getTodaySnapshot: vi.fn(),
     refreshToday: vi.fn(),
     revealInExplorer: vi.fn(),
+    openFile: vi.fn(),
+    openFileInTextEditor: vi.fn(),
+    copyFileToClipboard: vi.fn(),
+    deleteFile: vi.fn(),
     listScanRules: vi.fn(),
     saveScanRules: vi.fn(),
     listRagflowChats: vi.fn().mockResolvedValue([

@@ -1,7 +1,9 @@
 :root {
-  color: #1e2d27;
-  background: #f8faf8;
-  font-family: "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+  color: #172c25;
+  background: #f7faf8;
+  font-family:
+    "Segoe UI Variable", "Microsoft YaHei UI", "Microsoft YaHei", system-ui,
+    sans-serif;
 }
 * {
   box-sizing: border-box;
@@ -9,6 +11,10 @@
 body {
   margin: 0;
   min-width: 1024px;
+  overflow: hidden;
+}
+#root {
+  height: 100vh;
 }
 button,
 input {
@@ -26,9 +32,10 @@ button:disabled {
   opacity: 0.5;
 }
 .app-shell {
-  background: #f8faf8;
+  background: #f7faf8;
   display: flex;
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
 }
 .sidebar {
   background: #fff;
@@ -37,26 +44,28 @@ button:disabled {
   display: flex;
   flex: 0 0 228px;
   flex-direction: column;
-  min-height: 100vh;
-  padding: 26px 16px;
+  height: 100vh;
+  overflow: hidden;
+  padding: 28px 16px 22px;
 }
 .brand {
   align-items: center;
   display: flex;
-  font-size: 22px;
+  font-size: 23px;
   font-weight: 700;
   gap: 10px;
-  margin: 0 10px 44px;
+  letter-spacing: -0.04em;
+  margin: 0 10px 46px;
 }
 .brand-mark {
   align-items: center;
   background: #183d34;
-  border-radius: 9px;
+  border-radius: 10px;
   color: #fff;
   display: inline-flex;
   font-family: Georgia, serif;
-  font-size: 17px;
-  height: 29px;
+  font-size: 18px;
+  height: 30px;
   justify-content: center;
   width: 29px;
 }
@@ -71,9 +80,19 @@ nav {
   color: #63736b;
   display: flex;
   font-size: 15px;
+  font-weight: 500;
   gap: 12px;
-  padding: 12px 14px;
+  padding: 12px 13px;
   text-align: left;
+}
+.nav-item svg {
+  fill: none;
+  height: 17px;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.7;
+  width: 17px;
 }
 .nav-item:hover,
 .nav-item.active {
@@ -87,9 +106,14 @@ nav {
   margin: auto 12px 4px;
 }
 .workspace {
+  flex: 1;
+  height: 100vh;
   min-width: 0;
-  padding: 42px 54px;
-  width: 100%;
+  overflow: auto;
+  padding: 38px 48px;
+}
+.workspace.today-workspace {
+  overflow: hidden;
 }
 .page {
   margin: 0 auto;
@@ -99,7 +123,7 @@ nav {
   align-items: flex-start;
   display: flex;
   justify-content: space-between;
-  margin-bottom: 30px;
+  margin-bottom: 24px;
 }
 .eyebrow {
   color: #397061;
@@ -110,7 +134,7 @@ nav {
   text-transform: uppercase;
 }
 h1 {
-  font-size: 30px;
+  font-size: 31px;
   letter-spacing: -0.04em;
   margin: 0;
 }
@@ -155,6 +179,8 @@ h2 {
   display: grid;
   gap: 18px;
   grid-template-columns: minmax(460px, 1fr) 290px;
+  height: min(54vh, 590px);
+  min-height: 340px;
 }
 .file-panel,
 .detail-panel,
@@ -165,6 +191,12 @@ h2 {
   border: 1px solid #e1e7e1;
   border-radius: 12px;
   box-shadow: 0 9px 24px rgb(25 55 43 / 4%);
+}
+.file-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
 }
 .panel-title {
   border-bottom: 1px solid #edf0ec;
@@ -194,8 +226,12 @@ h2 {
   padding: 8px 10px;
 }
 .file-list {
+  flex: 1;
   list-style: none;
   margin: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 0;
 }
 .file-row {
@@ -252,8 +288,8 @@ h2 {
   padding: 28px 18px;
 }
 .timeline {
-  margin-top: 20px;
-  padding: 20px 22px;
+  margin-top: 18px;
+  padding: 17px 20px;
 }
 .timeline-item {
   align-items: flex-start;
@@ -509,6 +545,35 @@ h2 {
   line-height: 1.8;
   margin: 0;
   white-space: pre-wrap;
+}
+.file-context-menu {
+  background: #fff;
+  border: 1px solid #dce5de;
+  border-radius: 9px;
+  box-shadow: 0 14px 32px rgb(27 53 43 / 16%);
+  display: grid;
+  min-width: 178px;
+  overflow: hidden;
+  position: fixed;
+  transform: translate(4px, 4px);
+  z-index: 10;
+}
+.file-context-menu button {
+  background: #fff;
+  border: 0;
+  color: #28473d;
+  font-size: 13px;
+  padding: 10px 13px;
+  text-align: left;
+}
+.file-context-menu button:hover {
+  background: #edf6f0;
+}
+.file-context-menu button.danger {
+  color: #aa4939;
+}
+.file-context-menu button.danger:hover {
+  background: #fff2ef;
 }
 @media (max-width: 980px) {
   .file-controls {

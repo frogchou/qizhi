@@ -28,6 +28,10 @@ function commands(snapshot: TodaySnapshot = readySnapshot): QizhiCommands {
     getTodaySnapshot: vi.fn().mockResolvedValue(snapshot),
     refreshToday: vi.fn().mockResolvedValue(snapshot),
     revealInExplorer: vi.fn().mockResolvedValue(undefined),
+    openFile: vi.fn().mockResolvedValue(undefined),
+    openFileInTextEditor: vi.fn().mockResolvedValue(undefined),
+    copyFileToClipboard: vi.fn().mockResolvedValue(undefined),
+    deleteFile: vi.fn().mockResolvedValue(undefined),
     listScanRules: vi.fn().mockResolvedValue({
       allowedRoots: [],
       customExclusions: [],
@@ -194,5 +198,34 @@ describe("TodayPage", () => {
       expect.stringContaining("周报.docx"),
       expect.stringContaining("analysis.py"),
     ]);
+  });
+
+  it("offers native file actions from a file row context menu", async () => {
+    const client = commands();
+    render(<TodayPage commands={client} />);
+    const file = await screen.findByText("周报.docx");
+
+    fireEvent.contextMenu(file);
+
+    expect(
+      screen.getByRole("menuitem", { name: "打开文件" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("menuitem", { name: "使用文本编辑器打开" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("menuitem", { name: "打开文件所在位置" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("menuitem", { name: "复制文件" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("menuitem", { name: "删除文件" }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "复制文件" }));
+    await waitFor(() =>
+      expect(client.copyFileToClipboard).toHaveBeenCalledWith(7),
+    );
   });
 });

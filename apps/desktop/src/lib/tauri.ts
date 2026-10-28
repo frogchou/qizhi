@@ -16,6 +16,10 @@ export interface QizhiCommands {
   getTodayScanStatus?(): Promise<TodayScanStatus>;
   refreshToday(): Promise<TodaySnapshot>;
   revealInExplorer(id: number): Promise<void>;
+  openFile(id: number): Promise<void>;
+  openFileInTextEditor(id: number): Promise<void>;
+  copyFileToClipboard(id: number): Promise<void>;
+  deleteFile(id: number): Promise<void>;
   listScanRules(): Promise<ScanRules>;
   saveScanRules(
     input: Pick<
@@ -118,6 +122,18 @@ export const unavailableCommands: QizhiCommands = {
   async revealInExplorer() {
     throw new Error("桌面服务尚未连接");
   },
+  async openFile() {
+    throw new Error("桌面服务尚未连接");
+  },
+  async openFileInTextEditor() {
+    throw new Error("桌面服务尚未连接");
+  },
+  async copyFileToClipboard() {
+    throw new Error("桌面服务尚未连接");
+  },
+  async deleteFile() {
+    throw new Error("桌面服务尚未连接");
+  },
   async listScanRules() {
     return {
       allowedRoots: [],
@@ -144,6 +160,10 @@ export const tauriCommands: QizhiCommands = {
   getTodayScanStatus: () => invoke("get_today_scan_status"),
   refreshToday: () => invoke("refresh_today"),
   revealInExplorer: (id) => invoke("reveal_in_explorer", { id }),
+  openFile: (id) => invoke("open_file", { id }),
+  openFileInTextEditor: (id) => invoke("open_file_in_text_editor", { id }),
+  copyFileToClipboard: (id) => invoke("copy_file_to_clipboard", { id }),
+  deleteFile: (id) => invoke("delete_file", { id }),
   listScanRules: () => invoke("list_scan_rules"),
   saveScanRules: (input) => invoke("save_scan_rules", { input }),
   listRagflowChats: () => invoke("list_ragflow_chats"),

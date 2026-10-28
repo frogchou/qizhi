@@ -52,4 +52,11 @@ impl FileRepository {
             connection.query_row("SELECT id,canonical_path,file_identity,modified_at_utc_ms,size_bytes,source FROM file_records WHERE canonical_path = ?1 AND file_identity = ?2", (canonical_path, file_identity), |row| Ok(FileRecord { id: row.get(0)?, canonical_path: row.get(1)?, file_identity: row.get(2)?, modified_at_utc_ms: row.get(3)?, size_bytes: row.get(4)?, source: row.get(5)? })).optional()
         })
     }
+
+    pub fn delete_by_id(&self, id: i64) -> Result<(), AppError> {
+        self.database.with_connection(|connection| {
+            connection.execute("DELETE FROM file_records WHERE id = ?1", [id])?;
+            Ok(())
+        })
+    }
 }
