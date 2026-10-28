@@ -93,7 +93,7 @@ pub fn test_service_connection(input: SaveSettingsInput) -> ConnectionStatus {
         _ => unreachable!("service validated above"),
     }
     let config = format!(
-        "silent\nshow-error\noutput = \"NUL\"\nwrite-out = \"%{{http_code}}\"\nmax-time = 10\nheader = \"Authorization: Bearer {}\"\nurl = \"{}\"\n",
+        "silent\nshow-error\nwrite-out = \"\\n%{{http_code}}\"\nmax-time = 10\nheader = \"Authorization: Bearer {}\"\nurl = \"{}\"\n",
         input.api_key, base_url
     );
     let mut child = match std::process::Command::new("curl.exe")
@@ -124,29 +124,70 @@ pub fn test_service_connection(input: SaveSettingsInput) -> ConnectionStatus {
         };
     }
     match child.wait_with_output() {
-        Ok(value) if value.status.success() && value.stdout == b"200" => ConnectionStatus {
-            available: true,
-            message: match input.service.as_str() {
-                "openai" => "OpenAI API 连接正常。".to_owned(),
-                "ragflow" => "RAGFlow API 连接正常。".to_owned(),
-                _ => unreachable!("service validated above"),
-            },
-        },
-        Ok(value) => ConnectionStatus {
-            available: false,
-            message: format!(
-                "连接未通过{}。",
-                String::from_utf8_lossy(&value.stdout)
-                    .trim()
-                    .strip_prefix('0')
-                    .map(|code| format!("（HTTP {code}）"))
-                    .unwrap_or_default()
-            ),
-        },
+        Ok(value) => {
+            let (body, status) = split_connection_response(&value.stdout);
+            if value.status.success() && connection_is_usable(&input.service, status, body) {
+                return ConnectionStatus {
+                    available: true,
+                    message: match input.service.as_str() {
+                        "openai" => "OpenAI API 连接正常。".to_owned(),
+                        "ragflow" => "RAGFlow API 连接正常。".to_owned(),
+                        _ => unreachable!("service validated above"),
+                    },
+                };
+            }
+            ConnectionStatus {
+                available: false,
+                message: format!(
+                    "连接未通过{}。",
+                    status
+                        .strip_prefix('0')
+                        .map(|code| format!("（HTTP {code}）"))
+                        .unwrap_or_default()
+                ),
+            }
+        }
         Err(_) => ConnectionStatus {
             available: false,
             message: "无法连接 Base URL，请检查网络、地址和代理设置。".to_owned(),
         },
+    }
+}
+
+fn split_connection_response(output: &[u8]) -> (&str, &str) {
+    let text = std::str::from_utf8(output).unwrap_or_default();
+    text.rsplit_once('\n')
+        .map(|(body, status)| (body, status.trim()))
+        .unwrap_or(("", text.trim()))
+}
+
+fn connection_is_usable(service: &str, status: &str, body: &str) -> bool {
+    if status != "200" {
+        return false;
+    }
+    service != "ragflow"
+        || serde_json::from_str::<serde_json::Value>(body)
+            .ok()
+            .and_then(|value| value.get("code").and_then(serde_json::Value::as_i64))
+            == Some(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::connection_is_usable;
+
+    #[test]
+    fn rejects_a_ragflow_business_error_with_an_http_success_status() {
+        assert!(!connection_is_usable(
+            "ragflow",
+            "200",
+            r#"{"code":102,"message":"API key is invalid"}"#,
+        ));
+        assert!(connection_is_usable(
+            "ragflow",
+            "200",
+            r#"{"code":0,"message":"success","data":[]}"#,
+        ));
     }
 }
 
