@@ -10,6 +10,10 @@ import type {
 type SettingsPageProps = { commands: QizhiCommands };
 type ConnectionState = { available: boolean; message: string } | null;
 
+function displayPath(path: string) {
+  return path.replace(/^\\\\\?\\UNC\\/i, "\\\\").replace(/^\\\\\?\\/, "");
+}
+
 function PathList({
   paths,
   onRemove,
@@ -24,7 +28,7 @@ function PathList({
     <ul className="path-list">
       {paths.map((path) => (
         <li key={path}>
-          <span title={path}>{path}</span>
+          <span title={displayPath(path)}>{displayPath(path)}</span>
           <button
             type="button"
             onClick={() => onRemove(path)}

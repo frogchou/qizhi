@@ -41,6 +41,12 @@ struct ChatData {
 }
 
 #[derive(Deserialize)]
+struct PagedChatData {
+    #[serde(default)]
+    chats: Vec<ChatData>,
+}
+
+#[derive(Deserialize)]
 struct AnswerData {
     answer: Option<String>,
     #[serde(default)]
@@ -100,8 +106,13 @@ impl RagflowClient {
 
     pub fn parse_chat_list(body: &str) -> Result<Vec<RagflowChat>, String> {
         let envelope = parse_envelope(body)?;
-        let chats = serde_json::from_value::<Vec<ChatData>>(envelope.data)
-            .map_err(|_| "RAGFlow 返回的问答机器人列表无法识别。".to_owned())?;
+        // RAGFlow's current endpoint returns data as { chats, total }. Keep the
+        // array form as a compatibility path for older RAGFlow deployments.
+        let chats = match envelope.data {
+            Value::Array(items) => serde_json::from_value::<Vec<ChatData>>(Value::Array(items)),
+            data => serde_json::from_value::<PagedChatData>(data).map(|page| page.chats),
+        }
+        .map_err(|_| "RAGFlow 返回的问答机器人列表无法识别。".to_owned())?;
         Ok(chats
             .into_iter()
             .map(|chat| RagflowChat {

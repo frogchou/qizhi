@@ -10,7 +10,7 @@ use crate::{
     scan::{
         configuration::ScanRules,
         file_filter::{FileCategory, default_file_categories},
-        policy::ScanPolicy,
+        policy::{ScanPolicy, display_path},
     },
 };
 
@@ -276,7 +276,7 @@ pub fn save_scan_rules(
         .save(ScanRules {
             allowed_roots: roots
                 .into_iter()
-                .map(|root| root.0.to_string_lossy().to_string())
+                .map(|root| display_path(&root.0))
                 .collect(),
             custom_exclusions: input.custom_exclusions,
             file_categories: input.file_categories,

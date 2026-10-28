@@ -181,4 +181,36 @@ describe("SettingsPage", () => {
       screen.getByText("RAGFlow 设置已保存，可前往知识库加载机器人。"),
     ).toBeInTheDocument();
   });
+
+  it("shows a normal Windows path when legacy settings contain an extended path", async () => {
+    const commands: QizhiCommands = {
+      getSettings: vi.fn().mockResolvedValue([]),
+      saveSettings: vi.fn(),
+      testServiceConnection: vi.fn(),
+      pickFolder: vi.fn(),
+      getTodaySnapshot: vi.fn(),
+      refreshToday: vi.fn(),
+      revealInExplorer: vi.fn(),
+      openFile: vi.fn(),
+      openFileInTextEditor: vi.fn(),
+      copyFileToClipboard: vi.fn(),
+      deleteFile: vi.fn(),
+      listScanRules: vi.fn().mockResolvedValue({
+        allowedRoots: [String.raw`\\?\C:\Users\fcc\Documents`],
+        customExclusions: [],
+        fileCategories: ["documents", "sourceCode"],
+        everythingSdkPath: null,
+        esCliPath: null,
+        lockedExclusions: [],
+      }),
+      saveScanRules: vi.fn(),
+    };
+
+    render(<SettingsPage commands={commands} />);
+
+    expect(
+      await screen.findByText(String.raw`C:\Users\fcc\Documents`),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/\\\\\?\\/)).not.toBeInTheDocument();
+  });
 });

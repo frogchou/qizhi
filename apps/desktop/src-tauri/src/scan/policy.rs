@@ -59,11 +59,12 @@ impl ScanPolicy {
         if self.is_denied(path) {
             return false;
         }
+        let value = comparable_path(path);
         self.allowed_roots.is_empty()
             || self
                 .allowed_roots
                 .iter()
-                .any(|root| path.starts_with(&root.0))
+                .any(|root| is_path_prefix(&value, &comparable_path(&root.0)))
     }
 
     /// Used while walking below an already approved root. It avoids resolving
@@ -74,8 +75,7 @@ impl ScanPolicy {
     }
 
     fn is_denied(&self, path: &Path) -> bool {
-        let raw = path.to_string_lossy().to_ascii_lowercase();
-        let value = raw.strip_prefix(r"\\?\").unwrap_or(&raw);
+        let value = comparable_path(path);
         value.starts_with(r"\\")
             || [
                 r"c:\windows",
@@ -84,12 +84,36 @@ impl ScanPolicy {
                 r"c:\$recycle.bin",
             ]
             .iter()
-            .any(|prefix| is_path_prefix(value, prefix))
+            .any(|prefix| is_path_prefix(&value, prefix))
             || value.contains(r"\appdata\")
-            || self.exclusions.iter().any(|excluded| {
-                is_path_prefix(value, &excluded.to_string_lossy().to_ascii_lowercase())
-            })
+            || self
+                .exclusions
+                .iter()
+                .any(|excluded| is_path_prefix(&value, &comparable_path(excluded)))
     }
+}
+
+/// Converts a Windows extended-length path into the form users enter and see.
+/// Windows filesystem APIs may canonicalize `C:\...` to `\\?\C:\...`; that
+/// implementation detail must not leak into settings or boundary comparisons.
+pub fn display_path(path: &Path) -> String {
+    let value = path.to_string_lossy();
+    #[cfg(windows)]
+    {
+        if let Some(unc_path) = value.strip_prefix(r"\\?\UNC\") {
+            return format!(r"\\{unc_path}");
+        }
+        return value.strip_prefix(r"\\?\").unwrap_or(&value).to_owned();
+    }
+    #[cfg(not(windows))]
+    value.into_owned()
+}
+
+fn comparable_path(path: &Path) -> String {
+    display_path(path)
+        .replace('/', r"\")
+        .trim_end_matches('\\')
+        .to_ascii_lowercase()
 }
 
 fn normalized_exclusions(exclusions: Vec<PathBuf>) -> Vec<PathBuf> {

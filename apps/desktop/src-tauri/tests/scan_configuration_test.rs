@@ -35,3 +35,34 @@ fn fills_default_roots_for_an_existing_empty_configuration() {
     assert_eq!(rules.custom_exclusions, vec![r"D:\Private"]);
     fs::remove_file(path).expect("remove temporary rules");
 }
+
+#[cfg(windows)]
+#[test]
+fn migrates_windows_extended_paths_to_normal_user_paths() {
+    let path = temporary_rules_path();
+    let visible_path = std::env::current_dir()
+        .expect("project directory")
+        .to_string_lossy()
+        .to_string();
+    let extended_path = format!(r"\\?\{visible_path}");
+    fs::write(
+        &path,
+        serde_json::json!({
+            "allowedRoots": [extended_path],
+            "customExclusions": [],
+            "fileCategories": ["documents"],
+            "everythingSdkPath": null,
+            "esCliPath": null,
+        })
+        .to_string(),
+    )
+    .expect("write legacy rules");
+
+    let rules = ScanRuleStore::open(&path, ScanRules::default())
+        .expect("open store")
+        .get()
+        .expect("read rules");
+
+    assert_eq!(rules.allowed_roots, vec![visible_path]);
+    fs::remove_file(path).expect("remove temporary rules");
+}

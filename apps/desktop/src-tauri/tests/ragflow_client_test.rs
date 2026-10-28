@@ -13,6 +13,17 @@ fn parses_accessible_chat_assistants_from_a_successful_response() {
 }
 
 #[test]
+fn parses_chat_assistants_from_the_current_ragflow_paged_response() {
+    let chats = RagflowClient::parse_chat_list(
+        r#"{"code":0,"message":"success","data":{"chats":[{"id":"chat-a","name":"工作知识库","description":"工作资料问答"}],"total":1}}"#,
+    )
+    .expect("paged chat list parses");
+
+    assert_eq!(chats.len(), 1);
+    assert_eq!(chats[0].name, "工作知识库");
+}
+
+#[test]
 fn rejects_a_ragflow_business_error_even_when_the_response_is_json() {
     let error =
         RagflowClient::parse_chat_list(r#"{"code":102,"message":"API key is invalid","data":[]}"#)

@@ -43,6 +43,10 @@ function wildcardMatches(value: string, query: string) {
 
 type FileMenu = { id: number; x: number; y: number };
 
+function readableError(error: unknown, fallback: string) {
+  return typeof error === "string" && error.trim() ? error : fallback;
+}
+
 const SOURCE_EXTENSIONS = new Set([
   "rs",
   "py",
@@ -136,8 +140,10 @@ export function TodayPage({ commands }: { commands: QizhiCommands }) {
     setScanStatus(null);
     try {
       setSnapshot(await commands.refreshToday());
-    } catch {
-      setNotice("刷新未完成，请检查扫描范围和文件访问权限。");
+    } catch (error) {
+      setNotice(
+        readableError(error, "刷新未完成，请检查扫描范围和文件访问权限。"),
+      );
     } finally {
       setBusy(false);
     }

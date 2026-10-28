@@ -50,3 +50,16 @@ fn only_allows_files_within_the_canonicalized_work_root() {
     let _ = std::fs::remove_dir_all(work_root);
     let _ = std::fs::remove_dir_all(outside_root);
 }
+
+#[cfg(windows)]
+#[test]
+fn allows_a_normal_cached_path_under_an_extended_windows_scan_root() {
+    let root = std::env::current_dir().expect("project directory");
+    let extended_root = std::fs::canonicalize(&root).expect("canonical root");
+    let policy = ScanPolicy::for_roots(
+        vec![],
+        vec![qizhi_desktop_lib::scan::policy::AllowedRoot(extended_root)],
+    );
+
+    assert!(policy.is_cached_path_allowed(&root.join("from-cache.md")));
+}

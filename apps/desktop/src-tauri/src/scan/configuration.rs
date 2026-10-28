@@ -2,7 +2,7 @@ use crate::{
     database::AppError,
     scan::{
         file_filter::{FileCategory, default_file_categories},
-        policy::ScanPolicy,
+        policy::{ScanPolicy, display_path},
     },
 };
 use serde::{Deserialize, Serialize};
@@ -74,6 +74,16 @@ impl ScanRules {
             .map(|value| (*value).to_owned())
             .collect()
     }
+
+    fn normalize_user_paths(&mut self) {
+        for path in self
+            .allowed_roots
+            .iter_mut()
+            .chain(self.custom_exclusions.iter_mut())
+        {
+            *path = display_path(Path::new(path));
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -91,6 +101,12 @@ impl ScanRuleStore {
         if rules.allowed_roots.is_empty() {
             rules.allowed_roots = defaults.allowed_roots;
         }
+        let original_rules = rules.clone();
+        rules.normalize_user_paths();
+        if rules != original_rules {
+            let text = serde_json::to_string(&rules).map_err(|_| AppError::Storage)?;
+            fs::write(path, text).map_err(|_| AppError::Storage)?;
+        }
         Ok(Self {
             path: path.to_path_buf(),
             rules: Arc::new(Mutex::new(rules)),
@@ -102,7 +118,8 @@ impl ScanRuleStore {
             .map(|value| value.clone())
             .map_err(|_| AppError::Storage)
     }
-    pub fn save(&self, rules: ScanRules) -> Result<ScanRules, AppError> {
+    pub fn save(&self, mut rules: ScanRules) -> Result<ScanRules, AppError> {
+        rules.normalize_user_paths();
         let text = serde_json::to_string(&rules).map_err(|_| AppError::Storage)?;
         fs::write(&self.path, text).map_err(|_| AppError::Storage)?;
         *self.rules.lock().map_err(|_| AppError::Storage)? = rules.clone();
