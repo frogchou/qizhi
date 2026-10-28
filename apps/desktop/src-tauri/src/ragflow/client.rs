@@ -25,6 +25,39 @@ pub struct RagflowAnswer {
     pub session_id: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RagflowDataset {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RagflowAgent {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RagflowChunk {
+    pub id: String,
+    pub content: String,
+    pub document_name: String,
+    pub similarity: f64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RagflowAgentAnswer {
+    pub agent_id: String,
+    pub answer: String,
+    pub session_id: String,
+}
+
 #[derive(Deserialize)]
 struct Envelope {
     code: i64,
@@ -51,6 +84,51 @@ struct AnswerData {
     answer: Option<String>,
     #[serde(default)]
     session_id: String,
+}
+
+#[derive(Deserialize)]
+struct DatasetData {
+    id: String,
+    name: String,
+    #[serde(default)]
+    description: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct AgentCanvasData {
+    id: String,
+    #[serde(rename = "type", default)]
+    item_type: String,
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    description: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct AgentPageData {
+    #[serde(default)]
+    canvas: Vec<AgentCanvasData>,
+}
+
+#[derive(Deserialize)]
+struct RetrievalChunkData {
+    id: String,
+    content: String,
+    #[serde(default)]
+    document_keyword: String,
+    #[serde(default)]
+    docnm_kwd: String,
+    #[serde(default)]
+    similarity: f64,
+}
+
+#[derive(Deserialize)]
+struct RetrievalData {
+    #[serde(default)]
+    chunks: Vec<RetrievalChunkData>,
 }
 
 pub struct RagflowClient {
@@ -88,6 +166,50 @@ impl RagflowClient {
     pub fn list_chats(&self) -> Result<Vec<RagflowChat>, String> {
         let url = self.api_url("/api/v1/chats?page=1&page_size=100")?;
         Self::parse_chat_list(&self.request("GET", url, None)?)
+    }
+
+    pub fn list_datasets(&self) -> Result<Vec<RagflowDataset>, String> {
+        let url = self.api_url("/api/v1/datasets?page=1&page_size=100")?;
+        Self::parse_dataset_list(&self.request("GET", url, None)?)
+    }
+
+    pub fn list_agents(&self) -> Result<Vec<RagflowAgent>, String> {
+        let url = self.api_url("/api/v1/agents?page=1&page_size=100")?;
+        Self::parse_agent_list(&self.request("GET", url, None)?)
+    }
+
+    pub fn retrieve(
+        &self,
+        question: &str,
+        dataset_ids: Vec<String>,
+    ) -> Result<Vec<RagflowChunk>, String> {
+        if question.trim().is_empty() || dataset_ids.is_empty() {
+            return Err("请选择至少一个知识库并输入关键词。".to_owned());
+        }
+        let body = serde_json::json!({
+            "question": question,
+            "dataset_ids": dataset_ids,
+            "page": 1,
+            "page_size": 10,
+            "highlight": true,
+        })
+        .to_string();
+        let url = self.api_url("/api/v1/retrieval")?;
+        Self::parse_retrieval(&self.request("POST", url, Some(body))?)
+    }
+
+    pub fn ask_agent(&self, agent_id: &str, question: &str) -> Result<RagflowAgentAnswer, String> {
+        if agent_id.trim().is_empty() || question.trim().is_empty() {
+            return Err("请选择 Agent 并输入问题。".to_owned());
+        }
+        let body = serde_json::json!({
+            "agent_id": agent_id,
+            "question": question,
+            "stream": false,
+        })
+        .to_string();
+        let url = self.api_url("/api/v1/agents/chat/completions")?;
+        Self::parse_agent_answer(agent_id, &self.request("POST", url, Some(body))?)
     }
 
     pub fn ask(&self, chat_id: &str, question: &str) -> Result<RagflowAnswer, String> {
@@ -131,6 +253,83 @@ impl RagflowClient {
             .filter(|value| !value.trim().is_empty())
             .ok_or_else(|| "RAGFlow 未返回回答内容。".to_owned())?;
         Ok(RagflowAnswer { answer, session_id })
+    }
+
+    pub fn parse_dataset_list(body: &str) -> Result<Vec<RagflowDataset>, String> {
+        let envelope = parse_envelope(body)?;
+        let datasets = serde_json::from_value::<Vec<DatasetData>>(envelope.data)
+            .map_err(|_| "RAGFlow 返回的知识库列表无法识别。".to_owned())?;
+        Ok(datasets
+            .into_iter()
+            .map(|dataset| RagflowDataset {
+                id: dataset.id,
+                name: dataset.name,
+                description: dataset.description.unwrap_or_default(),
+            })
+            .collect())
+    }
+
+    pub fn parse_agent_list(body: &str) -> Result<Vec<RagflowAgent>, String> {
+        let envelope = parse_envelope(body)?;
+        let page = serde_json::from_value::<AgentPageData>(envelope.data)
+            .map_err(|_| "RAGFlow 返回的 Agents 列表无法识别。".to_owned())?;
+        Ok(page
+            .canvas
+            .into_iter()
+            .filter(|item| item.item_type == "agent")
+            .map(|item| RagflowAgent {
+                id: item.id,
+                name: if item.title.is_empty() {
+                    item.name
+                } else {
+                    item.title
+                },
+                description: item.description.unwrap_or_default(),
+            })
+            .collect())
+    }
+
+    pub fn parse_retrieval(body: &str) -> Result<Vec<RagflowChunk>, String> {
+        let envelope = parse_envelope(body)?;
+        let data = serde_json::from_value::<RetrievalData>(envelope.data)
+            .map_err(|_| "RAGFlow 返回的检索结果无法识别。".to_owned())?;
+        Ok(data
+            .chunks
+            .into_iter()
+            .map(|chunk| RagflowChunk {
+                id: chunk.id,
+                content: chunk.content,
+                document_name: if chunk.document_keyword.is_empty() {
+                    chunk.docnm_kwd
+                } else {
+                    chunk.document_keyword
+                },
+                similarity: chunk.similarity,
+            })
+            .collect())
+    }
+
+    pub fn parse_agent_answer(agent_id: &str, body: &str) -> Result<RagflowAgentAnswer, String> {
+        let envelope = parse_envelope(body)?;
+        let session_id = envelope
+            .data
+            .get("session_id")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
+        let answer = envelope
+            .data
+            .get("data")
+            .and_then(|data| data.get("content"))
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| "RAGFlow Agent 未返回回答内容。".to_owned())?
+            .to_owned();
+        Ok(RagflowAgentAnswer {
+            agent_id: agent_id.to_owned(),
+            answer,
+            session_id,
+        })
     }
 
     fn api_url(&self, suffix: &str) -> Result<String, String> {
