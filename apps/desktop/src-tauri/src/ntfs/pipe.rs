@@ -284,22 +284,34 @@ pub fn call_indexer_service(request: &IndexerRequest) -> Result<IndexerResponse,
         .chain(std::iter::once(0))
         .collect::<Vec<_>>();
     let access = FILE_READ_DATA | FILE_WRITE_DATA | SYNCHRONIZE;
-    let handle = unsafe {
-        // Explicit rights avoid FILE_APPEND_DATA/FILE_CREATE_PIPE_INSTANCE implied by GENERIC_WRITE.
-        CreateFileW(
-            pipe_name.as_ptr(),
-            access,
-            0,
-            std::ptr::null(),
-            OPEN_EXISTING,
-            FILE_ATTRIBUTE_NORMAL,
-            std::ptr::null_mut(),
-        )
-    };
+    let mut last_connect_error = 0_u32;
+    let mut handle = INVALID_HANDLE_VALUE;
+    for attempt in 0..60 {
+        handle = unsafe {
+            // Explicit rights avoid FILE_APPEND_DATA/FILE_CREATE_PIPE_INSTANCE implied by GENERIC_WRITE.
+            CreateFileW(
+                pipe_name.as_ptr(),
+                access,
+                0,
+                std::ptr::null(),
+                OPEN_EXISTING,
+                FILE_ATTRIBUTE_NORMAL,
+                std::ptr::null_mut(),
+            )
+        };
+        if handle != INVALID_HANDLE_VALUE {
+            break;
+        }
+        last_connect_error = unsafe { GetLastError() };
+        if !is_retryable_pipe_connect_error(last_connect_error) || attempt == 59 {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
     if handle == INVALID_HANDLE_VALUE {
         return Err(format!(
             "本地索引服务不可用（Windows 错误 {}）",
-            unsafe { GetLastError() }
+            last_connect_error
         ));
     }
     let mut written = 0_u32;
@@ -345,6 +357,12 @@ pub fn call_indexer_service(request: &IndexerRequest) -> Result<IndexerResponse,
         .map_err(|_| "本地索引服务返回了无效数据".to_owned())
 }
 
+#[cfg(windows)]
+fn is_retryable_pipe_connect_error(error: u32) -> bool {
+    use windows_sys::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_PIPE_BUSY};
+    matches!(error, ERROR_FILE_NOT_FOUND | ERROR_PIPE_BUSY)
+}
+
 #[cfg(not(windows))]
 pub fn call_indexer_service(_: &IndexerRequest) -> Result<IndexerResponse, String> {
     Err("本地索引服务仅支持 Windows".to_owned())
@@ -357,5 +375,17 @@ mod tests {
     fn pipe_acl_grants_only_the_documented_client_rights() {
         assert!(super::INDEXER_PIPE_SDDL.contains("0x12019b;;;AU"));
         assert!(!super::INDEXER_PIPE_SDDL.contains("GA;;;AU"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn retries_only_when_the_next_pipe_instance_is_temporarily_unavailable() {
+        use windows_sys::Win32::Foundation::{
+            ERROR_ACCESS_DENIED, ERROR_FILE_NOT_FOUND, ERROR_PIPE_BUSY,
+        };
+
+        assert!(super::is_retryable_pipe_connect_error(ERROR_FILE_NOT_FOUND));
+        assert!(super::is_retryable_pipe_connect_error(ERROR_PIPE_BUSY));
+        assert!(!super::is_retryable_pipe_connect_error(ERROR_ACCESS_DENIED));
     }
 }
