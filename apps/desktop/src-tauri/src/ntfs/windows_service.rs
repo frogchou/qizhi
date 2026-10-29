@@ -7,7 +7,10 @@ use std::{
 };
 
 #[cfg(windows)]
-use crate::ntfs::pipe::serve_health_pipe_until_stopped;
+use crate::{
+    database::Database,
+    ntfs::{IndexerControlPlane, pipe::serve_controlled_pipe_until_stopped},
+};
 
 pub const INDEXER_SERVICE_NAME: &str = "QizhiNtfsIndexer";
 
@@ -89,7 +92,9 @@ unsafe extern "system" fn service_main(_: u32, _: *mut *mut u16) {
     set_status(status_handle, 4, 1);
     let pipe_stop = &STOP_REQUESTED;
     thread::spawn(move || {
-        let _ = serve_health_pipe_until_stopped(pipe_stop);
+        if run_indexer_pipe_service(pipe_stop).is_err() {
+            STOP_REQUESTED.store(true, Ordering::SeqCst);
+        }
     });
     while !STOP_REQUESTED.load(Ordering::SeqCst) {
         thread::sleep(Duration::from_millis(200));
@@ -99,6 +104,77 @@ unsafe extern "system" fn service_main(_: u32, _: *mut *mut u16) {
         // SCM owns the status handle; this final transition tells it the process can exit.
         SetServiceStatus(status_handle, &stopped_status());
     }
+}
+
+#[cfg(windows)]
+fn run_indexer_pipe_service(stopped: &AtomicBool) -> Result<(), String> {
+    let path = secure_service_database_path()?;
+    let database = Database::open(&path).map_err(|_| "无法打开本地索引服务数据库".to_owned())?;
+    serve_controlled_pipe_until_stopped(stopped, IndexerControlPlane::new(database.ntfs_index()))
+}
+
+#[cfg(windows)]
+fn secure_service_database_path() -> Result<std::path::PathBuf, String> {
+    use windows_sys::Win32::{
+        Foundation::{ERROR_ALREADY_EXISTS, GetLastError, LocalFree},
+        Security::Authorization::ConvertStringSecurityDescriptorToSecurityDescriptorW,
+        Security::{DACL_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION},
+        Storage::FileSystem::{
+            CreateDirectoryW, FILE_ATTRIBUTE_REPARSE_POINT, GetFileAttributesW,
+            INVALID_FILE_ATTRIBUTES,
+        },
+    };
+
+    let program_data = std::env::var_os("ProgramData")
+        .map(std::path::PathBuf::from)
+        .ok_or_else(|| "无法定位 Windows 共享应用数据目录".to_owned())?;
+    let directory = program_data.join("QizhiNtfsIndexer");
+    for current in [&directory] {
+        let display = current.to_string_lossy();
+        let mut wide = display
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect::<Vec<_>>();
+        let created = unsafe { CreateDirectoryW(wide.as_mut_ptr(), std::ptr::null()) };
+        if created == 0 && unsafe { GetLastError() } != ERROR_ALREADY_EXISTS {
+            return Err("无法创建本地索引服务数据目录".to_owned());
+        }
+        let attributes = unsafe { GetFileAttributesW(wide.as_ptr()) };
+        if attributes == INVALID_FILE_ATTRIBUTES || attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            return Err("本地索引服务数据目录无效".to_owned());
+        }
+        let mut descriptor = std::ptr::null_mut();
+        let mut size = 0_u32;
+        let mut sddl = "D:P(A;OICI;GA;;;SY)(A;OICI;GA;;;BA)"
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect::<Vec<_>>();
+        if unsafe {
+            ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                sddl.as_mut_ptr(),
+                1,
+                &mut descriptor,
+                &mut size,
+            )
+        } == 0
+        {
+            return Err("无法保护本地索引服务数据目录".to_owned());
+        }
+        let applied = unsafe {
+            windows_sys::Win32::Security::SetFileSecurityW(
+                wide.as_ptr(),
+                DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+                descriptor,
+            )
+        };
+        unsafe {
+            let _ = LocalFree(descriptor);
+        }
+        if applied == 0 {
+            return Err("无法保护本地索引服务数据目录".to_owned());
+        }
+    }
+    Ok(directory.join("index.sqlite"))
 }
 
 #[cfg(windows)]

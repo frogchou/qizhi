@@ -2,7 +2,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use qizhi_desktop_lib::{
     database::Database,
-    ntfs::{CallerIndexPolicy, DiscoveredEvent, IndexEntry, IndexPage, UsnCheckpoint, VolumeDescriptor, VolumeState},
+    ntfs::{
+        CallerIndexPolicy, DiscoveredEvent, IndexEntry, IndexPage, UsnCheckpoint, VolumeDescriptor,
+        VolumeState,
+    },
 };
 
 fn temporary_database_path(name: &str) -> std::path::PathBuf {
@@ -119,7 +122,10 @@ fn stores_scan_authorization_by_authenticated_windows_sid() {
     let repository = database.ntfs_index();
     let policy = CallerIndexPolicy {
         caller_sid: "S-1-5-21-100".to_owned(),
-        allowed_roots: vec![r"D:\\work".to_owned(), r"C:\\Users\\fcc\\Documents".to_owned()],
+        allowed_roots: vec![
+            r"D:\\work".to_owned(),
+            r"C:\\Users\\fcc\\Documents".to_owned(),
+        ],
         updated_at_utc_ms: 1_793_189_401_000,
     };
 

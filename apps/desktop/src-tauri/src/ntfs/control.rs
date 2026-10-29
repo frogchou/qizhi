@@ -2,7 +2,10 @@ use chrono::Utc;
 
 use crate::ntfs::{
     CallerIndexPolicy, NtfsIndexRepository,
-    ipc::{INDEXER_PROTOCOL_VERSION, IndexerRequest, IndexerRequestKind, IndexerResponse, IpcAuthorizationPolicy, validate_configured_roots, validate_request},
+    ipc::{
+        INDEXER_PROTOCOL_VERSION, IndexerRequest, IndexerRequestKind, IndexerResponse,
+        IpcAuthorizationPolicy, validate_configured_roots, validate_request,
+    },
 };
 
 /// The service-side control plane. Its caller SID always originates from the
@@ -19,7 +22,9 @@ impl IndexerControlPlane {
     }
 
     pub fn handle(&self, caller_sid: &str, request: &IndexerRequest) -> IndexerResponse {
-        if request.protocol_version != INDEXER_PROTOCOL_VERSION || request.request_id.trim().is_empty() {
+        if request.protocol_version != INDEXER_PROTOCOL_VERSION
+            || request.request_id.trim().is_empty()
+        {
             return rejected(request, "本地索引请求无效");
         }
         match &request.kind {

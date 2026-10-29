@@ -36,11 +36,17 @@ fn binds_saved_scan_roots_to_the_authenticated_pipe_sid() {
 
     let owner = control.handle("S-1-5-21-100", &request(IndexerRequestKind::Build));
     assert_eq!(owner.status, "rejected");
-    assert_eq!(owner.message.as_deref(), Some("本地索引服务尚未完成索引执行器配置"));
+    assert_eq!(
+        owner.message.as_deref(),
+        Some("本地索引服务尚未完成索引执行器配置")
+    );
 
     let other_user = control.handle("S-1-5-21-999", &request(IndexerRequestKind::Build));
     assert_eq!(other_user.status, "rejected");
-    assert_eq!(other_user.message.as_deref(), Some("扫描范围未获本地索引服务授权"));
+    assert_eq!(
+        other_user.message.as_deref(),
+        Some("扫描范围未获本地索引服务授权")
+    );
 
     drop(database);
     let _ = std::fs::remove_file(path);

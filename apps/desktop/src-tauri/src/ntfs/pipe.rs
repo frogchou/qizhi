@@ -42,6 +42,28 @@ pub fn handle_request_bytes(message: &[u8]) -> Vec<u8> {
 pub fn serve_health_pipe_until_stopped(
     stopped: &std::sync::atomic::AtomicBool,
 ) -> Result<(), String> {
+    serve_pipe_until_stopped(stopped, |_, message| handle_request_bytes(message))
+}
+
+#[cfg(windows)]
+pub fn serve_controlled_pipe_until_stopped(
+    stopped: &std::sync::atomic::AtomicBool,
+    control: crate::ntfs::IndexerControlPlane,
+) -> Result<(), String> {
+    serve_pipe_until_stopped(stopped, move |caller_sid, message| {
+        let response = match serde_json::from_slice::<IndexerRequest>(message) {
+            Ok(request) => control.handle(caller_sid, &request),
+            Err(_) => error_response(String::new(), "本地索引请求格式无效"),
+        };
+        serde_json::to_vec(&response).unwrap_or_else(|_| b"{}".to_vec())
+    })
+}
+
+#[cfg(windows)]
+fn serve_pipe_until_stopped(
+    stopped: &std::sync::atomic::AtomicBool,
+    handle_request: impl Fn(&str, &[u8]) -> Vec<u8>,
+) -> Result<(), String> {
     use std::sync::atomic::Ordering;
     use windows_sys::Win32::{
         Foundation::{CloseHandle, GetLastError, INVALID_HANDLE_VALUE},
@@ -125,7 +147,7 @@ pub fn serve_health_pipe_until_stopped(
         };
         if received != 0 {
             let output = match authenticated_client_sid(handle) {
-                Ok(_) => handle_request_bytes(&input[..read as usize]),
+                Ok(caller_sid) => handle_request(&caller_sid, &input[..read as usize]),
                 Err(message) => serde_json::to_vec(&error_response(String::new(), &message))
                     .unwrap_or_else(|_| b"{}".to_vec()),
             };
@@ -149,12 +171,17 @@ pub fn serve_health_pipe_until_stopped(
 }
 
 #[cfg(windows)]
-fn authenticated_client_sid(pipe: windows_sys::Win32::Foundation::HANDLE) -> Result<String, String> {
+fn authenticated_client_sid(
+    pipe: windows_sys::Win32::Foundation::HANDLE,
+) -> Result<String, String> {
     use windows_sys::Win32::{
-        Foundation::{CloseHandle, GetLastError, ERROR_INSUFFICIENT_BUFFER, LocalFree},
-        Security::{GetTokenInformation, TokenUser, TOKEN_QUERY, TOKEN_USER},
+        Foundation::{CloseHandle, ERROR_INSUFFICIENT_BUFFER, GetLastError, LocalFree},
         Security::Authorization::ConvertSidToStringSidW,
-        System::{Pipes::GetNamedPipeClientProcessId, Threading::{OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION}},
+        Security::{GetTokenInformation, TOKEN_QUERY, TOKEN_USER, TokenUser},
+        System::{
+            Pipes::GetNamedPipeClientProcessId,
+            Threading::{OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION},
+        },
     };
 
     let mut process_id = 0_u32;
@@ -174,7 +201,8 @@ fn authenticated_client_sid(pipe: windows_sys::Win32::Foundation::HANDLE) -> Res
         return Err(last_pipe_error("无法验证本地索引服务调用方"));
     }
     let mut required = 0_u32;
-    let first = unsafe { GetTokenInformation(token, TokenUser, std::ptr::null_mut(), 0, &mut required) };
+    let first =
+        unsafe { GetTokenInformation(token, TokenUser, std::ptr::null_mut(), 0, &mut required) };
     if first != 0 || unsafe { GetLastError() } != ERROR_INSUFFICIENT_BUFFER || required == 0 {
         unsafe {
             let _ = CloseHandle(token);
@@ -202,7 +230,11 @@ fn authenticated_client_sid(pipe: windows_sys::Win32::Foundation::HANDLE) -> Res
     if unsafe { ConvertSidToStringSidW(sid, &mut sid_text) } == 0 || sid_text.is_null() {
         return Err(last_pipe_error("无法验证本地索引服务调用方身份"));
     }
-    let length = unsafe { (0..).take_while(|&offset| *sid_text.add(offset) != 0).count() };
+    let length = unsafe {
+        (0..)
+            .take_while(|&offset| *sid_text.add(offset) != 0)
+            .count()
+    };
     let result = String::from_utf16(unsafe { std::slice::from_raw_parts(sid_text, length) })
         .map_err(|_| "本地索引服务调用方身份无效".to_owned());
     unsafe {

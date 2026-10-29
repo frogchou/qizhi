@@ -11,14 +11,14 @@ pub mod volume;
 pub mod win32;
 pub mod windows_service;
 
+pub use control::IndexerControlPlane;
 pub use indexer::{
     IndexProgress, IndexProgressState, IndexSourcePage, IndexerError, JournalCursor, NtfsIndexer,
     UsnVolumeSource,
 };
-pub use control::IndexerControlPlane;
 pub use model::{
-    CallerIndexPolicy, DiscoveredEvent, IndexDiagnostic, IndexEntry, IndexPage, IndexedVolume, UsnCheckpoint,
-    VolumeDescriptor, VolumeState,
+    CallerIndexPolicy, DiscoveredEvent, IndexDiagnostic, IndexEntry, IndexPage, IndexedVolume,
+    UsnCheckpoint, VolumeDescriptor, VolumeState,
 };
 pub use repository::NtfsIndexRepository;
 pub use service::WindowsUsnVolumeSource;

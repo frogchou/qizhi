@@ -87,7 +87,9 @@ fn rejects_more_than_the_bounded_number_of_roots() {
     let configure = IndexerRequest {
         protocol_version: INDEXER_PROTOCOL_VERSION,
         request_id: "configure-1".to_owned(),
-        kind: IndexerRequestKind::Configure { allowed_roots: roots },
+        kind: IndexerRequestKind::Configure {
+            allowed_roots: roots,
+        },
     };
     assert_eq!(
         validate_request(&policy(), "S-1-5-21-100", &configure),

@@ -3,7 +3,8 @@ use rusqlite::{OptionalExtension, params};
 use crate::{
     database::{AppError, Database},
     ntfs::{
-        CallerIndexPolicy, DiscoveredEvent, IndexPage, IndexedVolume, UsnCheckpoint, VolumeDescriptor, VolumeState,
+        CallerIndexPolicy, DiscoveredEvent, IndexPage, IndexedVolume, UsnCheckpoint,
+        VolumeDescriptor, VolumeState,
     },
 };
 
@@ -277,8 +278,8 @@ impl NtfsIndexRepository {
     }
 
     pub fn replace_caller_policy(&self, policy: &CallerIndexPolicy) -> Result<(), AppError> {
-        let allowed_roots = serde_json::to_string(&policy.allowed_roots)
-            .map_err(|_| AppError::InvalidConfig)?;
+        let allowed_roots =
+            serde_json::to_string(&policy.allowed_roots).map_err(|_| AppError::InvalidConfig)?;
         self.database.with_connection(|connection| {
             connection.execute(
                 "INSERT INTO ntfs_caller_policies(caller_sid,allowed_roots_json,updated_at_utc_ms) VALUES (?1,?2,?3) ON CONFLICT(caller_sid) DO UPDATE SET allowed_roots_json=excluded.allowed_roots_json,updated_at_utc_ms=excluded.updated_at_utc_ms",
