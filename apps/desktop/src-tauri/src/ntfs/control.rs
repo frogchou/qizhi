@@ -9,7 +9,7 @@ use std::{
 use chrono::Utc;
 
 use crate::ntfs::{
-    CallerIndexPolicy, NtfsIndexRepository,
+    CallerIndexPolicy, IndexedFileCandidate, NtfsIndexRepository,
     ipc::{
         INDEXER_PROTOCOL_VERSION, IndexerRequest, IndexerRequestKind, IndexerResponse,
         IpcAuthorizationPolicy, validate_configured_roots, validate_request,
@@ -38,6 +38,46 @@ impl IndexerControlPlane {
             executor: None,
             busy: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    pub fn list_visible_candidates(
+        &self,
+        caller_sid: &str,
+        start_utc_ms: i64,
+        end_utc_ms: i64,
+    ) -> Result<Vec<IndexedFileCandidate>, String> {
+        let policy = self
+            .repository
+            .caller_policy(caller_sid)
+            .map_err(|_| "无法读取本地索引服务授权配置".to_owned())?
+            .ok_or_else(|| "扫描范围未获本地索引服务授权".to_owned())?;
+        let exclusions = policy
+            .excluded_roots
+            .iter()
+            .map(std::path::PathBuf::from)
+            .collect::<Vec<_>>();
+        let validation = crate::scan::policy::ScanPolicy::new(exclusions.clone());
+        let roots = policy
+            .allowed_roots
+            .iter()
+            .map(std::path::PathBuf::from)
+            .map(|root| validation.validate_root(&root))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| "本地索引服务保存的扫描范围无效".to_owned())?;
+        let visibility = crate::scan::policy::ScanPolicy::for_roots(exclusions, roots);
+        let type_filter = crate::scan::file_filter::FileTypeFilter::new(policy.file_categories);
+        self.repository
+            .list_file_candidates_between(start_utc_ms, end_utc_ms)
+            .map_err(|_| "无法查询本地 NTFS 索引".to_owned())
+            .map(|candidates| {
+                candidates
+                    .into_iter()
+                    .filter(|candidate| {
+                        let path = std::path::Path::new(&candidate.canonical_path);
+                        visibility.is_cached_path_allowed(path) && type_filter.allows(path)
+                    })
+                    .collect()
+            })
     }
 
     pub fn with_executor(
