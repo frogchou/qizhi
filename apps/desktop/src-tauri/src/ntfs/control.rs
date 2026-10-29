@@ -211,9 +211,41 @@ impl IndexerControlPlane {
         self.busy.store(false, Ordering::SeqCst);
         match result {
             Ok(()) => ready(request, Some("本地 NTFS 索引已同步")),
-            Err(_) => rejected(request, "本地 NTFS 索引同步失败"),
+            Err(error) => rejected(
+                request,
+                &format!(
+                    "本地 NTFS 索引同步失败：{}",
+                    local_diagnostic_message(&error)
+                ),
+            ),
         }
     }
+}
+
+fn local_diagnostic_message(message: &str) -> String {
+    const MAX_DIAGNOSTIC_CHARS: usize = 240;
+    let normalized = message
+        .chars()
+        .map(|character| {
+            if character.is_control() {
+                ' '
+            } else {
+                character
+            }
+        })
+        .collect::<String>();
+    let trimmed = normalized.trim();
+    if trimmed.is_empty() {
+        return "未返回可用诊断信息".to_owned();
+    }
+    let mut result = trimmed
+        .chars()
+        .take(MAX_DIAGNOSTIC_CHARS)
+        .collect::<String>();
+    if trimmed.chars().count() > MAX_DIAGNOSTIC_CHARS {
+        result.push('…');
+    }
+    result
 }
 
 fn ready(request: &IndexerRequest, message: Option<&str>) -> IndexerResponse {

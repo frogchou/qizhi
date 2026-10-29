@@ -44,6 +44,18 @@ impl IndexExecutor for RecordingExecutor {
     }
 }
 
+struct FailingExecutor;
+
+impl IndexExecutor for FailingExecutor {
+    fn build(&self, _: &CallerIndexPolicy) -> Result<(), String> {
+        Err("测试构建失败".to_owned())
+    }
+
+    fn sync(&self, _: &CallerIndexPolicy) -> Result<(), String> {
+        Err("无法读取 NTFS 变更日志: Windows 错误 87".to_owned())
+    }
+}
+
 #[test]
 fn binds_saved_scan_roots_to_the_authenticated_pipe_sid() {
     let nonce = SystemTime::now()
@@ -118,6 +130,31 @@ fn schedules_authorized_builds_without_blocking_the_pipe_request() {
 
     drop(database);
     let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn returns_the_sanitized_sync_failure_to_the_local_client() {
+    let database = Database::open(std::path::Path::new(":memory:")).expect("database opens");
+    let control =
+        IndexerControlPlane::with_executor(database.ntfs_index(), Arc::new(FailingExecutor));
+    let sid = "S-1-5-21-100";
+    let configured = control.handle(
+        sid,
+        &request(IndexerRequestKind::Configure {
+            allowed_roots: vec![r"D:\\work".to_owned()],
+            excluded_roots: vec![],
+            file_categories: vec![],
+        }),
+    );
+    assert_eq!(configured.status, "ready");
+
+    let response = control.handle(sid, &request(IndexerRequestKind::Sync));
+
+    assert_eq!(response.status, "rejected");
+    assert_eq!(
+        response.message.as_deref(),
+        Some("本地 NTFS 索引同步失败：无法读取 NTFS 变更日志: Windows 错误 87")
+    );
 }
 
 #[test]
