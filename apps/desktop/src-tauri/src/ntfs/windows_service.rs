@@ -147,9 +147,10 @@ fn stopped_status() -> windows_sys::Win32::System::Services::SERVICE_STATUS {
 fn install_service() -> Result<(), String> {
     use windows_sys::Win32::System::Services::{
         ChangeServiceConfig2W, ChangeServiceConfigW, CloseServiceHandle, CreateServiceW,
-        OpenSCManagerW, OpenServiceW, SC_MANAGER_CONNECT, SC_MANAGER_CREATE_SERVICE, SERVICE_ALL_ACCESS,
-        SERVICE_CONFIG_SERVICE_SID_INFO, SERVICE_DEMAND_START, SERVICE_ERROR_NORMAL,
-        SERVICE_SID_INFO, SERVICE_SID_TYPE_UNRESTRICTED, SERVICE_WIN32_OWN_PROCESS, StartServiceW,
+        OpenSCManagerW, OpenServiceW, SC_MANAGER_CONNECT, SC_MANAGER_CREATE_SERVICE,
+        SERVICE_ALL_ACCESS, SERVICE_CONFIG_SERVICE_SID_INFO, SERVICE_DEMAND_START,
+        SERVICE_ERROR_NORMAL, SERVICE_SID_INFO, SERVICE_SID_TYPE_UNRESTRICTED,
+        SERVICE_WIN32_OWN_PROCESS, StartServiceW,
     };
 
     let manager = unsafe {
@@ -233,7 +234,8 @@ fn install_service() -> Result<(), String> {
         return Err(last_error("无法配置本地索引服务身份"));
     }
     let started = unsafe { StartServiceW(service, 0, std::ptr::null()) };
-    let start_error = (started == 0).then(|| unsafe { windows_sys::Win32::Foundation::GetLastError() });
+    let start_error =
+        (started == 0).then(|| unsafe { windows_sys::Win32::Foundation::GetLastError() });
     unsafe {
         let _ = CloseServiceHandle(service);
         let _ = CloseServiceHandle(manager);
@@ -251,13 +253,7 @@ fn uninstall_service() -> Result<(), String> {
         SC_MANAGER_CONNECT, SERVICE_ALL_ACCESS, SERVICE_STATUS,
     };
 
-    let manager = unsafe {
-        OpenSCManagerW(
-            std::ptr::null(),
-            std::ptr::null(),
-            SC_MANAGER_CONNECT,
-        )
-    };
+    let manager = unsafe { OpenSCManagerW(std::ptr::null(), std::ptr::null(), SC_MANAGER_CONNECT) };
     if manager.is_null() {
         return Ok(());
     }
