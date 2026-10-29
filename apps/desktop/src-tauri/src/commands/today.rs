@@ -207,6 +207,9 @@ fn cached_snapshot_for_range(
     let files = files
         .list_for_local_day(LocalDayRange::new(start_utc_ms, end_utc_ms))?
         .into_iter()
+        // `本机文件` identifies the retired recursive scanner. Do not surface
+        // its stale cache as if it were produced by the NTFS indexer.
+        .filter(|file| file.source != "本机文件")
         .filter(|file| file_filter.allows(std::path::Path::new(&file.canonical_path)))
         .filter(|file| policy.is_cached_path_allowed(std::path::Path::new(&file.canonical_path)))
         .collect();
@@ -378,7 +381,7 @@ mod tests {
                 file_identity: "today-file".to_owned(),
                 modified_at_utc_ms: start + 1,
                 size_bytes: 12,
-                source: "本机文件".to_owned(),
+                source: "本机 NTFS 索引".to_owned(),
             })
             .expect("persist today file");
 
@@ -416,7 +419,7 @@ mod tests {
                     file_identity: identity.to_owned(),
                     modified_at_utc_ms: start + 1,
                     size_bytes: 12,
-                    source: "本机文件".to_owned(),
+                    source: "本机 NTFS 索引".to_owned(),
                 })
                 .expect("persist today file");
         }
@@ -433,6 +436,39 @@ mod tests {
         assert_eq!(snapshot.files.len(), 1);
         assert_eq!(snapshot.files[0].canonical_path, r"D:\\work\\notes.md");
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn cached_snapshot_hides_legacy_recursive_scan_records() {
+        let database = Database::open(std::path::Path::new(":memory:")).expect("database");
+        let (start, end) = bounds();
+        let repository = database.files();
+        for (path, identity, source) in [
+            (r"D:\\work\\legacy.md", "legacy", "本机文件"),
+            (r"D:\\work\\indexed.md", "indexed", "本机 NTFS 索引"),
+        ] {
+            repository
+                .upsert(&FileRecordInput {
+                    canonical_path: path.to_owned(),
+                    file_identity: identity.to_owned(),
+                    modified_at_utc_ms: start + 1,
+                    size_bytes: 12,
+                    source: source.to_owned(),
+                })
+                .expect("persist cached record");
+        }
+
+        let snapshot = cached_snapshot_for_range(
+            repository,
+            start,
+            end,
+            &FileTypeFilter::default(),
+            &ScanPolicy::new(vec![]),
+        )
+        .expect("read persisted snapshot");
+
+        assert_eq!(snapshot.files.len(), 1);
+        assert_eq!(snapshot.files[0].canonical_path, r"D:\\work\\indexed.md");
     }
 
     #[test]
