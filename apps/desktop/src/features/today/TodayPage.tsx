@@ -28,9 +28,10 @@ function extension(path: string) {
   const dot = name.lastIndexOf(".");
   return dot > 0 ? name.slice(dot + 1).toLowerCase() : "";
 }
-function fileCategory(path: string) {
+function fileCategory(path: string): "documents" | "sourceCode" | null {
   const value = extension(path);
-  return SOURCE_EXTENSIONS.has(value) ? "sourceCode" : "documents";
+  if (SOURCE_EXTENSIONS.has(value)) return "sourceCode";
+  return DOCUMENT_EXTENSIONS.has(value) ? "documents" : null;
 }
 function wildcardMatches(value: string, query: string) {
   const normalized = query.trim();
@@ -98,6 +99,32 @@ const SOURCE_EXTENSIONS = new Set([
   "dockerfile",
   "gradle",
   "groovy",
+]);
+
+const DOCUMENT_EXTENSIONS = new Set([
+  "txt",
+  "md",
+  "markdown",
+  "csv",
+  "tsv",
+  "json",
+  "yaml",
+  "yml",
+  "toml",
+  "xml",
+  "html",
+  "htm",
+  "pdf",
+  "doc",
+  "docx",
+  "odt",
+  "rtf",
+  "xls",
+  "xlsx",
+  "ods",
+  "ppt",
+  "pptx",
+  "odp",
 ]);
 
 export function TodayPage({ commands }: { commands: QizhiCommands }) {
@@ -221,10 +248,12 @@ export function TodayPage({ commands }: { commands: QizhiCommands }) {
     const [field, direction] = sort.split("-");
     const factor = direction === "asc" ? 1 : -1;
     return snapshot.files
-      .filter(
-        (file) =>
-          category === "all" || fileCategory(file.canonicalPath) === category,
-      )
+      .filter((file) => {
+        const fileType = fileCategory(file.canonicalPath);
+        return (
+          fileType !== null && (category === "all" || fileType === category)
+        );
+      })
       .filter((file) => wildcardMatches(filename(file.canonicalPath), query))
       .sort((left, right) => {
         if (field === "name") {

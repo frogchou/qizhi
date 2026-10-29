@@ -248,6 +248,40 @@ describe("TodayPage", () => {
     ]);
   });
 
+  it("shows only recognized documents when the document filter is selected", async () => {
+    const snapshot: TodaySnapshot = {
+      state: "ready",
+      files: [
+        {
+          ...readySnapshot.files[0],
+          id: 11,
+          canonicalPath: "D:\\工作\\出差申请.docx",
+        },
+        {
+          ...readySnapshot.files[0],
+          id: 12,
+          canonicalPath: "D:\\工作\\report.py",
+        },
+        {
+          ...readySnapshot.files[0],
+          id: 13,
+          canonicalPath: "D:\\工作\\build-output.o",
+        },
+      ],
+      clusters: [{ label: "本机文件", fileIds: [11, 12, 13] }],
+    };
+    render(<TodayPage commands={commands(snapshot)} />);
+    await screen.findByText("出差申请.docx");
+
+    fireEvent.change(screen.getByLabelText("文件类型筛选"), {
+      target: { value: "documents" },
+    });
+
+    expect(screen.getByText("出差申请.docx")).toBeInTheDocument();
+    expect(screen.queryByText("report.py")).not.toBeInTheDocument();
+    expect(screen.queryByText("build-output.o")).not.toBeInTheDocument();
+  });
+
   it("offers native file actions from a file row context menu", async () => {
     const client = commands();
     render(<TodayPage commands={client} />);
