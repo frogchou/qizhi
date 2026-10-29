@@ -7,7 +7,10 @@ pub fn apply(connection: &Connection) -> Result<()> {
         [],
     )?;
 
-    for (version, migration) in [(2, include_str!("../../migrations/0002_ntfs_index.sql"))] {
+    for (version, migration) in [
+        (2, include_str!("../../migrations/0002_ntfs_index.sql")),
+        (3, include_str!("../../migrations/0003_ntfs_staging.sql")),
+    ] {
         let applied = connection.query_row(
             "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version = ?1)",
             [version],

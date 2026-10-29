@@ -2,6 +2,7 @@
 pub enum VolumeState {
     Ready,
     Building,
+    Syncing,
     RebuildRequired,
     Unsupported,
     Unavailable,
@@ -13,6 +14,7 @@ impl VolumeState {
         match self {
             Self::Ready => "ready",
             Self::Building => "building",
+            Self::Syncing => "syncing",
             Self::RebuildRequired => "rebuild_required",
             Self::Unsupported => "unsupported",
             Self::Unavailable => "unavailable",
@@ -24,6 +26,7 @@ impl VolumeState {
         match value {
             "ready" => Some(Self::Ready),
             "building" => Some(Self::Building),
+            "syncing" => Some(Self::Syncing),
             "rebuild_required" => Some(Self::RebuildRequired),
             "unsupported" => Some(Self::Unsupported),
             "unavailable" => Some(Self::Unavailable),

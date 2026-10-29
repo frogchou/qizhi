@@ -111,3 +111,101 @@ fn rejects_a_page_for_an_unknown_volume_without_advancing_a_checkpoint() {
     drop(database);
     let _ = std::fs::remove_file(path);
 }
+
+#[test]
+fn keeps_the_last_ready_index_visible_until_a_rebuild_is_published() {
+    let path = temporary_database_path("ntfs-staged-build");
+    let database = Database::open(&path).expect("database opens");
+    let repository = database.ntfs_index();
+    let volume = repository
+        .upsert_volume(&work_volume())
+        .expect("volume persists");
+
+    repository
+        .apply_page(&IndexPage {
+            volume_id: volume.id,
+            entries: vec![],
+            events: vec![DiscoveredEvent {
+                file_reference_number: "old".to_owned(),
+                canonical_path: r"D:\\work\\old.docx".to_owned(),
+                event_kind: "modified".to_owned(),
+                modified_at_utc_ms: 1_793_189_400_000,
+                size_bytes: Some(1),
+                source: "本机 NTFS 索引".to_owned(),
+            }],
+            checkpoint: UsnCheckpoint {
+                usn_journal_id: "journal-1".to_owned(),
+                next_usn: "10".to_owned(),
+                first_usn_seen: "1".to_owned(),
+                record_major_version: 2,
+                last_successful_sync_at_utc_ms: 1_793_189_401_000,
+            },
+        })
+        .expect("old index persists");
+
+    repository
+        .begin_rebuild(volume.id, "build-1", 1_793_189_402_000)
+        .expect("build begins");
+    repository
+        .stage_rebuild_page(
+            volume.id,
+            "build-1",
+            &IndexPage {
+                volume_id: volume.id,
+                entries: vec![],
+                events: vec![DiscoveredEvent {
+                    file_reference_number: "new".to_owned(),
+                    canonical_path: r"D:\\work\\new.docx".to_owned(),
+                    event_kind: "modified".to_owned(),
+                    modified_at_utc_ms: 1_793_189_402_000,
+                    size_bytes: Some(2),
+                    source: "本机 NTFS 索引".to_owned(),
+                }],
+                checkpoint: UsnCheckpoint {
+                    usn_journal_id: "journal-2".to_owned(),
+                    next_usn: "20".to_owned(),
+                    first_usn_seen: "11".to_owned(),
+                    record_major_version: 2,
+                    last_successful_sync_at_utc_ms: 1_793_189_403_000,
+                },
+            },
+        )
+        .expect("new data stages");
+
+    assert_eq!(
+        repository
+            .checkpoint_for(volume.id)
+            .expect("checkpoint reads")
+            .expect("old checkpoint remains").next_usn,
+        "10"
+    );
+    assert_eq!(
+        repository
+            .list_events_between(1_793_145_600_000, 1_793_232_000_000)
+            .expect("events read")[0]
+            .file_reference_number,
+        "old"
+    );
+
+    repository
+        .publish_rebuild(volume.id, "build-1", 1_793_189_404_000)
+        .expect("build publishes atomically");
+
+    assert_eq!(
+        repository
+            .checkpoint_for(volume.id)
+            .expect("checkpoint reads")
+            .expect("new checkpoint persists").next_usn,
+        "20"
+    );
+    assert_eq!(
+        repository
+            .list_events_between(1_793_145_600_000, 1_793_232_000_000)
+            .expect("events read")[0]
+            .file_reference_number,
+        "new"
+    );
+
+    drop(database);
+    let _ = std::fs::remove_file(path);
+}

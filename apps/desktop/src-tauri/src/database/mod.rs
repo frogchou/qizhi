@@ -38,6 +38,9 @@ pub struct Database(Arc<Mutex<Connection>>);
 impl Database {
     pub fn open(path: &Path) -> Result<Self, AppError> {
         let connection = Connection::open(path).map_err(|_| AppError::Storage)?;
+        connection
+            .execute_batch("PRAGMA foreign_keys = ON;")
+            .map_err(|_| AppError::Storage)?;
         migrations::apply(&connection).map_err(|_| AppError::Storage)?;
         Ok(Self(Arc::new(Mutex::new(connection))))
     }
