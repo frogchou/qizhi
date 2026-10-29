@@ -1,3 +1,5 @@
+#[cfg(windows)]
+use qizhi_desktop_lib::ntfs::snapshot::parse_snapshot_page;
 use qizhi_desktop_lib::ntfs::usn::{
     USN_REASON_BASIC_INFO_CHANGE, USN_REASON_CLOSE, USN_REASON_DATA_OVERWRITE,
     USN_REASON_FILE_DELETE, USN_REASON_RENAME_NEW_NAME, UsnParseError, parse_usn_page,
@@ -137,4 +139,16 @@ fn rejects_a_record_with_a_name_outside_its_declared_length() {
         parse_usn_page(&page),
         Err(UsnParseError::InvalidNameRange)
     ));
+}
+
+#[cfg(windows)]
+#[test]
+fn decodes_an_mft_enumeration_cursor_as_a_file_reference_not_a_usn() {
+    let mut page = 77_u64.to_le_bytes().to_vec();
+    page.extend(v2_record("notes.md", 1, 2, USN_REASON_FILE_DELETE));
+
+    let parsed = parse_snapshot_page(&page).expect("snapshot page parses");
+
+    assert_eq!(parsed.next_file_reference_number, 77);
+    assert_eq!(parsed.records[0].name, "notes.md");
 }
