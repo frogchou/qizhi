@@ -86,6 +86,16 @@ pub struct DiscoveredEvent {
     pub source: String,
 }
 
+/// A file reconstructed from the service-owned NTFS entry tree. It contains
+/// metadata only; file contents are never read at the indexer boundary.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct IndexedFileCandidate {
+    pub file_reference_number: String,
+    pub canonical_path: String,
+    pub modified_at_utc_ms: i64,
+    pub size_bytes: Option<i64>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IndexPage {
     pub volume_id: i64,

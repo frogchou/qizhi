@@ -17,8 +17,8 @@ pub use indexer::{
     UsnVolumeSource,
 };
 pub use model::{
-    CallerIndexPolicy, DiscoveredEvent, IndexDiagnostic, IndexEntry, IndexPage, IndexedVolume,
-    UsnCheckpoint, VolumeDescriptor, VolumeState,
+    CallerIndexPolicy, DiscoveredEvent, IndexDiagnostic, IndexEntry, IndexPage,
+    IndexedFileCandidate, IndexedVolume, UsnCheckpoint, VolumeDescriptor, VolumeState,
 };
 pub use repository::NtfsIndexRepository;
 pub use service::{WindowsIndexExecutor, WindowsUsnVolumeSource};

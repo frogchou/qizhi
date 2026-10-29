@@ -3,8 +3,8 @@ use rusqlite::{OptionalExtension, params};
 use crate::{
     database::{AppError, Database},
     ntfs::{
-        CallerIndexPolicy, DiscoveredEvent, IndexPage, IndexedVolume, UsnCheckpoint,
-        VolumeDescriptor, VolumeState,
+        CallerIndexPolicy, DiscoveredEvent, IndexPage, IndexedFileCandidate, IndexedVolume,
+        UsnCheckpoint, VolumeDescriptor, VolumeState,
     },
 };
 
@@ -328,6 +328,56 @@ impl NtfsIndexRepository {
                         modified_at_utc_ms: row.get(3)?,
                         size_bytes: row.get(4)?,
                         source: row.get(5)?,
+                    })
+                })?
+                .collect()
+        })
+    }
+
+    pub fn list_file_candidates_between(
+        &self,
+        start_utc_ms: i64,
+        end_utc_ms: i64,
+    ) -> Result<Vec<IndexedFileCandidate>, AppError> {
+        self.database.with_connection(|connection| {
+            let mut statement = connection.prepare(
+                "WITH RECURSIVE candidates AS (
+                    SELECT volume_id,file_reference_number,parent_file_reference_number,name,modified_at_utc_ms,size_bytes
+                    FROM ntfs_entries
+                    WHERE is_directory = 0
+                      AND deleted_at_utc_ms IS NULL
+                      AND modified_at_utc_ms >= ?1
+                      AND modified_at_utc_ms < ?2
+                ), ancestry AS (
+                    SELECT volume_id,file_reference_number AS target_reference,parent_file_reference_number,name,modified_at_utc_ms,size_bytes,name AS relative_path,0 AS depth
+                    FROM candidates
+                    UNION ALL
+                    SELECT parent.volume_id,ancestry.target_reference,parent.parent_file_reference_number,parent.name,ancestry.modified_at_utc_ms,ancestry.size_bytes,
+                           CASE WHEN parent.name IS NULL OR parent.name = '' OR parent.name = '.' THEN ancestry.relative_path ELSE parent.name || '\\' || ancestry.relative_path END,
+                           ancestry.depth + 1
+                    FROM ancestry
+                    JOIN ntfs_entries parent ON parent.volume_id = ancestry.volume_id AND parent.file_reference_number = ancestry.parent_file_reference_number
+                    WHERE ancestry.parent_file_reference_number IS NOT NULL
+                      AND ancestry.depth < 128
+                      AND parent.file_reference_number != ancestry.target_reference
+                ), deepest AS (
+                    SELECT volume_id,target_reference,MAX(depth) AS depth
+                    FROM ancestry
+                    GROUP BY volume_id,target_reference
+                )
+                SELECT ancestry.target_reference,ntfs_volumes.current_mount_path || ancestry.relative_path,ancestry.modified_at_utc_ms,ancestry.size_bytes
+                FROM ancestry
+                JOIN deepest ON deepest.volume_id = ancestry.volume_id AND deepest.target_reference = ancestry.target_reference AND deepest.depth = ancestry.depth
+                JOIN ntfs_volumes ON ntfs_volumes.id = ancestry.volume_id
+                ORDER BY ancestry.modified_at_utc_ms DESC, ancestry.target_reference ASC",
+            )?;
+            statement
+                .query_map([start_utc_ms, end_utc_ms], |row| {
+                    Ok(IndexedFileCandidate {
+                        file_reference_number: row.get(0)?,
+                        canonical_path: row.get(1)?,
+                        modified_at_utc_ms: row.get(2)?,
+                        size_bytes: row.get(3)?,
                     })
                 })?
                 .collect()
