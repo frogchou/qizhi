@@ -6,7 +6,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use rusqlite::{Connection, Result as SqlResult};
+use rusqlite::{Connection, Result as SqlResult, Transaction};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -55,6 +55,9 @@ impl Database {
     pub fn files(&self) -> repositories::FileRepository {
         repositories::FileRepository::new(self.clone())
     }
+    pub fn ntfs_index(&self) -> crate::ntfs::NtfsIndexRepository {
+        crate::ntfs::NtfsIndexRepository::new(self.clone())
+    }
     pub fn configs(&self) -> repositories::ConfigRepository {
         repositories::ConfigRepository::new(self.clone())
     }
@@ -85,5 +88,16 @@ impl Database {
     ) -> Result<T, AppError> {
         let connection = self.0.lock().map_err(|_| AppError::Storage)?;
         action(&connection).map_err(|_| AppError::Storage)
+    }
+
+    pub(crate) fn with_transaction<T>(
+        &self,
+        action: impl FnOnce(&Transaction<'_>) -> SqlResult<T>,
+    ) -> Result<T, AppError> {
+        let mut connection = self.0.lock().map_err(|_| AppError::Storage)?;
+        let transaction = connection.transaction().map_err(|_| AppError::Storage)?;
+        let result = action(&transaction).map_err(|_| AppError::Storage)?;
+        transaction.commit().map_err(|_| AppError::Storage)?;
+        Ok(result)
     }
 }

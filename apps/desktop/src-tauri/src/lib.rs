@@ -5,6 +5,7 @@ pub mod contracts;
 pub mod database;
 pub mod discovery;
 pub mod network;
+pub mod ntfs;
 pub mod ragflow;
 pub mod scan;
 pub mod system;

@@ -30,7 +30,7 @@ fn migrates_a_fresh_database_and_upserts_one_file_identity() {
     repository.upsert(&record).expect("first upsert succeeds");
     repository.upsert(&record).expect("second upsert succeeds");
 
-    assert_eq!(database.schema_version().expect("schema version reads"), 1);
+    assert_eq!(database.schema_version().expect("schema version reads"), 2);
     assert_eq!(repository.count().expect("record count reads"), 1);
 
     let _ = std::fs::remove_file(path);
@@ -67,5 +67,16 @@ fn lists_records_inclusive_of_day_start_and_exclusive_of_next_day_start() {
     assert_eq!(results[0].file_identity, "at-start");
     assert_eq!(results[1].file_identity, "before-end");
 
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn migrates_existing_database_to_the_ntfs_index_schema() {
+    let path = temporary_database_path("ntfs-index");
+    let database = Database::open(&path).expect("database opens");
+
+    assert_eq!(database.schema_version().expect("schema version"), 2);
+
+    drop(database);
     let _ = std::fs::remove_file(path);
 }
