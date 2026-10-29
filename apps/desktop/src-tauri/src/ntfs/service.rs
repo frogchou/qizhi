@@ -56,7 +56,18 @@ impl WindowsIndexExecutor {
                     let indexed = self.repository.volume_by_guid(&descriptor.volume_guid);
                     let outcome = match (rebuild, indexed) {
                         (true, _) | (_, Ok(None)) => indexer.bootstrap(descriptor.clone()),
-                        (false, Ok(Some(volume))) => indexer.sync(&volume),
+                        (false, Ok(Some(volume))) => match indexer.sync(&volume) {
+                            // A previous bootstrap may have been interrupted after the volume row
+                            // was created but before a checkpoint was published. Treat that state
+                            // as a recoverable rebuild, not a successful empty synchronization.
+                            Ok(progress)
+                                if progress.state
+                                    == crate::ntfs::IndexProgressState::RebuildRequired =>
+                            {
+                                indexer.bootstrap(descriptor.clone())
+                            }
+                            result => result,
+                        },
                         (_, Err(_)) => Err(crate::ntfs::IndexerError::Source(
                             "无法读取本地 NTFS 索引状态".to_owned(),
                         )),

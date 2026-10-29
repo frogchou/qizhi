@@ -193,3 +193,52 @@ fn marks_only_the_affected_volume_for_rebuild_when_its_journal_changes() {
     drop(database);
     let _ = std::fs::remove_file(path);
 }
+
+#[test]
+fn recovers_an_interrupted_initial_index_by_bootstrapping_after_sync_requests_rebuild() {
+    let path = temporary_database_path("ntfs-rebuild-recovery");
+    let database = Database::open(&path).expect("database opens");
+    let descriptor = volume();
+    database
+        .ntfs_index()
+        .upsert_volume(&descriptor)
+        .expect("persist interrupted volume row");
+    let source = ScriptedSource {
+        journals: Mutex::new(VecDeque::from([
+            JournalCursor {
+                journal_id: "journal-1".to_owned(),
+                first_usn: "1".to_owned(),
+                next_usn: "4".to_owned(),
+                record_major_version: 2,
+            },
+            JournalCursor {
+                journal_id: "journal-1".to_owned(),
+                first_usn: "1".to_owned(),
+                next_usn: "4".to_owned(),
+                record_major_version: 2,
+            },
+        ])),
+        snapshot: Mutex::new(VecDeque::from([page("4")])),
+        replay: Mutex::new(VecDeque::new()),
+    };
+    let indexer = NtfsIndexer::new(database.ntfs_index(), source);
+    let interrupted = database
+        .ntfs_index()
+        .volume_by_guid(&descriptor.volume_guid)
+        .expect("read volume")
+        .expect("volume exists");
+
+    let sync = indexer
+        .sync(&interrupted)
+        .expect("sync returns rebuild request");
+    assert_eq!(sync.state, IndexProgressState::RebuildRequired);
+
+    let rebuilt = indexer
+        .bootstrap(descriptor)
+        .expect("bootstrap recovers index");
+    assert_eq!(rebuilt.state, IndexProgressState::Ready);
+    assert_eq!(rebuilt.processed_records, 1);
+
+    drop(database);
+    let _ = std::fs::remove_file(path);
+}
