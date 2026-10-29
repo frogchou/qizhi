@@ -7,6 +7,10 @@ use crate::{
     config::{ConfigService, ServiceConfigurationInput, secret_store::WindowsCredentialStore},
     discovery::selector::select_discovery_with_paths,
     network::http::HttpClient,
+    ntfs::{
+        ipc::{INDEXER_PROTOCOL_VERSION, IndexerRequest, IndexerRequestKind},
+        pipe::call_indexer_service,
+    },
     scan::{
         configuration::ScanRules,
         file_filter::{FileCategory, default_file_categories},
@@ -70,6 +74,37 @@ pub fn save_settings(
 pub struct ConnectionStatus {
     available: bool,
     message: String,
+}
+
+#[tauri::command]
+pub fn get_ntfs_indexer_status() -> ConnectionStatus {
+    let request = IndexerRequest {
+        protocol_version: INDEXER_PROTOCOL_VERSION,
+        request_id: format!("desktop-health-{}", chrono::Utc::now().timestamp_millis()),
+        kind: IndexerRequestKind::Health,
+    };
+    local_indexer_connection_status(call_indexer_service(&request))
+}
+
+fn local_indexer_connection_status(
+    result: Result<crate::ntfs::ipc::IndexerResponse, String>,
+) -> ConnectionStatus {
+    match result {
+        Ok(response) if response.status == "ready" => ConnectionStatus {
+            available: true,
+            message: "本地 NTFS 索引服务已连接。".to_owned(),
+        },
+        Ok(response) => ConnectionStatus {
+            available: false,
+            message: response
+                .message
+                .unwrap_or_else(|| "本地 NTFS 索引服务暂不可用。".to_owned()),
+        },
+        Err(message) => ConnectionStatus {
+            available: false,
+            message,
+        },
+    }
 }
 
 #[tauri::command]
@@ -149,7 +184,8 @@ fn connection_is_usable(service: &str, status: &str, body: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::connection_is_usable;
+    use super::{connection_is_usable, local_indexer_connection_status};
+    use crate::ntfs::ipc::{INDEXER_PROTOCOL_VERSION, IndexerResponse};
 
     #[test]
     fn connection_tests_do_not_delegate_http_to_curl() {
@@ -175,6 +211,18 @@ mod tests {
             "200",
             r#"{"code":0,"message":"success","data":[]}"#,
         ));
+    }
+
+    #[test]
+    fn reports_a_healthy_local_indexer_without_falling_back_to_file_scanning() {
+        let status = local_indexer_connection_status(Ok(IndexerResponse {
+            protocol_version: INDEXER_PROTOCOL_VERSION,
+            request_id: "health-1".to_owned(),
+            status: "ready".to_owned(),
+            message: None,
+        }));
+        assert!(status.available);
+        assert!(status.message.contains("NTFS"));
     }
 }
 

@@ -13,6 +13,7 @@ export interface QizhiCommands {
   ): Promise<ConnectionStatus>;
   pickFolder(): Promise<string | null>;
   getEverythingStatus?(): Promise<EverythingStatus>;
+  getNtfsIndexerStatus?(): Promise<ConnectionStatus>;
   getTodaySnapshot(): Promise<TodaySnapshot>;
   getTodayScanStatus?(): Promise<TodayScanStatus>;
   refreshToday(): Promise<TodaySnapshot>;
@@ -195,6 +196,7 @@ export const tauriCommands: QizhiCommands = {
     return typeof selected === "string" ? selected : null;
   },
   getEverythingStatus: () => invoke("get_everything_status"),
+  getNtfsIndexerStatus: () => invoke("get_ntfs_indexer_status"),
   getTodaySnapshot: () => invoke("get_today_snapshot"),
   getTodayScanStatus: () => invoke("get_today_scan_status"),
   refreshToday: () => invoke("refresh_today"),

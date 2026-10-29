@@ -49,7 +49,7 @@ pub fn serve_health_pipe_until_stopped(
     while !stopped.load(Ordering::SeqCst) {
         let mut descriptor = std::ptr::null_mut();
         let mut descriptor_size = 0_u32;
-        let mut sddl = "D:P(A;;GRGW;;;SY)(A;;GRGW;;;BA)(A;;GRGW;;;IU)"
+        let mut sddl = "D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;IU)"
             .encode_utf16()
             .chain(std::iter::once(0))
             .collect::<Vec<_>>();

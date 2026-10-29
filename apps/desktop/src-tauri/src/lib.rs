@@ -46,6 +46,7 @@ pub fn run() {
             commands::settings::get_settings,
             commands::settings::save_settings,
             commands::settings::test_service_connection,
+            commands::settings::get_ntfs_indexer_status,
             commands::settings::get_everything_status,
             commands::settings::list_scan_rules,
             commands::settings::save_scan_rules,
