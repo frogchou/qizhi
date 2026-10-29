@@ -4,6 +4,19 @@ use qizhi_desktop_lib::ntfs::ipc::{
 };
 use qizhi_desktop_lib::ntfs::pipe::handle_request_bytes;
 
+#[cfg(windows)]
+#[test]
+#[ignore = "requires a UAC-installed QizhiNtfsIndexer service; run with --ignored on a Windows integration machine"]
+fn connects_to_a_real_local_indexer_pipe_when_explicitly_enabled() {
+    let response = qizhi_desktop_lib::ntfs::pipe::call_indexer_service(&IndexerRequest {
+        protocol_version: INDEXER_PROTOCOL_VERSION,
+        request_id: "real-pipe-health".to_owned(),
+        kind: IndexerRequestKind::Health,
+    })
+    .expect("a locally installed indexer service responds");
+    assert_eq!(response.status, "ready");
+}
+
 fn policy() -> IpcAuthorizationPolicy {
     IpcAuthorizationPolicy {
         caller_sid: "S-1-5-21-100".to_owned(),

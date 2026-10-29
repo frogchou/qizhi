@@ -3,6 +3,14 @@ use crate::ntfs::ipc::{
     IndexerResponse, MAX_IPC_MESSAGE_BYTES,
 };
 
+// `0x12019b` is the exact pipe-client access mask: read/write data, the
+// associated metadata access and synchronize. It intentionally excludes
+// `FILE_CREATE_PIPE_INSTANCE` (`0x4`), which generic write would grant.
+// The service subsequently derives the caller SID from the connected pipe;
+// request payloads never establish identity.
+#[cfg(windows)]
+const INDEXER_PIPE_SDDL: &str = "D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;0x12019b;;;AU)";
+
 pub fn handle_request_bytes(message: &[u8]) -> Vec<u8> {
     let response = if message.len() > MAX_IPC_MESSAGE_BYTES {
         error_response(String::new(), "本地索引请求超过大小限制")
@@ -49,12 +57,12 @@ pub fn serve_health_pipe_until_stopped(
     while !stopped.load(Ordering::SeqCst) {
         let mut descriptor = std::ptr::null_mut();
         let mut descriptor_size = 0_u32;
-        let mut sddl = "D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;IU)"
+        let mut sddl = INDEXER_PIPE_SDDL
             .encode_utf16()
             .chain(std::iter::once(0))
             .collect::<Vec<_>>();
         let created = unsafe {
-            // A protected DACL allows only LocalSystem, Administrators and interactive local users.
+            // The descriptor keeps the pipe local and prevents clients from creating instances.
             ConvertStringSecurityDescriptorToSecurityDescriptorW(
                 sddl.as_mut_ptr(),
                 1,
@@ -114,7 +122,11 @@ pub fn serve_health_pipe_until_stopped(
             )
         };
         if received != 0 {
-            let output = handle_request_bytes(&input[..read as usize]);
+            let output = match authenticated_client_sid(handle) {
+                Ok(_) => handle_request_bytes(&input[..read as usize]),
+                Err(message) => serde_json::to_vec(&error_response(String::new(), &message))
+                    .unwrap_or_else(|_| b"{}".to_vec()),
+            };
             let mut written = 0_u32;
             unsafe {
                 let _ = WriteFile(
@@ -135,6 +147,73 @@ pub fn serve_health_pipe_until_stopped(
 }
 
 #[cfg(windows)]
+fn authenticated_client_sid(pipe: windows_sys::Win32::Foundation::HANDLE) -> Result<String, String> {
+    use windows_sys::Win32::{
+        Foundation::{CloseHandle, GetLastError, ERROR_INSUFFICIENT_BUFFER, LocalFree},
+        Security::{GetTokenInformation, TokenUser, TOKEN_QUERY, TOKEN_USER},
+        Security::Authorization::ConvertSidToStringSidW,
+        System::{Pipes::GetNamedPipeClientProcessId, Threading::{OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION}},
+    };
+
+    let mut process_id = 0_u32;
+    if unsafe { GetNamedPipeClientProcessId(pipe, &mut process_id) } == 0 || process_id == 0 {
+        return Err(last_pipe_error("无法确认本地索引服务调用方"));
+    }
+    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, process_id) };
+    if process.is_null() {
+        return Err(last_pipe_error("无法打开本地索引服务调用方"));
+    }
+    let mut token = std::ptr::null_mut();
+    let opened = unsafe { OpenProcessToken(process, TOKEN_QUERY, &mut token) };
+    unsafe {
+        let _ = CloseHandle(process);
+    }
+    if opened == 0 {
+        return Err(last_pipe_error("无法验证本地索引服务调用方"));
+    }
+    let mut required = 0_u32;
+    let first = unsafe { GetTokenInformation(token, TokenUser, std::ptr::null_mut(), 0, &mut required) };
+    if first != 0 || unsafe { GetLastError() } != ERROR_INSUFFICIENT_BUFFER || required == 0 {
+        unsafe {
+            let _ = CloseHandle(token);
+        }
+        return Err(last_pipe_error("无法读取本地索引服务调用方身份"));
+    }
+    let mut buffer = vec![0_u8; required as usize];
+    let read = unsafe {
+        GetTokenInformation(
+            token,
+            TokenUser,
+            buffer.as_mut_ptr().cast(),
+            required,
+            &mut required,
+        )
+    };
+    unsafe {
+        let _ = CloseHandle(token);
+    }
+    if read == 0 {
+        return Err(last_pipe_error("无法读取本地索引服务调用方身份"));
+    }
+    let sid = unsafe { (*buffer.as_ptr().cast::<TOKEN_USER>()).User.Sid };
+    let mut sid_text = std::ptr::null_mut();
+    if unsafe { ConvertSidToStringSidW(sid, &mut sid_text) } == 0 || sid_text.is_null() {
+        return Err(last_pipe_error("无法验证本地索引服务调用方身份"));
+    }
+    let length = unsafe { (0..).take_while(|&offset| *sid_text.add(offset) != 0).count() };
+    let result = String::from_utf16(unsafe { std::slice::from_raw_parts(sid_text, length) })
+        .map_err(|_| "本地索引服务调用方身份无效".to_owned());
+    unsafe {
+        let _ = LocalFree(sid_text.cast());
+    }
+    match result {
+        Ok(sid) if !sid.is_empty() => Ok(sid),
+        Ok(_) => Err("本地索引服务调用方身份无效".to_owned()),
+        Err(error) => Err(error),
+    }
+}
+
+#[cfg(windows)]
 fn last_pipe_error(action: &str) -> String {
     use windows_sys::Win32::Foundation::GetLastError;
     format!("{action}（Windows 错误 {}）", unsafe { GetLastError() })
@@ -151,7 +230,13 @@ fn error_response(request_id: String, message: &str) -> IndexerResponse {
 
 #[cfg(windows)]
 pub fn call_indexer_service(request: &IndexerRequest) -> Result<IndexerResponse, String> {
-    use windows_sys::Win32::{Foundation::GetLastError, System::Pipes::CallNamedPipeW};
+    use windows_sys::Win32::{
+        Foundation::{CloseHandle, GetLastError, INVALID_HANDLE_VALUE},
+        Storage::FileSystem::{
+            CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_READ_DATA, FILE_WRITE_DATA, OPEN_EXISTING,
+            ReadFile, SYNCHRONIZE, WriteFile,
+        },
+    };
 
     let encoded = serde_json::to_vec(request).map_err(|_| "本地索引请求无法编码".to_owned())?;
     if encoded.len() > MAX_IPC_MESSAGE_BYTES {
@@ -161,21 +246,59 @@ pub fn call_indexer_service(request: &IndexerRequest) -> Result<IndexerResponse,
         .encode_utf16()
         .chain(std::iter::once(0))
         .collect::<Vec<_>>();
+    let access = FILE_READ_DATA | FILE_WRITE_DATA | SYNCHRONIZE;
+    let handle = unsafe {
+        // Explicit rights avoid FILE_APPEND_DATA/FILE_CREATE_PIPE_INSTANCE implied by GENERIC_WRITE.
+        CreateFileW(
+            pipe_name.as_ptr(),
+            access,
+            0,
+            std::ptr::null(),
+            OPEN_EXISTING,
+            FILE_ATTRIBUTE_NORMAL,
+            std::ptr::null_mut(),
+        )
+    };
+    if handle == INVALID_HANDLE_VALUE {
+        return Err(format!(
+            "本地索引服务不可用（Windows 错误 {}）",
+            unsafe { GetLastError() }
+        ));
+    }
+    let mut written = 0_u32;
+    let wrote = unsafe {
+        WriteFile(
+            handle,
+            encoded.as_ptr(),
+            encoded.len() as u32,
+            &mut written,
+            std::ptr::null_mut(),
+        )
+    };
+    if wrote == 0 || written != encoded.len() as u32 {
+        unsafe {
+            let _ = CloseHandle(handle);
+        }
+        return Err(format!(
+            "无法向本地索引服务发送请求（Windows 错误 {}）",
+            unsafe { GetLastError() }
+        ));
+    }
     let mut response = vec![0_u8; MAX_IPC_MESSAGE_BYTES];
     let mut read = 0_u32;
-    let success = unsafe {
-        // The pipe name and buffers are valid for this synchronous call.
-        CallNamedPipeW(
-            pipe_name.as_ptr(),
-            encoded.as_ptr().cast(),
-            encoded.len() as u32,
+    let received = unsafe {
+        ReadFile(
+            handle,
             response.as_mut_ptr().cast(),
             response.len() as u32,
             &mut read,
-            5_000,
+            std::ptr::null_mut(),
         )
     };
-    if success == 0 {
+    unsafe {
+        let _ = CloseHandle(handle);
+    }
+    if received == 0 {
         return Err(format!(
             "本地索引服务不可用（Windows 错误 {}）",
             unsafe { GetLastError() }
@@ -188,4 +311,14 @@ pub fn call_indexer_service(request: &IndexerRequest) -> Result<IndexerResponse,
 #[cfg(not(windows))]
 pub fn call_indexer_service(_: &IndexerRequest) -> Result<IndexerResponse, String> {
     Err("本地索引服务仅支持 Windows".to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    #[cfg(windows)]
+    #[test]
+    fn pipe_acl_grants_only_the_documented_client_rights() {
+        assert!(super::INDEXER_PIPE_SDDL.contains("0x12019b;;;AU"));
+        assert!(!super::INDEXER_PIPE_SDDL.contains("GA;;;AU"));
+    }
 }
