@@ -147,7 +147,7 @@ fn stopped_status() -> windows_sys::Win32::System::Services::SERVICE_STATUS {
 fn install_service() -> Result<(), String> {
     use windows_sys::Win32::System::Services::{
         ChangeServiceConfig2W, ChangeServiceConfigW, CloseServiceHandle, CreateServiceW,
-        OpenSCManagerW, OpenServiceW, SC_MANAGER_CREATE_SERVICE, SERVICE_ALL_ACCESS,
+        OpenSCManagerW, OpenServiceW, SC_MANAGER_CONNECT, SC_MANAGER_CREATE_SERVICE, SERVICE_ALL_ACCESS,
         SERVICE_CONFIG_SERVICE_SID_INFO, SERVICE_DEMAND_START, SERVICE_ERROR_NORMAL,
         SERVICE_SID_INFO, SERVICE_SID_TYPE_UNRESTRICTED, SERVICE_WIN32_OWN_PROCESS, StartServiceW,
     };
@@ -157,7 +157,7 @@ fn install_service() -> Result<(), String> {
         OpenSCManagerW(
             std::ptr::null(),
             std::ptr::null(),
-            SC_MANAGER_CREATE_SERVICE,
+            SC_MANAGER_CONNECT | SC_MANAGER_CREATE_SERVICE,
         )
     };
     if manager.is_null() {
@@ -233,12 +233,13 @@ fn install_service() -> Result<(), String> {
         return Err(last_error("无法配置本地索引服务身份"));
     }
     let started = unsafe { StartServiceW(service, 0, std::ptr::null()) };
+    let start_error = (started == 0).then(|| unsafe { windows_sys::Win32::Foundation::GetLastError() });
     unsafe {
         let _ = CloseServiceHandle(service);
         let _ = CloseServiceHandle(manager);
     }
-    if started == 0 {
-        return Err(last_error("无法启动本地索引服务"));
+    if let Some(error) = start_error.filter(|error| *error != 1_056) {
+        return Err(format!("无法启动本地索引服务（Windows 错误 {error}）"));
     }
     Ok(())
 }
@@ -247,14 +248,14 @@ fn install_service() -> Result<(), String> {
 fn uninstall_service() -> Result<(), String> {
     use windows_sys::Win32::System::Services::{
         CloseServiceHandle, ControlService, DeleteService, OpenSCManagerW, OpenServiceW,
-        SC_MANAGER_CREATE_SERVICE, SERVICE_ALL_ACCESS, SERVICE_STATUS,
+        SC_MANAGER_CONNECT, SERVICE_ALL_ACCESS, SERVICE_STATUS,
     };
 
     let manager = unsafe {
         OpenSCManagerW(
             std::ptr::null(),
             std::ptr::null(),
-            SC_MANAGER_CREATE_SERVICE,
+            SC_MANAGER_CONNECT,
         )
     };
     if manager.is_null() {
