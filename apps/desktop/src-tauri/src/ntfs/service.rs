@@ -1,15 +1,106 @@
 #[cfg(windows)]
+use std::collections::HashSet;
+
+#[cfg(windows)]
 use crate::ntfs::{
-    indexer::{IndexSourcePage, JournalCursor, UsnVolumeSource},
-    model::{IndexEntry, UsnCheckpoint, VolumeDescriptor},
+    control::IndexExecutor,
+    indexer::{IndexSourcePage, JournalCursor, NtfsIndexer, UsnVolumeSource},
+    model::{CallerIndexPolicy, IndexEntry, UsnCheckpoint, VolumeDescriptor, VolumeState},
     replay::read_replay_page,
+    repository::NtfsIndexRepository,
     snapshot::read_snapshot_page,
     usn::UsnRecord,
+    volume::{VolumeQualification, inspect_volume},
     win32::{open_volume, query_journal},
 };
 
 #[cfg(windows)]
 pub struct WindowsUsnVolumeSource;
+
+#[cfg(windows)]
+#[derive(Clone)]
+pub struct WindowsIndexExecutor {
+    repository: NtfsIndexRepository,
+}
+
+#[cfg(windows)]
+impl WindowsIndexExecutor {
+    pub fn new(repository: NtfsIndexRepository) -> Self {
+        Self { repository }
+    }
+
+    fn execute(&self, policy: &CallerIndexPolicy, rebuild: bool) -> Result<(), String> {
+        let mut seen_volumes = HashSet::new();
+        let mut first_failure = None;
+        for root in &policy.allowed_roots {
+            let inspected = inspect_volume(root);
+            if !seen_volumes.insert(inspected.volume_guid.clone()) {
+                continue;
+            }
+            let mut descriptor = VolumeDescriptor {
+                volume_guid: inspected.volume_guid,
+                current_mount_path: inspected.mount_path,
+                serial_number: (!inspected.serial_number.is_empty())
+                    .then_some(inspected.serial_number),
+                file_system: match &inspected.qualification {
+                    VolumeQualification::Indexable => "NTFS".to_owned(),
+                    VolumeQualification::Unsupported(message)
+                    | VolumeQualification::Unavailable(message) => message.clone(),
+                },
+                state: VolumeState::Ready,
+                state_message: None,
+            };
+            match inspected.qualification {
+                VolumeQualification::Indexable => {
+                    let indexer = NtfsIndexer::new(self.repository.clone(), WindowsUsnVolumeSource);
+                    let indexed = self.repository.volume_by_guid(&descriptor.volume_guid);
+                    let outcome = match (rebuild, indexed) {
+                        (true, _) | (_, Ok(None)) => indexer.bootstrap(descriptor.clone()),
+                        (false, Ok(Some(volume))) => indexer.sync(&volume),
+                        (_, Err(_)) => Err(crate::ntfs::IndexerError::Source(
+                            "无法读取本地 NTFS 索引状态".to_owned(),
+                        )),
+                    };
+                    if let Err(error) = outcome {
+                        descriptor.state = VolumeState::Failed;
+                        descriptor.state_message = Some("建立或同步本地 NTFS 索引失败".to_owned());
+                        if let Ok(volume) = self.repository.upsert_volume(&descriptor) {
+                            let _ = self.repository.set_volume_state(
+                                volume.id,
+                                VolumeState::Failed,
+                                descriptor.state_message.as_deref(),
+                                Some(chrono::Utc::now().timestamp_millis()),
+                            );
+                        }
+                        first_failure.get_or_insert_with(|| error.to_string());
+                    }
+                }
+                VolumeQualification::Unsupported(message) => {
+                    descriptor.state = VolumeState::Unsupported;
+                    descriptor.state_message = Some(message);
+                    let _ = self.repository.upsert_volume(&descriptor);
+                }
+                VolumeQualification::Unavailable(message) => {
+                    descriptor.state = VolumeState::Unavailable;
+                    descriptor.state_message = Some(message);
+                    let _ = self.repository.upsert_volume(&descriptor);
+                }
+            }
+        }
+        first_failure.map_or(Ok(()), Err)
+    }
+}
+
+#[cfg(windows)]
+impl IndexExecutor for WindowsIndexExecutor {
+    fn build(&self, policy: &CallerIndexPolicy) -> Result<(), String> {
+        self.execute(policy, true)
+    }
+
+    fn sync(&self, policy: &CallerIndexPolicy) -> Result<(), String> {
+        self.execute(policy, false)
+    }
+}
 
 #[cfg(windows)]
 impl UsnVolumeSource for WindowsUsnVolumeSource {
@@ -115,3 +206,7 @@ fn filetime_to_unix_milliseconds(value: i64) -> Option<i64> {
 
 #[cfg(not(windows))]
 pub struct WindowsUsnVolumeSource;
+
+#[cfg(not(windows))]
+#[derive(Clone)]
+pub struct WindowsIndexExecutor;

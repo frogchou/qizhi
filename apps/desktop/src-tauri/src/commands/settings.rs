@@ -107,6 +107,24 @@ fn local_indexer_connection_status(
     }
 }
 
+fn configure_local_indexer(allowed_roots: Vec<String>) -> Result<(), String> {
+    let request = IndexerRequest {
+        protocol_version: INDEXER_PROTOCOL_VERSION,
+        request_id: format!(
+            "desktop-configure-{}",
+            chrono::Utc::now().timestamp_millis()
+        ),
+        kind: IndexerRequestKind::Configure { allowed_roots },
+    };
+    match call_indexer_service(&request) {
+        Ok(response) if response.status == "ready" => Ok(()),
+        Ok(response) => Err(response
+            .message
+            .unwrap_or_else(|| "本地 NTFS 索引服务拒绝了扫描范围".to_owned())),
+        Err(message) => Err(message),
+    }
+}
+
 #[tauri::command]
 pub fn test_service_connection(input: SaveSettingsInput) -> ConnectionStatus {
     if !matches!(input.service.as_str(), "openai" | "ragflow")
@@ -224,6 +242,13 @@ mod tests {
         assert!(status.available);
         assert!(status.message.contains("NTFS"));
     }
+
+    #[test]
+    fn scan_scope_sync_uses_the_local_indexer_protocol_instead_of_a_shell() {
+        let source = include_str!("settings.rs").to_ascii_lowercase();
+        assert!(source.contains("indexerrequestkind::configure"));
+        assert!(!source.contains(&["power", "shell.exe"].concat()));
+    }
 }
 
 #[derive(Serialize)]
@@ -319,7 +344,7 @@ pub fn save_scan_rules(
     if roots.is_empty() {
         return Err("invalid_config".to_owned());
     }
-    state
+    let saved = state
         .scan_rules
         .save(ScanRules {
             allowed_roots: roots
@@ -331,6 +356,15 @@ pub fn save_scan_rules(
             everything_sdk_path: None,
             es_cli_path: input.es_cli_path,
         })
-        .map(rules_output)
-        .map_err(|error| error.code().to_owned())
+        .map_err(|error| error.code().to_owned())?;
+    match configure_local_indexer(saved.allowed_roots.clone()) {
+        Ok(()) => state
+            .logger
+            .info("ntfs-indexer", "scan scope synchronized to local indexer"),
+        Err(error) => state.logger.error(
+            "ntfs-indexer",
+            &format!("scan scope saved locally but indexer synchronization failed: {error}"),
+        ),
+    }
+    Ok(rules_output(saved))
 }

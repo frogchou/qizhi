@@ -1,3 +1,11 @@
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    thread,
+};
+
 use chrono::Utc;
 
 use crate::ntfs::{
@@ -11,14 +19,36 @@ use crate::ntfs::{
 /// The service-side control plane. Its caller SID always originates from the
 /// connected pipe's token, so persisted roots cannot be re-used by another
 /// local Windows account.
+pub trait IndexExecutor: Send + Sync + 'static {
+    fn build(&self, policy: &CallerIndexPolicy) -> Result<(), String>;
+    fn sync(&self, policy: &CallerIndexPolicy) -> Result<(), String>;
+}
+
 #[derive(Clone)]
 pub struct IndexerControlPlane {
     repository: NtfsIndexRepository,
+    executor: Option<Arc<dyn IndexExecutor>>,
+    busy: Arc<AtomicBool>,
 }
 
 impl IndexerControlPlane {
     pub fn new(repository: NtfsIndexRepository) -> Self {
-        Self { repository }
+        Self {
+            repository,
+            executor: None,
+            busy: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    pub fn with_executor(
+        repository: NtfsIndexRepository,
+        executor: Arc<dyn IndexExecutor>,
+    ) -> Self {
+        Self {
+            repository,
+            executor: Some(executor),
+            busy: Arc::new(AtomicBool::new(false)),
+        }
     }
 
     pub fn handle(&self, caller_sid: &str, request: &IndexerRequest) -> IndexerResponse {
@@ -50,14 +80,43 @@ impl IndexerControlPlane {
                     Err(_) => return rejected(request, "无法读取本地索引服务授权配置"),
                 };
                 let authorization = IpcAuthorizationPolicy {
-                    caller_sid: policy.caller_sid,
-                    allowed_roots: policy.allowed_roots,
+                    caller_sid: policy.caller_sid.clone(),
+                    allowed_roots: policy.allowed_roots.clone(),
                 };
                 if let Err(error) = validate_request(&authorization, caller_sid, request) {
                     return rejected(request, error.message());
                 }
-                rejected(request, "本地索引服务尚未完成索引执行器配置")
+                self.schedule(request, policy)
             }
+        }
+    }
+
+    fn schedule(&self, request: &IndexerRequest, policy: CallerIndexPolicy) -> IndexerResponse {
+        let Some(executor) = self.executor.clone() else {
+            return rejected(request, "本地索引服务尚未完成索引执行器配置");
+        };
+        if self
+            .busy
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
+            return rejected(request, "本地索引服务正在处理另一项索引任务");
+        }
+        let operation = request.kind.clone();
+        let busy = self.busy.clone();
+        thread::spawn(move || {
+            let _ = match operation {
+                IndexerRequestKind::Build => executor.build(&policy),
+                IndexerRequestKind::Sync => executor.sync(&policy),
+                _ => Ok(()),
+            };
+            busy.store(false, Ordering::SeqCst);
+        });
+        IndexerResponse {
+            protocol_version: INDEXER_PROTOCOL_VERSION,
+            request_id: request.request_id.clone(),
+            status: "accepted".to_owned(),
+            message: Some("本地索引任务已在后台启动".to_owned()),
         }
     }
 }

@@ -9,7 +9,7 @@ use std::{
 #[cfg(windows)]
 use crate::{
     database::Database,
-    ntfs::{IndexerControlPlane, pipe::serve_controlled_pipe_until_stopped},
+    ntfs::{IndexerControlPlane, WindowsIndexExecutor, pipe::serve_controlled_pipe_until_stopped},
 };
 
 pub const INDEXER_SERVICE_NAME: &str = "QizhiNtfsIndexer";
@@ -110,7 +110,12 @@ unsafe extern "system" fn service_main(_: u32, _: *mut *mut u16) {
 fn run_indexer_pipe_service(stopped: &AtomicBool) -> Result<(), String> {
     let path = secure_service_database_path()?;
     let database = Database::open(&path).map_err(|_| "无法打开本地索引服务数据库".to_owned())?;
-    serve_controlled_pipe_until_stopped(stopped, IndexerControlPlane::new(database.ntfs_index()))
+    let repository = database.ntfs_index();
+    let control = IndexerControlPlane::with_executor(
+        repository.clone(),
+        std::sync::Arc::new(WindowsIndexExecutor::new(repository)),
+    );
+    serve_controlled_pipe_until_stopped(stopped, control)
 }
 
 #[cfg(windows)]
