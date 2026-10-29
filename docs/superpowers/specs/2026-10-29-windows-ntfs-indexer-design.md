@@ -188,7 +188,7 @@ Windows 结构与常量来自 `windows-sys` 的 `Win32_Storage_FileSystem` / `Wi
 
 1. 打开 `\\.\X:` 卷句柄，并查询当前 USN 日志元数据。
 2. 在数据库中将该卷标为 `building`，保存本次开始时的 `UsnJournalID` 与起点 `NextUsn`。
-3. 使用 `FSCTL_ENUM_USN_DATA` 从 `StartFileReferenceNumber = 0` 分页枚举，解析每条记录的 FRN、父 FRN、名称、属性和 USN，并批量写入 `ntfs_entries`。
+3. 使用 `FSCTL_ENUM_USN_DATA` 从 `StartFileReferenceNumber = 0` 分页枚举，解析每条记录的 FRN、父 FRN、名称、属性和 USN，并在每个分页到达时立即批量写入 `ntfs_entries`；不得把整卷记录累积在进程内存中。
 4. 枚举完成后，读取在步骤 1 起点之后追加的变更记录并回放，消除初始快照和当前状态之间的竞态窗口。
 5. 完成事务后写入检查点 `next_usn`，卷状态改为 `ready`。
 6. 任一步失败时保留旧的完整索引（若存在）或标记 `failed/rebuild_required`；不得将半个新索引标为可用。

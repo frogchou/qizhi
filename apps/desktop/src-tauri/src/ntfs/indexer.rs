@@ -27,12 +27,17 @@ pub struct IndexSourcePage {
 
 pub trait UsnVolumeSource {
     fn current_journal(&self, volume: &VolumeDescriptor) -> Result<JournalCursor, String>;
-    fn snapshot_pages(&self, volume: &VolumeDescriptor) -> Result<Vec<IndexSourcePage>, String>;
-    fn replay_pages(
+    fn visit_snapshot_pages(
+        &self,
+        volume: &VolumeDescriptor,
+        on_page: &mut dyn FnMut(IndexSourcePage) -> Result<(), String>,
+    ) -> Result<(), String>;
+    fn visit_replay_pages(
         &self,
         volume: &VolumeDescriptor,
         checkpoint: &UsnCheckpoint,
-    ) -> Result<Vec<IndexSourcePage>, String>;
+        on_page: &mut dyn FnMut(IndexSourcePage) -> Result<(), String>,
+    ) -> Result<(), String>;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -104,18 +109,16 @@ impl<S: UsnVolumeSource> NtfsIndexer<S> {
             .source
             .current_journal(&descriptor)
             .map_err(IndexerError::Source)?;
-        let pages = self
-            .source
-            .snapshot_pages(&descriptor)
-            .map_err(IndexerError::Source)?;
         let mut processed_records = 0;
         let mut next_usn = journal.next_usn.clone();
-
-        for page in pages {
-            processed_records += page.entries.len();
-            next_usn = page.next_usn.clone();
-            self.stage_source_page(&volume, &build_id, &journal, page)?;
-        }
+        self.source
+            .visit_snapshot_pages(&descriptor, &mut |page| {
+                processed_records += page.entries.len();
+                next_usn = page.next_usn.clone();
+                self.stage_source_page(&volume, &build_id, &journal, page)
+                    .map_err(|error| error.to_string())
+            })
+            .map_err(IndexerError::Source)?;
         if processed_records == 0 {
             self.stage_source_page(
                 &volume,
@@ -162,15 +165,14 @@ impl<S: UsnVolumeSource> NtfsIndexer<S> {
             Some("正在同步 NTFS 变更"),
             None,
         )?;
-        let pages = self
-            .source
-            .replay_pages(&volume.descriptor, &checkpoint)
-            .map_err(IndexerError::Source)?;
         let mut changed_records = 0;
-        for page in pages {
-            changed_records += page.entries.len();
-            self.apply_source_page(volume, &journal, page)?;
-        }
+        self.source
+            .visit_replay_pages(&volume.descriptor, &checkpoint, &mut |page| {
+                changed_records += page.entries.len();
+                self.apply_source_page(volume, &journal, page)
+                    .map_err(|error| error.to_string())
+            })
+            .map_err(IndexerError::Source)?;
         self.repository.set_volume_state(
             volume.id,
             VolumeState::Ready,

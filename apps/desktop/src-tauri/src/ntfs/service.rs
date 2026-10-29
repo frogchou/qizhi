@@ -24,11 +24,14 @@ impl UsnVolumeSource for WindowsUsnVolumeSource {
         })
     }
 
-    fn snapshot_pages(&self, volume: &VolumeDescriptor) -> Result<Vec<IndexSourcePage>, String> {
+    fn visit_snapshot_pages(
+        &self,
+        volume: &VolumeDescriptor,
+        on_page: &mut dyn FnMut(IndexSourcePage) -> Result<(), String>,
+    ) -> Result<(), String> {
         let handle = open_volume(&volume.current_mount_path).map_err(|error| error.to_string())?;
         let journal = query_journal(&handle).map_err(|error| error.to_string())?;
         let mut cursor = 0_u64;
-        let mut pages = Vec::new();
 
         for _ in 0..1_000_000 {
             let page = read_snapshot_page(&handle, cursor, journal.next_usn)
@@ -37,20 +40,21 @@ impl UsnVolumeSource for WindowsUsnVolumeSource {
                 break;
             }
             cursor = page.next_file_reference_number;
-            pages.push(IndexSourcePage {
+            on_page(IndexSourcePage {
                 next_usn: journal.next_usn.to_string(),
                 entries: page.records.iter().map(entry_from_record).collect(),
                 events: vec![],
-            });
+            })?;
         }
-        Ok(pages)
+        Ok(())
     }
 
-    fn replay_pages(
+    fn visit_replay_pages(
         &self,
         volume: &VolumeDescriptor,
         checkpoint: &UsnCheckpoint,
-    ) -> Result<Vec<IndexSourcePage>, String> {
+        on_page: &mut dyn FnMut(IndexSourcePage) -> Result<(), String>,
+    ) -> Result<(), String> {
         let handle = open_volume(&volume.current_mount_path).map_err(|error| error.to_string())?;
         let journal_id = checkpoint
             .usn_journal_id
@@ -60,7 +64,6 @@ impl UsnVolumeSource for WindowsUsnVolumeSource {
             .next_usn
             .parse::<i64>()
             .map_err(|_| "本地 USN 检查点格式无效".to_owned())?;
-        let mut pages = Vec::new();
 
         for _ in 0..1_000_000 {
             let page = read_replay_page(&handle, cursor, journal_id)
@@ -73,13 +76,13 @@ impl UsnVolumeSource for WindowsUsnVolumeSource {
                 break;
             }
             cursor = next_usn;
-            pages.push(IndexSourcePage {
+            on_page(IndexSourcePage {
                 next_usn: cursor.to_string(),
                 entries: page.records.iter().map(entry_from_record).collect(),
                 events: vec![],
-            });
+            })?;
         }
-        Ok(pages)
+        Ok(())
     }
 }
 

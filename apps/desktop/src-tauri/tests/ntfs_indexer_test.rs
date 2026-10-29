@@ -22,12 +22,12 @@ fn temporary_database_path(name: &str) -> std::path::PathBuf {
 
 #[cfg(windows)]
 #[test]
+#[ignore = "requires a UAC-installed service and an explicit NTFS integration volume"]
 fn reads_a_real_usn_journal_when_a_test_volume_is_explicitly_provided() {
     use qizhi_desktop_lib::ntfs::WindowsUsnVolumeSource;
 
-    let Ok(mount_path) = std::env::var("QIZHI_NTFS_SMOKE_VOLUME") else {
-        return;
-    };
+    let mount_path = std::env::var("QIZHI_NTFS_SMOKE_VOLUME")
+        .expect("set QIZHI_NTFS_SMOKE_VOLUME to the dedicated NTFS test volume");
     let volume = VolumeDescriptor {
         volume_guid: mount_path.clone(),
         current_mount_path: mount_path,
@@ -95,16 +95,27 @@ impl UsnVolumeSource for ScriptedSource {
             .ok_or_else(|| "missing scripted journal".to_owned())
     }
 
-    fn snapshot_pages(&self, _: &VolumeDescriptor) -> Result<Vec<IndexSourcePage>, String> {
-        Ok(self.snapshot.lock().expect("lock").drain(..).collect())
+    fn visit_snapshot_pages(
+        &self,
+        _: &VolumeDescriptor,
+        on_page: &mut dyn FnMut(IndexSourcePage) -> Result<(), String>,
+    ) -> Result<(), String> {
+        while let Some(page) = self.snapshot.lock().expect("lock").pop_front() {
+            on_page(page)?;
+        }
+        Ok(())
     }
 
-    fn replay_pages(
+    fn visit_replay_pages(
         &self,
         _: &VolumeDescriptor,
         _: &UsnCheckpoint,
-    ) -> Result<Vec<IndexSourcePage>, String> {
-        Ok(self.replay.lock().expect("lock").drain(..).collect())
+        on_page: &mut dyn FnMut(IndexSourcePage) -> Result<(), String>,
+    ) -> Result<(), String> {
+        while let Some(page) = self.replay.lock().expect("lock").pop_front() {
+            on_page(page)?;
+        }
+        Ok(())
     }
 }
 
