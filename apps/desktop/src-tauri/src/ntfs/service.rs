@@ -136,8 +136,13 @@ impl UsnVolumeSource for WindowsUsnVolumeSource {
         let mut cursor = 0_u64;
 
         for _ in 0..1_000_000 {
-            let page = read_snapshot_page(&handle, cursor, journal.next_usn)
-                .map_err(|error| format!("无法读取 NTFS 元数据快照: {error:?}"))?;
+            let page = match read_snapshot_page(&handle, cursor, i64::MAX) {
+                Ok(page) => page,
+                Err(error) if error.is_end_of_enumeration() => break,
+                Err(error) => {
+                    return Err(format!("无法读取 NTFS 元数据快照: {error:?}"));
+                }
+            };
             if page.records.is_empty() || page.next_file_reference_number == cursor {
                 break;
             }

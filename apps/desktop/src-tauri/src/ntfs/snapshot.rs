@@ -33,6 +33,21 @@ impl From<UsnParseError> for SnapshotError {
 }
 
 #[cfg(windows)]
+impl SnapshotError {
+    pub fn is_end_of_enumeration(&self) -> bool {
+        use windows_sys::Win32::Foundation::ERROR_HANDLE_EOF;
+
+        matches!(
+            self,
+            Self::Windows(Win32Failure {
+                code: ERROR_HANDLE_EOF,
+                ..
+            })
+        )
+    }
+}
+
+#[cfg(windows)]
 pub fn read_snapshot_page(
     handle: &VolumeHandle,
     start_file_reference_number: u64,
@@ -54,4 +69,25 @@ pub fn parse_snapshot_page(bytes: &[u8]) -> Result<SnapshotPage, UsnParseError> 
         next_file_reference_number,
         records: parsed.records,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    #[cfg(windows)]
+    #[test]
+    fn treats_handle_eof_as_the_normal_end_of_an_mft_enumeration() {
+        use windows_sys::Win32::Foundation::{ERROR_ACCESS_DENIED, ERROR_HANDLE_EOF};
+
+        let eof = super::SnapshotError::Windows(crate::ntfs::win32::Win32Failure {
+            operation: "enumerate NTFS metadata",
+            code: ERROR_HANDLE_EOF,
+        });
+        let denied = super::SnapshotError::Windows(crate::ntfs::win32::Win32Failure {
+            operation: "enumerate NTFS metadata",
+            code: ERROR_ACCESS_DENIED,
+        });
+
+        assert!(eof.is_end_of_enumeration());
+        assert!(!denied.is_end_of_enumeration());
+    }
 }
