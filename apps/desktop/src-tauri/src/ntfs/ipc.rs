@@ -9,7 +9,11 @@ const MAX_SCAN_ROOTS: usize = 64;
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum IndexerRequestKind {
     Health,
-    Configure { allowed_roots: Vec<String> },
+    Configure {
+        allowed_roots: Vec<String>,
+        excluded_roots: Vec<String>,
+        file_categories: Vec<crate::scan::file_filter::FileCategory>,
+    },
     Build,
     Sync,
 }
@@ -73,7 +77,7 @@ pub fn validate_request(
     }
     match &request.kind {
         IndexerRequestKind::Health => return Ok(()),
-        IndexerRequestKind::Configure { allowed_roots } => {
+        IndexerRequestKind::Configure { allowed_roots, .. } => {
             return validate_configured_roots(allowed_roots);
         }
         IndexerRequestKind::Build | IndexerRequestKind::Sync => {}

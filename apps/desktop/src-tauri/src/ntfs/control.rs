@@ -59,13 +59,19 @@ impl IndexerControlPlane {
         }
         match &request.kind {
             IndexerRequestKind::Health => ready(request, None),
-            IndexerRequestKind::Configure { allowed_roots } => {
+            IndexerRequestKind::Configure {
+                allowed_roots,
+                excluded_roots,
+                file_categories,
+            } => {
                 if let Err(error) = validate_configured_roots(allowed_roots) {
                     return rejected(request, error.message());
                 }
                 let policy = CallerIndexPolicy {
                     caller_sid: caller_sid.to_owned(),
                     allowed_roots: allowed_roots.clone(),
+                    excluded_roots: excluded_roots.clone(),
+                    file_categories: file_categories.clone(),
                     updated_at_utc_ms: Utc::now().timestamp_millis(),
                 };
                 match self.repository.replace_caller_policy(&policy) {

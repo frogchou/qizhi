@@ -14,6 +14,10 @@ pub fn apply(connection: &Connection) -> Result<()> {
             4,
             include_str!("../../migrations/0004_ntfs_caller_policy.sql"),
         ),
+        (
+            5,
+            include_str!("../../migrations/0005_ntfs_caller_policy_filters.sql"),
+        ),
     ] {
         let applied = connection.query_row(
             "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version = ?1)",

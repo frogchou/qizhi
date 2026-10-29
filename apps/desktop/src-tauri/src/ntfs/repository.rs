@@ -280,10 +280,14 @@ impl NtfsIndexRepository {
     pub fn replace_caller_policy(&self, policy: &CallerIndexPolicy) -> Result<(), AppError> {
         let allowed_roots =
             serde_json::to_string(&policy.allowed_roots).map_err(|_| AppError::InvalidConfig)?;
+        let excluded_roots =
+            serde_json::to_string(&policy.excluded_roots).map_err(|_| AppError::InvalidConfig)?;
+        let file_categories =
+            serde_json::to_string(&policy.file_categories).map_err(|_| AppError::InvalidConfig)?;
         self.database.with_connection(|connection| {
             connection.execute(
-                "INSERT INTO ntfs_caller_policies(caller_sid,allowed_roots_json,updated_at_utc_ms) VALUES (?1,?2,?3) ON CONFLICT(caller_sid) DO UPDATE SET allowed_roots_json=excluded.allowed_roots_json,updated_at_utc_ms=excluded.updated_at_utc_ms",
-                params![policy.caller_sid, allowed_roots, policy.updated_at_utc_ms],
+                "INSERT INTO ntfs_caller_policies(caller_sid,allowed_roots_json,excluded_roots_json,file_categories_json,updated_at_utc_ms) VALUES (?1,?2,?3,?4,?5) ON CONFLICT(caller_sid) DO UPDATE SET allowed_roots_json=excluded.allowed_roots_json,excluded_roots_json=excluded.excluded_roots_json,file_categories_json=excluded.file_categories_json,updated_at_utc_ms=excluded.updated_at_utc_ms",
+                params![policy.caller_sid, allowed_roots, excluded_roots, file_categories, policy.updated_at_utc_ms],
             )?;
             Ok(())
         })
@@ -293,16 +297,24 @@ impl NtfsIndexRepository {
         self.database.with_connection(|connection| {
             connection
                 .query_row(
-                    "SELECT allowed_roots_json,updated_at_utc_ms FROM ntfs_caller_policies WHERE caller_sid = ?1",
+                    "SELECT allowed_roots_json,excluded_roots_json,file_categories_json,updated_at_utc_ms FROM ntfs_caller_policies WHERE caller_sid = ?1",
                     [caller_sid],
                     |row| {
                         let roots_json: String = row.get(0)?;
                         let allowed_roots = serde_json::from_str(&roots_json)
                             .map_err(|_| rusqlite::Error::InvalidQuery)?;
+                        let exclusions_json: String = row.get(1)?;
+                        let excluded_roots = serde_json::from_str(&exclusions_json)
+                            .map_err(|_| rusqlite::Error::InvalidQuery)?;
+                        let categories_json: String = row.get(2)?;
+                        let file_categories = serde_json::from_str(&categories_json)
+                            .map_err(|_| rusqlite::Error::InvalidQuery)?;
                         Ok(CallerIndexPolicy {
                             caller_sid: caller_sid.to_owned(),
                             allowed_roots,
-                            updated_at_utc_ms: row.get(1)?,
+                            excluded_roots,
+                            file_categories,
+                            updated_at_utc_ms: row.get(3)?,
                         })
                     },
                 )

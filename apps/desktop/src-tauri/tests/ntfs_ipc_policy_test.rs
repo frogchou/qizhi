@@ -73,6 +73,8 @@ fn rejects_missing_or_empty_configured_scan_roots() {
         request_id: "configure-1".to_owned(),
         kind: IndexerRequestKind::Configure {
             allowed_roots: vec!["".to_owned()],
+            excluded_roots: vec![],
+            file_categories: vec![],
         },
     };
     assert_eq!(
@@ -89,6 +91,8 @@ fn rejects_more_than_the_bounded_number_of_roots() {
         request_id: "configure-1".to_owned(),
         kind: IndexerRequestKind::Configure {
             allowed_roots: roots,
+            excluded_roots: vec![],
+            file_categories: vec![],
         },
     };
     assert_eq!(

@@ -56,6 +56,8 @@ fn binds_saved_scan_roots_to_the_authenticated_pipe_sid() {
         "S-1-5-21-100",
         &request(IndexerRequestKind::Configure {
             allowed_roots: vec![r"D:\\work".to_owned()],
+            excluded_roots: vec![],
+            file_categories: vec![],
         }),
     );
     assert_eq!(configured.status, "ready");
@@ -94,6 +96,8 @@ fn schedules_authorized_builds_without_blocking_the_pipe_request() {
         sid,
         &request(IndexerRequestKind::Configure {
             allowed_roots: vec![r"D:\\work".to_owned()],
+            excluded_roots: vec![],
+            file_categories: vec![],
         }),
     );
     let response = control.handle(sid, &request(IndexerRequestKind::Build));

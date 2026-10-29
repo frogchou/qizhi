@@ -107,14 +107,18 @@ fn local_indexer_connection_status(
     }
 }
 
-fn configure_local_indexer(allowed_roots: Vec<String>) -> Result<(), String> {
+fn configure_local_indexer(rules: &ScanRules) -> Result<(), String> {
     let request = IndexerRequest {
         protocol_version: INDEXER_PROTOCOL_VERSION,
         request_id: format!(
             "desktop-configure-{}",
             chrono::Utc::now().timestamp_millis()
         ),
-        kind: IndexerRequestKind::Configure { allowed_roots },
+        kind: IndexerRequestKind::Configure {
+            allowed_roots: rules.allowed_roots.clone(),
+            excluded_roots: rules.custom_exclusions.clone(),
+            file_categories: rules.file_categories.clone(),
+        },
     };
     match call_indexer_service(&request) {
         Ok(response) if response.status == "ready" => Ok(()),
@@ -357,7 +361,7 @@ pub fn save_scan_rules(
             es_cli_path: input.es_cli_path,
         })
         .map_err(|error| error.code().to_owned())?;
-    match configure_local_indexer(saved.allowed_roots.clone()) {
+    match configure_local_indexer(&saved) {
         Ok(()) => state
             .logger
             .info("ntfs-indexer", "scan scope synchronized to local indexer"),

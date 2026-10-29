@@ -195,6 +195,8 @@ fn stores_scan_authorization_by_authenticated_windows_sid() {
             r"D:\\work".to_owned(),
             r"C:\\Users\\fcc\\Documents".to_owned(),
         ],
+        excluded_roots: vec![r"D:\\work\\private".to_owned()],
+        file_categories: qizhi_desktop_lib::scan::file_filter::default_file_categories(),
         updated_at_utc_ms: 1_793_189_401_000,
     };
 

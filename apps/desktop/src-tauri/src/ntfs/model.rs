@@ -118,5 +118,7 @@ pub struct IndexDiagnostic {
 pub struct CallerIndexPolicy {
     pub caller_sid: String,
     pub allowed_roots: Vec<String>,
+    pub excluded_roots: Vec<String>,
+    pub file_categories: Vec<crate::scan::file_filter::FileCategory>,
     pub updated_at_utc_ms: i64,
 }
