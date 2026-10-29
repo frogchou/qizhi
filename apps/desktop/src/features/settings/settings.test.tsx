@@ -27,8 +27,6 @@ describe("SettingsPage", () => {
         allowedRoots: [],
         customExclusions: [],
         fileCategories: ["documents", "sourceCode"],
-        everythingSdkPath: null,
-        esCliPath: null,
         lockedExclusions: [],
       }),
       saveScanRules: vi.fn(),
@@ -50,7 +48,7 @@ describe("SettingsPage", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("shows the privacy boundary and identifies Everything as optional", async () => {
+  it("shows the privacy boundary and identifies the built-in NTFS indexer", async () => {
     const commands: QizhiCommands = {
       getSettings: vi.fn().mockResolvedValue([]),
       saveSettings: vi.fn(),
@@ -67,15 +65,12 @@ describe("SettingsPage", () => {
         allowedRoots: [],
         customExclusions: [],
         fileCategories: ["documents", "sourceCode"],
-        everythingSdkPath: null,
-        esCliPath: null,
         lockedExclusions: [],
       }),
       saveScanRules: vi.fn(),
-      getEverythingStatus: vi.fn().mockResolvedValue({
-        available: false,
-        adapter: "unavailable",
-        remediation: "未检测到 Everything，请安装并启动 Everything。",
+      getNtfsIndexerStatus: vi.fn().mockResolvedValue({
+        available: true,
+        message: "本地 NTFS 索引服务已连接。",
       }),
     };
 
@@ -84,10 +79,8 @@ describe("SettingsPage", () => {
     expect(
       screen.getByText(/系统目录、AppData.*始终被排除/),
     ).toBeInTheDocument();
-    expect(await screen.findByText("可选加速器")).toBeInTheDocument();
-    expect(
-      screen.getByText("不会影响“今日”发现本地文件。"),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("本地 NTFS 索引器")).toBeInTheDocument();
+    expect(screen.getByText("无需启动或安装 Everything。")).toBeInTheDocument();
   });
 
   it("adds a folder selected from the system picker to the scan roots", async () => {
@@ -107,8 +100,6 @@ describe("SettingsPage", () => {
         allowedRoots: [],
         customExclusions: [],
         fileCategories: ["documents", "sourceCode"],
-        everythingSdkPath: null,
-        esCliPath: null,
         lockedExclusions: [],
       }),
       saveScanRules: vi.fn(),
@@ -138,16 +129,12 @@ describe("SettingsPage", () => {
         allowedRoots: ["D:\\Work"],
         customExclusions: [],
         fileCategories: ["documents", "sourceCode"],
-        everythingSdkPath: null,
-        esCliPath: null,
         lockedExclusions: [],
       }),
       saveScanRules: vi.fn().mockResolvedValue({
         allowedRoots: ["D:\\Work"],
         customExclusions: [],
         fileCategories: ["documents"],
-        everythingSdkPath: null,
-        esCliPath: null,
         lockedExclusions: [],
       }),
     };
@@ -162,7 +149,6 @@ describe("SettingsPage", () => {
         allowedRoots: ["D:\\Work"],
         customExclusions: [],
         fileCategories: ["documents"],
-        esCliPath: null,
       }),
     );
     expect(
@@ -192,8 +178,6 @@ describe("SettingsPage", () => {
         allowedRoots: [],
         customExclusions: [],
         fileCategories: ["documents", "sourceCode"],
-        everythingSdkPath: null,
-        esCliPath: null,
         lockedExclusions: [],
       }),
       saveScanRules: vi.fn(),
@@ -240,8 +224,6 @@ describe("SettingsPage", () => {
         allowedRoots: [String.raw`\\?\C:\Users\fcc\Documents`],
         customExclusions: [],
         fileCategories: ["documents", "sourceCode"],
-        everythingSdkPath: null,
-        esCliPath: null,
         lockedExclusions: [],
       }),
       saveScanRules: vi.fn(),

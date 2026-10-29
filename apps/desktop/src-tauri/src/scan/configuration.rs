@@ -27,8 +27,6 @@ pub struct ScanRules {
     pub custom_exclusions: Vec<String>,
     #[serde(default = "default_file_categories")]
     pub file_categories: Vec<FileCategory>,
-    pub everything_sdk_path: Option<String>,
-    pub es_cli_path: Option<String>,
 }
 
 impl Default for ScanRules {
@@ -37,8 +35,6 @@ impl Default for ScanRules {
             allowed_roots: vec![],
             custom_exclusions: vec![],
             file_categories: default_file_categories(),
-            everything_sdk_path: None,
-            es_cli_path: None,
         }
     }
 }

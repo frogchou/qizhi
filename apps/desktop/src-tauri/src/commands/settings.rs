@@ -5,7 +5,6 @@ use tauri::State;
 use crate::{
     app_state::AppState,
     config::{ConfigService, ServiceConfigurationInput, secret_store::WindowsCredentialStore},
-    discovery::selector::select_discovery_with_paths,
     network::http::HttpClient,
     ntfs::{
         ipc::{INDEXER_PROTOCOL_VERSION, IndexerRequest, IndexerRequestKind},
@@ -242,6 +241,7 @@ mod tests {
             request_id: "health-1".to_owned(),
             status: "ready".to_owned(),
             message: None,
+            candidates: vec![],
         }));
         assert!(status.available);
         assert!(status.message.contains("NTFS"));
@@ -255,37 +255,6 @@ mod tests {
     }
 }
 
-#[derive(Serialize)]
-pub struct EverythingStatus {
-    available: bool,
-    adapter: String,
-    remediation: String,
-}
-
-#[tauri::command]
-pub fn get_everything_status(state: State<'_, AppState>) -> EverythingStatus {
-    let rules = match state.scan_rules.get() {
-        Ok(value) => value,
-        Err(_) => {
-            return EverythingStatus {
-                available: false,
-                adapter: "unavailable".to_owned(),
-                remediation: "无法读取本地扫描规则。".to_owned(),
-            };
-        }
-    };
-    let adapter = select_discovery_with_paths(
-        Some(state.everything_sdk_path.clone()),
-        rules.es_cli_path.map(std::path::PathBuf::from),
-    );
-    let health = adapter.health();
-    EverythingStatus {
-        available: health.available,
-        adapter: health.adapter,
-        remediation: health.remediation,
-    }
-}
-
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SaveScanRulesInput {
@@ -293,7 +262,6 @@ pub struct SaveScanRulesInput {
     custom_exclusions: Vec<String>,
     #[serde(default = "default_file_categories")]
     file_categories: Vec<FileCategory>,
-    es_cli_path: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -302,8 +270,6 @@ pub struct ScanRulesOutput {
     allowed_roots: Vec<String>,
     custom_exclusions: Vec<String>,
     file_categories: Vec<FileCategory>,
-    everything_sdk_path: Option<String>,
-    es_cli_path: Option<String>,
     locked_exclusions: Vec<String>,
 }
 
@@ -312,8 +278,6 @@ fn rules_output(value: ScanRules) -> ScanRulesOutput {
         allowed_roots: value.allowed_roots,
         custom_exclusions: value.custom_exclusions,
         file_categories: value.file_categories,
-        everything_sdk_path: value.everything_sdk_path,
-        es_cli_path: value.es_cli_path,
         locked_exclusions: ScanRules::default().locked_exclusions(),
     }
 }
@@ -357,8 +321,6 @@ pub fn save_scan_rules(
                 .collect(),
             custom_exclusions: input.custom_exclusions,
             file_categories: input.file_categories,
-            everything_sdk_path: None,
-            es_cli_path: input.es_cli_path,
         })
         .map_err(|error| error.code().to_owned())?;
     match configure_local_indexer(&saved) {

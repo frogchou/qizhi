@@ -25,10 +25,12 @@ pub fn handle_request_bytes(message: &[u8]) -> Vec<u8> {
                     request_id: request.request_id,
                     status: "ready".to_owned(),
                     message: None,
+                    candidates: vec![],
                 },
                 IndexerRequestKind::Configure { .. }
                 | IndexerRequestKind::Build
-                | IndexerRequestKind::Sync => {
+                | IndexerRequestKind::Sync
+                | IndexerRequestKind::ListToday { .. } => {
                     error_response(request.request_id, "本地索引服务尚未完成授权配置")
                 }
             },
@@ -259,6 +261,7 @@ fn error_response(request_id: String, message: &str) -> IndexerResponse {
         request_id,
         status: "rejected".to_owned(),
         message: Some(message.to_owned()),
+        candidates: vec![],
     }
 }
 

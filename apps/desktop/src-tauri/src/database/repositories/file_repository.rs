@@ -24,6 +24,26 @@ impl FileRepository {
         })
     }
 
+    pub fn replace_indexed_for_local_day(
+        &self,
+        day: LocalDayRange,
+        records: &[FileRecordInput],
+    ) -> Result<(), AppError> {
+        self.database.with_transaction(|transaction| {
+            transaction.execute(
+                "DELETE FROM file_records WHERE modified_at_utc_ms >= ?1 AND modified_at_utc_ms < ?2 AND source IN ('本机文件','本机 NTFS 索引')",
+                (day.start_utc_ms, day.next_start_utc_ms),
+            )?;
+            for record in records {
+                transaction.execute(
+                    "INSERT INTO file_records(canonical_path,file_identity,modified_at_utc_ms,size_bytes,source) VALUES (?1,?2,?3,?4,?5) ON CONFLICT(canonical_path,file_identity) DO UPDATE SET modified_at_utc_ms=excluded.modified_at_utc_ms,size_bytes=excluded.size_bytes,source=excluded.source",
+                    (&record.canonical_path, &record.file_identity, record.modified_at_utc_ms, record.size_bytes, &record.source),
+                )?;
+            }
+            Ok(())
+        })
+    }
+
     pub fn count(&self) -> Result<i64, AppError> {
         self.database.with_connection(|connection| {
             connection.query_row("SELECT COUNT(*) FROM file_records", [], |row| row.get(0))

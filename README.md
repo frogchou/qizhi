@@ -1,6 +1,6 @@
 # 栖知
 
-面向职场人士的 Windows 本地优先工作知识助手。当前开发阶段只包含安全设置、Everything 文件发现和“今日”文件工作台；不会调用模型、RAGFlow 或 Codex 的业务接口。
+面向职场人士的 Windows 本地优先工作知识助手。当前开发阶段提供安全设置、内置 Windows NTFS/USN 元数据索引和“今日”文件工作台；不需要安装或启动 Everything，也不会调用模型、RAGFlow 或 Codex 的业务接口。
 
 ## 本地开发
 

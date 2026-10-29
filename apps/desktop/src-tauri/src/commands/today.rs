@@ -5,15 +5,16 @@ use tauri::State;
 
 use crate::{
     app_state::AppState,
-    contracts::{FileRecord, LocalDayRange},
+    contracts::{FileRecord, FileRecordInput, LocalDayRange},
     database::{AppError, repositories::FileRepository},
-    discovery::{native_fs::NativeFileDiscovery, port::FileDiscovery},
+    ntfs::{
+        ipc::{INDEXER_PROTOCOL_VERSION, IndexerRequest, IndexerRequestKind},
+        pipe::call_indexer_service,
+    },
     scan::{
         file_filter::{FileCategory, FileTypeFilter},
-        file_stability::MetadataStability,
         policy::{AllowedRoot, ScanPolicy},
         progress::TodayScanStatus,
-        service::ScanService,
     },
     system::explorer::{ExplorerLauncher, WindowsProcessLauncher},
 };
@@ -104,31 +105,80 @@ fn refresh(state: &AppState) -> Result<TodayReady, TodayUnavailable> {
     if !state.today_scan_progress.start() {
         return Err(unavailable("已有今日扫描正在进行，请等待它完成。"));
     }
-    state.logger.info("today-scan", "today file scan started");
+    state
+        .logger
+        .info("today-index", "today NTFS index synchronization started");
     let result: Result<TodayReady, TodayUnavailable> = (|| {
         let (roots, exclusions, file_categories) = rules(state)?;
         let (start, end) = bounds();
-        let snapshot = ScanService::new(
-            today_discovery(
-                exclusions.clone(),
-                state.today_scan_progress.clone(),
-                FileTypeFilter::new(file_categories),
-            ),
-            ScanPolicy::for_roots(exclusions, roots.clone()),
+        let configure = IndexerRequest {
+            protocol_version: INDEXER_PROTOCOL_VERSION,
+            request_id: format!("today-configure-{}", chrono::Utc::now().timestamp_millis()),
+            kind: IndexerRequestKind::Configure {
+                allowed_roots: roots
+                    .iter()
+                    .map(|root| crate::scan::policy::display_path(&root.0))
+                    .collect(),
+                excluded_roots: exclusions
+                    .iter()
+                    .map(|path| crate::scan::policy::display_path(path))
+                    .collect(),
+                file_categories: file_categories.clone(),
+            },
+        };
+        ensure_ready_response(call_indexer_service(&configure))?;
+        let sync = IndexerRequest {
+            protocol_version: INDEXER_PROTOCOL_VERSION,
+            request_id: format!("today-sync-{}", chrono::Utc::now().timestamp_millis()),
+            kind: IndexerRequestKind::Sync,
+        };
+        ensure_accepted_response(call_indexer_service(&sync))?;
+        let query = IndexerRequest {
+            protocol_version: INDEXER_PROTOCOL_VERSION,
+            request_id: format!("today-list-{}", chrono::Utc::now().timestamp_millis()),
+            kind: IndexerRequestKind::ListToday {
+                start_utc_ms: start,
+                end_utc_ms: end,
+            },
+        };
+        let response = call_indexer_service(&query).map_err(unavailable)?;
+        if response.status != "ready" {
+            return Err(unavailable(response.message.unwrap_or_else(|| {
+                "本地 NTFS 索引服务无法返回今日文件。".to_owned()
+            })));
+        }
+        let records = response
+            .candidates
+            .into_iter()
+            .map(|candidate| FileRecordInput {
+                canonical_path: candidate.canonical_path,
+                file_identity: candidate.file_reference_number,
+                modified_at_utc_ms: candidate.modified_at_utc_ms,
+                size_bytes: candidate.size_bytes.unwrap_or_default(),
+                source: "本机 NTFS 索引".to_owned(),
+            })
+            .collect::<Vec<_>>();
+        state
+            .database
+            .files()
+            .replace_indexed_for_local_day(LocalDayRange::new(start, end), &records)
+            .map_err(|_| unavailable("无法保存本地 NTFS 索引结果。"))?;
+        cached_snapshot_for_range(
             state.database.files(),
-            Arc::new(MetadataStability),
+            start,
+            end,
+            &FileTypeFilter::new(file_categories),
+            &ScanPolicy::for_roots(exclusions, roots),
         )
-        .refresh_for_range(roots, start, end)
-        .map_err(|_| unavailable("刷新未完成，请检查扫描范围和文件访问权限。"))?;
-        Ok(ready_from_files(snapshot.files))
+        .map_err(|_| unavailable("无法读取本地 NTFS 索引结果。"))
     })();
     match &result {
         Ok(snapshot) => {
             state.today_scan_progress.complete();
             state.logger.info(
-                "today-scan",
+                "today-index",
                 &format!(
-                    "today file scan completed with {} files",
+                    "today NTFS index synchronization completed with {} files",
                     snapshot.files.len()
                 ),
             );
@@ -136,8 +186,11 @@ fn refresh(state: &AppState) -> Result<TodayReady, TodayUnavailable> {
         Err(error) => {
             state.today_scan_progress.fail(&error.remediation);
             state.logger.error(
-                "today-scan",
-                &format!("today file scan failed: {}", error.remediation),
+                "today-index",
+                &format!(
+                    "today NTFS index synchronization failed: {}",
+                    error.remediation
+                ),
             );
         }
     }
@@ -185,16 +238,32 @@ fn ready_from_files(files: Vec<FileRecord>) -> TodayReady {
     }
 }
 
-fn today_discovery(
-    exclusions: Vec<PathBuf>,
-    progress: crate::scan::progress::TodayScanProgress,
-    file_filter: FileTypeFilter,
-) -> Arc<dyn FileDiscovery> {
-    Arc::new(NativeFileDiscovery::with_progress(
-        exclusions,
-        progress,
-        file_filter,
-    ))
+fn ensure_ready_response(
+    response: Result<crate::ntfs::ipc::IndexerResponse, String>,
+) -> Result<(), TodayUnavailable> {
+    match response {
+        Ok(response) if response.status == "ready" => Ok(()),
+        Ok(response) => {
+            Err(unavailable(response.message.unwrap_or_else(|| {
+                "本地 NTFS 索引服务拒绝了扫描范围。".to_owned()
+            })))
+        }
+        Err(message) => Err(unavailable(message)),
+    }
+}
+
+fn ensure_accepted_response(
+    response: Result<crate::ntfs::ipc::IndexerResponse, String>,
+) -> Result<(), TodayUnavailable> {
+    match response {
+        Ok(response) if response.status == "accepted" || response.status == "ready" => Ok(()),
+        Ok(response) => {
+            Err(unavailable(response.message.unwrap_or_else(|| {
+                "本地 NTFS 索引服务无法启动同步。".to_owned()
+            })))
+        }
+        Err(message) => Err(unavailable(message)),
+    }
 }
 
 #[tauri::command]
@@ -275,7 +344,7 @@ mod tests {
         scan::{file_filter::FileTypeFilter, policy::ScanPolicy},
     };
 
-    use super::{bounds, cached_snapshot_for_range, today_discovery};
+    use super::{bounds, cached_snapshot_for_range};
 
     #[test]
     fn uses_local_calendar_midnights_for_today() {
@@ -291,19 +360,6 @@ mod tests {
         assert_eq!((start.hour(), start.minute(), start.second()), (0, 0, 0));
         assert_eq!((end.hour(), end.minute(), end.second()), (0, 0, 0));
         assert!(end > start);
-    }
-
-    #[test]
-    fn uses_native_discovery_without_an_everything_connection() {
-        assert_eq!(
-            today_discovery(
-                vec![],
-                crate::scan::progress::TodayScanProgress::new(),
-                FileTypeFilter::default(),
-            )
-            .name(),
-            "native-file-system"
-        );
     }
 
     #[test]
@@ -415,5 +471,59 @@ mod tests {
         assert!(snapshot.files.is_empty());
         let _ = std::fs::remove_file(file);
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn replacing_today_index_results_removes_legacy_scan_records_only() {
+        let database = Database::open(std::path::Path::new(":memory:")).expect("database");
+        let (start, end) = bounds();
+        let repository = database.files();
+        for (path, identity, source) in [
+            (r"D:\\work\\legacy.md", "legacy", "本机文件"),
+            (r"D:\\work\\history.md", "history", "浏览历史"),
+        ] {
+            repository
+                .upsert(&FileRecordInput {
+                    canonical_path: path.to_owned(),
+                    file_identity: identity.to_owned(),
+                    modified_at_utc_ms: start + 1,
+                    size_bytes: 12,
+                    source: source.to_owned(),
+                })
+                .expect("persist cached record");
+        }
+
+        repository
+            .replace_indexed_for_local_day(
+                crate::contracts::LocalDayRange::new(start, end),
+                &[FileRecordInput {
+                    canonical_path: r"D:\\work\\indexed.docx".to_owned(),
+                    file_identity: "ntfs:42".to_owned(),
+                    modified_at_utc_ms: start + 2,
+                    size_bytes: 24,
+                    source: "本机 NTFS 索引".to_owned(),
+                }],
+            )
+            .expect("replace local index records");
+
+        let records = repository
+            .list_for_local_day(crate::contracts::LocalDayRange::new(start, end))
+            .expect("read records");
+        assert_eq!(records.len(), 2);
+        assert!(
+            records
+                .iter()
+                .any(|record| record.canonical_path == r"D:\\work\\indexed.docx")
+        );
+        assert!(
+            records
+                .iter()
+                .any(|record| record.canonical_path == r"D:\\work\\history.md")
+        );
+        assert!(
+            !records
+                .iter()
+                .any(|record| record.canonical_path == r"D:\\work\\legacy.md")
+        );
     }
 }

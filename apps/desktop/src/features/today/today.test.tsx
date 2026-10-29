@@ -36,8 +36,6 @@ function commands(snapshot: TodaySnapshot = readySnapshot): QizhiCommands {
       allowedRoots: [],
       customExclusions: [],
       fileCategories: ["documents", "sourceCode"],
-      everythingSdkPath: null,
-      esCliPath: null,
       lockedExclusions: [],
     }),
     saveScanRules: vi.fn(),
@@ -72,14 +70,14 @@ describe("TodayPage", () => {
       <TodayPage
         commands={commands({
           state: "unavailable",
-          remediation: "请安装并启动 Everything。",
+          remediation: "本地 NTFS 索引服务暂不可用。",
           files: [],
           clusters: [],
         })}
       />,
     );
     expect(
-      await screen.findByText("请安装并启动 Everything。"),
+      await screen.findByText("本地 NTFS 索引服务暂不可用。"),
     ).toBeInTheDocument();
   });
 
@@ -163,7 +161,7 @@ describe("TodayPage", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("shows live scan counts while the background discovery is running", async () => {
+  it("explains that a running refresh is synchronizing the NTFS index", async () => {
     let completeRefresh: ((value: TodaySnapshot) => void) | undefined;
     const client = commands({ state: "ready", files: [], clusters: [] });
     client.getTodayScanStatus = vi.fn().mockResolvedValue({
@@ -185,7 +183,7 @@ describe("TodayPage", () => {
 
     expect(
       await screen.findByText(
-        "正在扫描：已检查 42 个文件夹，发现 3 个今日文件。",
+        "正在建立或同步本地 NTFS 索引；不会递归遍历文件夹。",
       ),
     ).toBeInTheDocument();
     completeRefresh?.({ state: "ready", files: [], clusters: [] });

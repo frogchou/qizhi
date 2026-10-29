@@ -24,13 +24,13 @@ fn migrates_a_fresh_database_and_upserts_one_file_identity() {
         file_identity: "volume-a:file-42".to_owned(),
         modified_at_utc_ms: 1_793_189_400_000,
         size_bytes: 1024,
-        source: "everything-sdk".to_owned(),
+        source: "本机 NTFS 索引".to_owned(),
     };
 
     repository.upsert(&record).expect("first upsert succeeds");
     repository.upsert(&record).expect("second upsert succeeds");
 
-    assert_eq!(database.schema_version().expect("schema version reads"), 3);
+    assert_eq!(database.schema_version().expect("schema version reads"), 5);
     assert_eq!(repository.count().expect("record count reads"), 1);
 
     let _ = std::fs::remove_file(path);
@@ -54,7 +54,7 @@ fn lists_records_inclusive_of_day_start_and_exclusive_of_next_day_start() {
                 file_identity: identity.to_owned(),
                 modified_at_utc_ms: timestamp,
                 size_bytes: 1,
-                source: "everything-sdk".to_owned(),
+                source: "本机 NTFS 索引".to_owned(),
             })
             .expect("upsert succeeds");
     }
@@ -75,7 +75,7 @@ fn migrates_existing_database_to_the_ntfs_index_schema() {
     let path = temporary_database_path("ntfs-index");
     let database = Database::open(&path).expect("database opens");
 
-    assert_eq!(database.schema_version().expect("schema version"), 3);
+    assert_eq!(database.schema_version().expect("schema version"), 5);
 
     drop(database);
     let _ = std::fs::remove_file(path);

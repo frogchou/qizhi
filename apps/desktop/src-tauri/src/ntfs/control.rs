@@ -132,7 +132,36 @@ impl IndexerControlPlane {
                 if let Err(error) = validate_request(&authorization, caller_sid, request) {
                     return rejected(request, error.message());
                 }
-                self.schedule(request, policy)
+                match request.kind {
+                    IndexerRequestKind::Build => self.schedule(request, policy),
+                    IndexerRequestKind::Sync => self.sync_now(request, policy),
+                    _ => unreachable!("request kind is matched above"),
+                }
+            }
+            IndexerRequestKind::ListToday {
+                start_utc_ms,
+                end_utc_ms,
+            } => {
+                let candidates =
+                    match self.list_visible_candidates(caller_sid, *start_utc_ms, *end_utc_ms) {
+                        Ok(candidates) => candidates,
+                        Err(message) => return rejected(request, &message),
+                    };
+                IndexerResponse {
+                    protocol_version: INDEXER_PROTOCOL_VERSION,
+                    request_id: request.request_id.clone(),
+                    status: "ready".to_owned(),
+                    message: None,
+                    candidates: candidates
+                        .into_iter()
+                        .map(|candidate| crate::ntfs::ipc::IndexerFileCandidate {
+                            file_reference_number: candidate.file_reference_number,
+                            canonical_path: candidate.canonical_path,
+                            modified_at_utc_ms: candidate.modified_at_utc_ms,
+                            size_bytes: candidate.size_bytes,
+                        })
+                        .collect(),
+                }
             }
         }
     }
@@ -163,6 +192,26 @@ impl IndexerControlPlane {
             request_id: request.request_id.clone(),
             status: "accepted".to_owned(),
             message: Some("本地索引任务已在后台启动".to_owned()),
+            candidates: vec![],
+        }
+    }
+
+    fn sync_now(&self, request: &IndexerRequest, policy: CallerIndexPolicy) -> IndexerResponse {
+        let Some(executor) = self.executor.clone() else {
+            return rejected(request, "本地索引服务尚未完成索引执行器配置");
+        };
+        if self
+            .busy
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
+            return rejected(request, "本地索引服务正在处理另一项索引任务");
+        }
+        let result = executor.sync(&policy);
+        self.busy.store(false, Ordering::SeqCst);
+        match result {
+            Ok(()) => ready(request, Some("本地 NTFS 索引已同步")),
+            Err(_) => rejected(request, "本地 NTFS 索引同步失败"),
         }
     }
 }
@@ -173,6 +222,7 @@ fn ready(request: &IndexerRequest, message: Option<&str>) -> IndexerResponse {
         request_id: request.request_id.clone(),
         status: "ready".to_owned(),
         message: message.map(str::to_owned),
+        candidates: vec![],
     }
 }
 
@@ -182,5 +232,6 @@ fn rejected(request: &IndexerRequest, message: &str) -> IndexerResponse {
         request_id: request.request_id.clone(),
         status: "rejected".to_owned(),
         message: Some(message.to_owned()),
+        candidates: vec![],
     }
 }

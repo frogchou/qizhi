@@ -1,11 +1,7 @@
 import { useEffect, useState } from "react";
 
 import type { MaskedServiceConfig } from "../../lib/contracts";
-import type {
-  EverythingStatus,
-  FileCategory,
-  QizhiCommands,
-} from "../../lib/tauri";
+import type { FileCategory, QizhiCommands } from "../../lib/tauri";
 
 type SettingsPageProps = { commands: QizhiCommands };
 type ConnectionState = { available: boolean; message: string } | null;
@@ -55,7 +51,7 @@ export function SettingsPage({ commands }: SettingsPageProps) {
   const [connection, setConnection] = useState<ConnectionState>(null);
   const [ragflowConnection, setRagflowConnection] =
     useState<ConnectionState>(null);
-  const [everything, setEverything] = useState<EverythingStatus | null>(null);
+  const [ntfsIndexer, setNtfsIndexer] = useState<ConnectionState>(null);
   const [roots, setRoots] = useState<string[]>([]);
   const [exclusions, setExclusions] = useState<string[]>([]);
   const [scanRulesNotice, setScanRulesNotice] = useState<string | null>(null);
@@ -66,8 +62,8 @@ export function SettingsPage({ commands }: SettingsPageProps) {
 
   useEffect(() => {
     commands
-      .getEverythingStatus?.()
-      .then(setEverything)
+      .getNtfsIndexerStatus?.()
+      .then(setNtfsIndexer)
       .catch(() => undefined);
     commands
       .getSettings()
@@ -116,7 +112,6 @@ export function SettingsPage({ commands }: SettingsPageProps) {
         allowedRoots: roots,
         customExclusions: exclusions,
         fileCategories,
-        esCliPath: null,
       });
       setRoots(savedRules.allowedRoots);
       setExclusions(savedRules.customExclusions);
@@ -124,7 +119,7 @@ export function SettingsPage({ commands }: SettingsPageProps) {
       setScanRulesNotice(
         `扫描规则已保存：${savedRules.allowedRoots.length} 个扫描范围，${savedRules.customExclusions.length} 个排除目录。`,
       );
-      setEverything((await commands.getEverythingStatus?.()) ?? null);
+      setNtfsIndexer((await commands.getNtfsIndexerStatus?.()) ?? null);
     } catch {
       setError("扫描范围未保存，请检查选择的文件夹。");
     }
@@ -308,17 +303,17 @@ export function SettingsPage({ commands }: SettingsPageProps) {
           <div className="service-name">
             <span className="service-icon">⌕</span>
             <div>
-              <h3>Everything（可选）</h3>
-              <p>用于后续的全机文件名快速检索。</p>
-              <p>不会影响“今日”发现本地文件。</p>
+              <h3>本地 NTFS 索引器</h3>
+              <p>内置服务使用 NTFS 元数据和变更日志发现工作文件。</p>
+              <p>无需启动或安装 Everything。</p>
             </div>
           </div>
           <p
             className={
-              everything?.available ? "service-state ready" : "service-state"
+              ntfsIndexer?.available ? "service-state ready" : "service-state"
             }
           >
-            {everything?.available ? "可选加速器已连接" : "可选加速器"}
+            {ntfsIndexer?.available ? "索引服务已连接" : "索引服务待安装"}
           </p>
         </article>
         <article className="service-card openai-card">

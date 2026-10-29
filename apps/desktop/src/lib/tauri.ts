@@ -12,7 +12,6 @@ export interface QizhiCommands {
     input: ServiceConfigurationInput,
   ): Promise<ConnectionStatus>;
   pickFolder(): Promise<string | null>;
-  getEverythingStatus?(): Promise<EverythingStatus>;
   getNtfsIndexerStatus?(): Promise<ConnectionStatus>;
   getTodaySnapshot(): Promise<TodaySnapshot>;
   getTodayScanStatus?(): Promise<TodayScanStatus>;
@@ -26,7 +25,7 @@ export interface QizhiCommands {
   saveScanRules(
     input: Pick<
       ScanRules,
-      "allowedRoots" | "customExclusions" | "fileCategories" | "esCliPath"
+      "allowedRoots" | "customExclusions" | "fileCategories"
     >,
   ): Promise<ScanRules>;
   listRagflowChats?(): Promise<RagflowChat[]>;
@@ -49,12 +48,6 @@ export interface QizhiCommands {
 }
 
 export type ConnectionStatus = { available: boolean; message: string };
-
-export type EverythingStatus = {
-  available: boolean;
-  adapter: string;
-  remediation: string;
-};
 
 export type TodayFile = {
   id: number;
@@ -91,8 +84,6 @@ export type ScanRules = {
   allowedRoots: string[];
   customExclusions: string[];
   fileCategories: FileCategory[];
-  everythingSdkPath: string | null;
-  esCliPath: string | null;
   lockedExclusions: string[];
 };
 
@@ -144,7 +135,7 @@ export const unavailableCommands: QizhiCommands = {
   async getTodaySnapshot() {
     return {
       state: "unavailable",
-      remediation: "桌面服务尚未连接，无法检测 Everything。",
+      remediation: "桌面服务尚未连接，无法读取本地 NTFS 索引。",
       files: [],
       clusters: [],
     };
@@ -172,8 +163,6 @@ export const unavailableCommands: QizhiCommands = {
       allowedRoots: [],
       customExclusions: [],
       fileCategories: ["documents", "sourceCode"],
-      everythingSdkPath: null,
-      esCliPath: null,
       lockedExclusions: [],
     };
   },
@@ -195,7 +184,6 @@ export const tauriCommands: QizhiCommands = {
     });
     return typeof selected === "string" ? selected : null;
   },
-  getEverythingStatus: () => invoke("get_everything_status"),
   getNtfsIndexerStatus: () => invoke("get_ntfs_indexer_status"),
   getTodaySnapshot: () => invoke("get_today_snapshot"),
   getTodayScanStatus: () => invoke("get_today_scan_status"),

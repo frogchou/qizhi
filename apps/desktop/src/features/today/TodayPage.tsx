@@ -234,12 +234,12 @@ export function TodayPage({ commands }: { commands: QizhiCommands }) {
 
   function scanNotice() {
     if (scanStatus?.state === "scanning") {
-      return `正在扫描：已检查 ${scanStatus.directoriesScanned} 个文件夹，发现 ${scanStatus.candidatesFound} 个今日文件。`;
+      return "正在建立或同步本地 NTFS 索引；不会递归遍历文件夹。";
     }
     if (scanStatus?.state === "failed") {
       return scanStatus.message ?? "扫描未完成，请检查扫描范围和文件访问权限。";
     }
-    return "正在准备扫描允许目录；你仍可浏览已发现的文件。";
+    return "正在准备本地 NTFS 索引；你仍可浏览已发现的文件。";
   }
 
   const visibleFiles = useMemo(() => {

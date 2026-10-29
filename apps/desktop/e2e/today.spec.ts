@@ -23,11 +23,10 @@ test.beforeEach(async ({ page }) => {
             ],
             clusters: [{ label: "本机文件", fileIds: [7] }],
           });
-        if (command === "get_everything_status")
+        if (command === "get_ntfs_indexer_status")
           return Promise.resolve({
-            available: false,
-            adapter: "unavailable",
-            remediation: "未检测到 Everything。",
+            available: true,
+            message: "本地 NTFS 索引服务已连接。",
           });
         if (command === "get_settings") return Promise.resolve([]);
         if (command === "list_scan_rules")
@@ -35,8 +34,6 @@ test.beforeEach(async ({ page }) => {
             allowedRoots: [],
             customExclusions: [],
             fileCategories: ["documents", "sourceCode"],
-            everythingSdkPath: null,
-            esCliPath: null,
             lockedExclusions: [],
           });
         if (command === "pick_folder") return Promise.resolve(null);

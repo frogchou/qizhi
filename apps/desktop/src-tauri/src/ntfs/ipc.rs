@@ -1,5 +1,14 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IndexerFileCandidate {
+    pub file_reference_number: String,
+    pub canonical_path: String,
+    pub modified_at_utc_ms: i64,
+    pub size_bytes: Option<i64>,
+}
+
 pub const INDEXER_PIPE_NAME: &str = r"\\.\pipe\qizhi-ntfs-indexer-v1";
 pub const INDEXER_PROTOCOL_VERSION: u16 = 1;
 pub const MAX_IPC_MESSAGE_BYTES: usize = 64 * 1024;
@@ -16,6 +25,10 @@ pub enum IndexerRequestKind {
     },
     Build,
     Sync,
+    ListToday {
+        start_utc_ms: i64,
+        end_utc_ms: i64,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -31,6 +44,8 @@ pub struct IndexerResponse {
     pub request_id: String,
     pub status: String,
     pub message: Option<String>,
+    #[serde(default)]
+    pub candidates: Vec<IndexerFileCandidate>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -80,7 +95,9 @@ pub fn validate_request(
         IndexerRequestKind::Configure { allowed_roots, .. } => {
             return validate_configured_roots(allowed_roots);
         }
-        IndexerRequestKind::Build | IndexerRequestKind::Sync => {}
+        IndexerRequestKind::Build
+        | IndexerRequestKind::Sync
+        | IndexerRequestKind::ListToday { .. } => {}
     }
     if policy.allowed_roots.is_empty() {
         return Err(IpcValidationError::MissingAuthorizedRoots);

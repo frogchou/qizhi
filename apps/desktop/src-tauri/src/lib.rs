@@ -3,7 +3,6 @@ pub mod commands;
 pub mod config;
 pub mod contracts;
 pub mod database;
-pub mod discovery;
 pub mod network;
 pub mod ntfs;
 pub mod ragflow;
@@ -28,15 +27,9 @@ pub fn run() {
                 scan::configuration::ScanRules::defaults_for_current_user(),
             )
             .expect("open scan rules");
-            let everything_sdk_path = app
-                .path()
-                .resource_dir()
-                .expect("resource directory")
-                .join("Everything64.dll");
             app.manage(app_state::AppState {
                 database,
                 scan_rules,
-                everything_sdk_path,
                 today_scan_progress: scan::progress::TodayScanProgress::new(),
                 logger: telemetry::AppLogger::new(&data_dir),
             });
@@ -47,7 +40,6 @@ pub fn run() {
             commands::settings::save_settings,
             commands::settings::test_service_connection,
             commands::settings::get_ntfs_indexer_status,
-            commands::settings::get_everything_status,
             commands::settings::list_scan_rules,
             commands::settings::save_scan_rules,
             commands::today::get_today_snapshot,
