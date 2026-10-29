@@ -26,6 +26,12 @@
   "bundle": {
     "active": true,
     "targets": ["nsis"],
+    "windows": {
+      "nsis": {
+        "installMode": "perMachine",
+        "installerHooks": "./windows/hooks.nsh"
+      }
+    },
     "resources": {
       "vendor/everything/Everything64.dll": "Everything64.dll",
       "THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md"

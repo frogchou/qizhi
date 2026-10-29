@@ -176,7 +176,8 @@ fn keeps_the_last_ready_index_visible_until_a_rebuild_is_published() {
         repository
             .checkpoint_for(volume.id)
             .expect("checkpoint reads")
-            .expect("old checkpoint remains").next_usn,
+            .expect("old checkpoint remains")
+            .next_usn,
         "10"
     );
     assert_eq!(
@@ -195,7 +196,8 @@ fn keeps_the_last_ready_index_visible_until_a_rebuild_is_published() {
         repository
             .checkpoint_for(volume.id)
             .expect("checkpoint reads")
-            .expect("new checkpoint persists").next_usn,
+            .expect("new checkpoint persists")
+            .next_usn,
         "20"
     );
     assert_eq!(

@@ -1,0 +1,95 @@
+use qizhi_desktop_lib::ntfs::ipc::{
+    INDEXER_PROTOCOL_VERSION, IndexerRequest, IndexerRequestKind, IpcAuthorizationPolicy,
+    IpcValidationError, validate_request,
+};
+use qizhi_desktop_lib::ntfs::pipe::handle_request_bytes;
+
+fn policy() -> IpcAuthorizationPolicy {
+    IpcAuthorizationPolicy {
+        caller_sid: "S-1-5-21-100".to_owned(),
+        allowed_roots: vec![r"D:\work".to_owned(), r"C:\Users\fcc\Documents".to_owned()],
+    }
+}
+
+fn build(roots: Vec<&str>) -> IndexerRequest {
+    IndexerRequest {
+        protocol_version: INDEXER_PROTOCOL_VERSION,
+        request_id: "request-1".to_owned(),
+        kind: IndexerRequestKind::Build {
+            roots: roots.into_iter().map(str::to_owned).collect(),
+        },
+    }
+}
+
+#[test]
+fn accepts_an_authenticated_request_for_authorized_descendant_roots() {
+    assert_eq!(
+        validate_request(&policy(), "S-1-5-21-100", &build(vec![r"D:\work\project"])),
+        Ok(())
+    );
+}
+
+#[test]
+fn rejects_unsupported_versions_and_untrusted_sids() {
+    let unsupported = IndexerRequest {
+        protocol_version: INDEXER_PROTOCOL_VERSION + 1,
+        request_id: "request-1".to_owned(),
+        kind: IndexerRequestKind::Health,
+    };
+    assert_eq!(
+        validate_request(&policy(), "S-1-5-21-100", &unsupported),
+        Err(IpcValidationError::UnsupportedProtocol)
+    );
+    assert_eq!(
+        validate_request(&policy(), "S-1-5-21-999", &build(vec![r"D:\work"])),
+        Err(IpcValidationError::UnauthorizedCaller)
+    );
+}
+
+#[test]
+fn rejects_empty_or_overbroad_scan_roots() {
+    assert_eq!(
+        validate_request(&policy(), "S-1-5-21-100", &build(vec![r"D:\other"])),
+        Err(IpcValidationError::RootOutsidePolicy)
+    );
+    assert_eq!(
+        validate_request(&policy(), "S-1-5-21-100", &build(vec![""])),
+        Err(IpcValidationError::EmptyRoot)
+    );
+}
+
+#[test]
+fn rejects_more_than_the_bounded_number_of_roots() {
+    let roots = (0..65).map(|_| r"D:\work").collect();
+    assert_eq!(
+        validate_request(&policy(), "S-1-5-21-100", &build(roots)),
+        Err(IpcValidationError::TooManyRoots)
+    );
+}
+
+#[test]
+fn service_protocol_refuses_index_requests_until_the_pipe_identity_is_configured() {
+    let response: serde_json::Value = serde_json::from_slice(&handle_request_bytes(
+        &serde_json::to_vec(&build(vec![r"D:\work"])).expect("request encodes"),
+    ))
+    .expect("response decodes");
+
+    assert_eq!(response["status"], "rejected");
+    assert_eq!(response["message"], "本地索引服务尚未完成授权配置");
+}
+
+#[test]
+fn service_protocol_supports_a_bounded_health_handshake() {
+    let request = IndexerRequest {
+        protocol_version: INDEXER_PROTOCOL_VERSION,
+        request_id: "health-1".to_owned(),
+        kind: IndexerRequestKind::Health,
+    };
+    let response: serde_json::Value = serde_json::from_slice(&handle_request_bytes(
+        &serde_json::to_vec(&request).expect("request encodes"),
+    ))
+    .expect("response decodes");
+
+    assert_eq!(response["status"], "ready");
+    assert_eq!(response["request_id"], "health-1");
+}

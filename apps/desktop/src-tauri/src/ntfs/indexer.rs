@@ -93,7 +93,11 @@ impl<S: UsnVolumeSource> NtfsIndexer<S> {
         descriptor.state = VolumeState::Building;
         descriptor.state_message = Some("正在建立本地 NTFS 索引".to_owned());
         let volume = self.repository.upsert_volume(&descriptor)?;
-        let build_id = format!("{}-{}", volume.id, Utc::now().timestamp_nanos_opt().unwrap_or_default());
+        let build_id = format!(
+            "{}-{}",
+            volume.id,
+            Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        );
         self.repository
             .begin_rebuild(volume.id, &build_id, Utc::now().timestamp_millis())?;
         let journal = self
@@ -124,11 +128,8 @@ impl<S: UsnVolumeSource> NtfsIndexer<S> {
                 },
             )?;
         }
-        self.repository.publish_rebuild(
-            volume.id,
-            &build_id,
-            Utc::now().timestamp_millis(),
-        )?;
+        self.repository
+            .publish_rebuild(volume.id, &build_id, Utc::now().timestamp_millis())?;
         let volume = self
             .repository
             .volume_by_guid(&descriptor.volume_guid)?
