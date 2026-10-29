@@ -25,19 +25,18 @@ fn policy() -> IpcAuthorizationPolicy {
 }
 
 fn build(roots: Vec<&str>) -> IndexerRequest {
+    let _ = roots;
     IndexerRequest {
         protocol_version: INDEXER_PROTOCOL_VERSION,
         request_id: "request-1".to_owned(),
-        kind: IndexerRequestKind::Build {
-            roots: roots.into_iter().map(str::to_owned).collect(),
-        },
+        kind: IndexerRequestKind::Build,
     }
 }
 
 #[test]
-fn accepts_an_authenticated_request_for_authorized_descendant_roots() {
+fn accepts_an_authenticated_request_with_a_saved_authorized_scope() {
     assert_eq!(
-        validate_request(&policy(), "S-1-5-21-100", &build(vec![r"D:\work\project"])),
+        validate_request(&policy(), "S-1-5-21-100", &build(vec![])),
         Ok(())
     );
 }
@@ -60,22 +59,38 @@ fn rejects_unsupported_versions_and_untrusted_sids() {
 }
 
 #[test]
-fn rejects_empty_or_overbroad_scan_roots() {
+fn rejects_missing_or_empty_configured_scan_roots() {
+    let missing = IpcAuthorizationPolicy {
+        caller_sid: "S-1-5-21-100".to_owned(),
+        allowed_roots: vec![],
+    };
     assert_eq!(
-        validate_request(&policy(), "S-1-5-21-100", &build(vec![r"D:\other"])),
-        Err(IpcValidationError::RootOutsidePolicy)
+        validate_request(&missing, "S-1-5-21-100", &build(vec![])),
+        Err(IpcValidationError::MissingAuthorizedRoots)
     );
+    let configure = IndexerRequest {
+        protocol_version: INDEXER_PROTOCOL_VERSION,
+        request_id: "configure-1".to_owned(),
+        kind: IndexerRequestKind::Configure {
+            allowed_roots: vec!["".to_owned()],
+        },
+    };
     assert_eq!(
-        validate_request(&policy(), "S-1-5-21-100", &build(vec![""])),
+        validate_request(&policy(), "S-1-5-21-100", &configure),
         Err(IpcValidationError::EmptyRoot)
     );
 }
 
 #[test]
 fn rejects_more_than_the_bounded_number_of_roots() {
-    let roots = (0..65).map(|_| r"D:\work").collect();
+    let roots = (0..65).map(|_| r"D:\work".to_owned()).collect();
+    let configure = IndexerRequest {
+        protocol_version: INDEXER_PROTOCOL_VERSION,
+        request_id: "configure-1".to_owned(),
+        kind: IndexerRequestKind::Configure { allowed_roots: roots },
+    };
     assert_eq!(
-        validate_request(&policy(), "S-1-5-21-100", &build(roots)),
+        validate_request(&policy(), "S-1-5-21-100", &configure),
         Err(IpcValidationError::TooManyRoots)
     );
 }
@@ -83,7 +98,7 @@ fn rejects_more_than_the_bounded_number_of_roots() {
 #[test]
 fn service_protocol_refuses_index_requests_until_the_pipe_identity_is_configured() {
     let response: serde_json::Value = serde_json::from_slice(&handle_request_bytes(
-        &serde_json::to_vec(&build(vec![r"D:\work"])).expect("request encodes"),
+        &serde_json::to_vec(&build(vec![])).expect("request encodes"),
     ))
     .expect("response decodes");
 

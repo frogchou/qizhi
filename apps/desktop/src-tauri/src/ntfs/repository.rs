@@ -3,7 +3,7 @@ use rusqlite::{OptionalExtension, params};
 use crate::{
     database::{AppError, Database},
     ntfs::{
-        DiscoveredEvent, IndexPage, IndexedVolume, UsnCheckpoint, VolumeDescriptor, VolumeState,
+        CallerIndexPolicy, DiscoveredEvent, IndexPage, IndexedVolume, UsnCheckpoint, VolumeDescriptor, VolumeState,
     },
 };
 
@@ -273,6 +273,39 @@ impl NtfsIndexRepository {
                     last_successful_sync_at_utc_ms: row.get(4)?,
                 }),
             ).optional()
+        })
+    }
+
+    pub fn replace_caller_policy(&self, policy: &CallerIndexPolicy) -> Result<(), AppError> {
+        let allowed_roots = serde_json::to_string(&policy.allowed_roots)
+            .map_err(|_| AppError::InvalidConfig)?;
+        self.database.with_connection(|connection| {
+            connection.execute(
+                "INSERT INTO ntfs_caller_policies(caller_sid,allowed_roots_json,updated_at_utc_ms) VALUES (?1,?2,?3) ON CONFLICT(caller_sid) DO UPDATE SET allowed_roots_json=excluded.allowed_roots_json,updated_at_utc_ms=excluded.updated_at_utc_ms",
+                params![policy.caller_sid, allowed_roots, policy.updated_at_utc_ms],
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn caller_policy(&self, caller_sid: &str) -> Result<Option<CallerIndexPolicy>, AppError> {
+        self.database.with_connection(|connection| {
+            connection
+                .query_row(
+                    "SELECT allowed_roots_json,updated_at_utc_ms FROM ntfs_caller_policies WHERE caller_sid = ?1",
+                    [caller_sid],
+                    |row| {
+                        let roots_json: String = row.get(0)?;
+                        let allowed_roots = serde_json::from_str(&roots_json)
+                            .map_err(|_| rusqlite::Error::InvalidQuery)?;
+                        Ok(CallerIndexPolicy {
+                            caller_sid: caller_sid.to_owned(),
+                            allowed_roots,
+                            updated_at_utc_ms: row.get(1)?,
+                        })
+                    },
+                )
+                .optional()
         })
     }
 

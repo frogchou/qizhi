@@ -100,3 +100,13 @@ pub struct IndexDiagnostic {
     pub code: String,
     pub message: String,
 }
+
+/// A caller-scoped index configuration owned by the privileged service.
+/// The SID is derived from the connected named-pipe client, never supplied
+/// as a trusted request field by the desktop application.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CallerIndexPolicy {
+    pub caller_sid: String,
+    pub allowed_roots: Vec<String>,
+    pub updated_at_utc_ms: i64,
+}

@@ -2,7 +2,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use qizhi_desktop_lib::{
     database::Database,
-    ntfs::{DiscoveredEvent, IndexEntry, IndexPage, UsnCheckpoint, VolumeDescriptor, VolumeState},
+    ntfs::{CallerIndexPolicy, DiscoveredEvent, IndexEntry, IndexPage, UsnCheckpoint, VolumeDescriptor, VolumeState},
 };
 
 fn temporary_database_path(name: &str) -> std::path::PathBuf {
@@ -107,6 +107,31 @@ fn rejects_a_page_for_an_unknown_volume_without_advancing_a_checkpoint() {
             .expect("checkpoint query succeeds")
             .is_none()
     );
+
+    drop(database);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn stores_scan_authorization_by_authenticated_windows_sid() {
+    let path = temporary_database_path("ntfs-caller-policy");
+    let database = Database::open(&path).expect("database opens");
+    let repository = database.ntfs_index();
+    let policy = CallerIndexPolicy {
+        caller_sid: "S-1-5-21-100".to_owned(),
+        allowed_roots: vec![r"D:\\work".to_owned(), r"C:\\Users\\fcc\\Documents".to_owned()],
+        updated_at_utc_ms: 1_793_189_401_000,
+    };
+
+    repository
+        .replace_caller_policy(&policy)
+        .expect("caller policy persists");
+    let stored = repository
+        .caller_policy(&policy.caller_sid)
+        .expect("policy reads")
+        .expect("policy exists");
+
+    assert_eq!(stored, policy);
 
     drop(database);
     let _ = std::fs::remove_file(path);

@@ -26,7 +26,9 @@ pub fn handle_request_bytes(message: &[u8]) -> Vec<u8> {
                     status: "ready".to_owned(),
                     message: None,
                 },
-                IndexerRequestKind::Build { .. } | IndexerRequestKind::Sync { .. } => {
+                IndexerRequestKind::Configure { .. }
+                | IndexerRequestKind::Build
+                | IndexerRequestKind::Sync => {
                     error_response(request.request_id, "本地索引服务尚未完成授权配置")
                 }
             },

@@ -15,9 +15,11 @@ pub use indexer::{
     IndexProgress, IndexProgressState, IndexSourcePage, IndexerError, JournalCursor, NtfsIndexer,
     UsnVolumeSource,
 };
+pub use control::IndexerControlPlane;
 pub use model::{
-    DiscoveredEvent, IndexDiagnostic, IndexEntry, IndexPage, IndexedVolume, UsnCheckpoint,
+    CallerIndexPolicy, DiscoveredEvent, IndexDiagnostic, IndexEntry, IndexPage, IndexedVolume, UsnCheckpoint,
     VolumeDescriptor, VolumeState,
 };
 pub use repository::NtfsIndexRepository;
 pub use service::WindowsUsnVolumeSource;
+pub mod control;
