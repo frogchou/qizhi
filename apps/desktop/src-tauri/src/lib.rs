@@ -57,6 +57,7 @@ pub fn run() {
             commands::knowledge::list_ragflow_agents,
             commands::knowledge::query_ragflow_knowledge,
             commands::knowledge::download_ragflow_document,
+            commands::knowledge::upload_today_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

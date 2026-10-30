@@ -8,8 +8,9 @@ use crate::{
     config::secret_store::WindowsCredentialStore,
     ragflow::client::{
         RagflowAgent, RagflowAgentAnswer, RagflowAnswer, RagflowChat, RagflowChunk, RagflowClient,
-        RagflowDataset,
+        RagflowDataset, RagflowUpload,
     },
+    scan::policy::ScanPolicy,
 };
 
 #[derive(Deserialize)]
@@ -98,6 +99,22 @@ pub struct DownloadRagflowDocumentOutput {
     saved_path: String,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UploadTodayFileInput {
+    file_id: i64,
+    dataset_id: String,
+    parent_path: Option<String>,
+    start_parsing: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RagflowUploadOutput {
+    document_count: usize,
+    parsing_started: bool,
+}
+
 impl From<RagflowChat> for RagflowChatOutput {
     fn from(value: RagflowChat) -> Self {
         Self {
@@ -150,6 +167,46 @@ impl From<RagflowChunk> for RagflowChunkOutput {
 
 fn client(state: &AppState) -> Result<RagflowClient, String> {
     RagflowClient::from_saved_config(state.database.configs(), WindowsCredentialStore)
+}
+
+fn upload_policy(state: &AppState) -> Result<ScanPolicy, String> {
+    let rules = state
+        .scan_rules
+        .get()
+        .map_err(|_| "无法读取扫描规则。".to_owned())?;
+    let exclusions = rules
+        .custom_exclusions
+        .iter()
+        .map(PathBuf::from)
+        .collect::<Vec<_>>();
+    let validation_policy = ScanPolicy::new(exclusions.clone());
+    let roots = rules
+        .allowed_roots
+        .iter()
+        .map(PathBuf::from)
+        .map(|root| validation_policy.validate_root(&root))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| "扫描目录无效，请在设置中重新保存。".to_owned())?;
+    if roots.is_empty() {
+        return Err("请先在设置中添加允许扫描的工作目录。".to_owned());
+    }
+    Ok(ScanPolicy::for_roots(exclusions, roots))
+}
+
+fn ensure_upload_candidate(
+    file: &crate::contracts::FileRecord,
+    policy: &ScanPolicy,
+) -> Result<PathBuf, String> {
+    let path = PathBuf::from(&file.canonical_path);
+    if !policy.is_allowed(&path) {
+        return Err("该文件已不在允许扫描范围内，无法上传。".to_owned());
+    }
+    let metadata = std::fs::metadata(&path)
+        .map_err(|_| "无法读取要上传的文件，它可能已移动或没有访问权限。".to_owned())?;
+    if !metadata.is_file() {
+        return Err("所选内容不是可上传的文件。".to_owned());
+    }
+    Ok(path)
 }
 
 #[tauri::command]
@@ -385,4 +442,88 @@ pub async fn download_ragflow_document(
     })
     .await
     .map_err(|_| "下载 RAGFlow 文件时发生意外错误。".to_owned())?
+}
+
+#[tauri::command]
+pub async fn upload_today_file(
+    state: State<'_, AppState>,
+    input: UploadTodayFileInput,
+) -> Result<RagflowUploadOutput, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = (|| {
+            if input.dataset_id.trim().is_empty() {
+                return Err("请选择目标知识库。".to_owned());
+            }
+            let file = state
+                .database
+                .files()
+                .get_by_id(input.file_id)
+                .map_err(|_| "无法读取所选文件。".to_owned())?
+                .ok_or_else(|| "所选文件已不在今日列表中。".to_owned())?;
+            let file_path = ensure_upload_candidate(&file, &upload_policy(&state)?)?;
+            let RagflowUpload {
+                document_count,
+                parsing_started,
+                ..
+            } = client(&state)?.upload_document(
+                &file_path,
+                input.dataset_id.trim(),
+                input.parent_path.as_deref(),
+                input.start_parsing,
+            )?;
+            Ok(RagflowUploadOutput {
+                document_count,
+                parsing_started,
+            })
+        })();
+        match &result {
+            Ok(output) => state.logger.info(
+                "ragflow",
+                &format!(
+                    "today file uploaded: {} document(s), parsing_started={}",
+                    output.document_count, output.parsing_started
+                ),
+            ),
+            Err(error) => state
+                .logger
+                .error("ragflow", &format!("today file upload failed: {error}")),
+        }
+        result
+    })
+    .await
+    .map_err(|_| "上传知识库时发生意外错误。".to_owned())?
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        contracts::FileRecord,
+        scan::policy::{AllowedRoot, ScanPolicy},
+    };
+
+    use super::ensure_upload_candidate;
+
+    #[test]
+    fn refuses_to_upload_a_file_outside_the_current_scan_policy() {
+        let file = FileRecord {
+            id: 1,
+            canonical_path: r"C:\Windows\System32\private.docx".to_owned(),
+            file_identity: "outside-scope".to_owned(),
+            modified_at_utc_ms: 1,
+            size_bytes: 1,
+            source: "本机 NTFS 索引".to_owned(),
+        };
+        let policy = ScanPolicy::for_roots(
+            vec![],
+            vec![AllowedRoot(
+                std::env::current_dir().expect("current directory"),
+            )],
+        );
+
+        let error = ensure_upload_candidate(&file, &policy)
+            .expect_err("a file outside the approved scan scope cannot be uploaded");
+
+        assert_eq!(error, "该文件已不在允许扫描范围内，无法上传。".to_owned());
+    }
 }

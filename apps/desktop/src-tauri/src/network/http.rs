@@ -67,6 +67,32 @@ impl HttpClient {
             .to_vec();
         Ok(HttpBytesResponse { status, body })
     }
+
+    pub fn request_bearer_multipart(
+        &self,
+        url: &str,
+        api_key: &str,
+        boundary: &str,
+        body: Vec<u8>,
+    ) -> Result<HttpResponse, String> {
+        let response = self
+            .client
+            .post(url)
+            .bearer_auth(api_key)
+            .header(reqwest::header::ACCEPT, "application/json")
+            .header(
+                reqwest::header::CONTENT_TYPE,
+                format!("multipart/form-data; boundary={boundary}"),
+            )
+            .body(body)
+            .send()
+            .map_err(transport_error)?;
+        let status = response.status().as_u16();
+        let body = response
+            .text()
+            .map_err(|_| "无法读取服务返回的数据。".to_owned())?;
+        Ok(HttpResponse { status, body })
+    }
 }
 
 fn transport_error(error: reqwest::Error) -> String {

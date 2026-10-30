@@ -1,4 +1,7 @@
-use std::time::Duration;
+use std::{
+    path::Path,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -60,11 +63,20 @@ pub struct RagflowAgentAnswer {
     pub session_id: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RagflowUpload {
+    pub document_ids: Vec<String>,
+    pub document_count: usize,
+    pub parsing_started: bool,
+}
+
 #[derive(Deserialize)]
 struct Envelope {
     code: i64,
     #[serde(default)]
     message: String,
+    #[serde(default)]
     data: Value,
 }
 
@@ -136,6 +148,11 @@ struct RetrievalChunkData {
 struct RetrievalData {
     #[serde(default)]
     chunks: Vec<RetrievalChunkData>,
+}
+
+#[derive(Deserialize)]
+struct UploadedDocumentData {
+    id: String,
 }
 
 #[derive(Clone)]
@@ -248,6 +265,58 @@ impl RagflowClient {
         Ok(transport.body)
     }
 
+    pub fn upload_document(
+        &self,
+        file_path: &Path,
+        dataset_id: &str,
+        parent_path: Option<&str>,
+        start_parsing: bool,
+    ) -> Result<RagflowUpload, String> {
+        if !is_resource_id(dataset_id) {
+            return Err("目标知识库无效。".to_owned());
+        }
+        let file_name = file_path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| "无法读取文件名。".to_owned())?;
+        if contains_multipart_control(file_name) {
+            return Err("文件名包含不支持的字符。".to_owned());
+        }
+        let file_bytes = std::fs::read(file_path)
+            .map_err(|_| "无法读取要上传的文件，它可能已移动或没有访问权限。".to_owned())?;
+        let parent_path = parent_path.map(str::trim).filter(|value| !value.is_empty());
+        if parent_path.is_some_and(contains_multipart_control) {
+            return Err("知识库内目录包含不支持的字符。".to_owned());
+        }
+        let boundary = upload_boundary();
+        let body = build_upload_body(&boundary, file_name, &file_bytes, parent_path);
+        let url = self.api_url(&format!("/api/v1/datasets/{dataset_id}/documents"))?;
+        let transport = HttpClient::with_timeout(Duration::from_secs(120))?
+            .request_bearer_multipart(&url, &self.api_key, &boundary, body)?;
+        if !(200..300).contains(&transport.status) {
+            return Err(format!("RAGFlow 上传未通过（HTTP {}）。", transport.status));
+        }
+        let mut upload = Self::parse_upload_response(&transport.body)?;
+        if start_parsing {
+            self.start_parsing(dataset_id, &upload.document_ids)?;
+            upload.parsing_started = true;
+        }
+        Ok(upload)
+    }
+
+    pub fn start_parsing(&self, dataset_id: &str, document_ids: &[String]) -> Result<(), String> {
+        if !is_resource_id(dataset_id)
+            || document_ids.is_empty()
+            || !document_ids.iter().all(|id| is_resource_id(id))
+        {
+            return Err("RAGFlow 上传未返回可解析的文档。".to_owned());
+        }
+        let url = self.api_url(&format!("/api/v1/datasets/{dataset_id}/chunks"))?;
+        let body = serde_json::json!({ "document_ids": document_ids }).to_string();
+        Self::parse_parse_action_response(&self.request("POST", url, Some(body))?)
+    }
+
     pub fn ask(&self, chat_id: &str, question: &str) -> Result<RagflowAnswer, String> {
         if chat_id.trim().is_empty() || question.trim().is_empty() {
             return Err("请选择问答机器人并输入问题。".to_owned());
@@ -303,6 +372,35 @@ impl RagflowClient {
                 description: dataset.description.unwrap_or_default(),
             })
             .collect())
+    }
+
+    pub fn parse_upload_response(body: &str) -> Result<RagflowUpload, String> {
+        let envelope = parse_envelope(body)?;
+        let documents = match envelope.data {
+            Value::Array(items) => {
+                serde_json::from_value::<Vec<UploadedDocumentData>>(Value::Array(items))
+            }
+            data => serde_json::from_value::<UploadedDocumentData>(data).map(|item| vec![item]),
+        }
+        .map_err(|_| "RAGFlow 上传返回的数据无法识别。".to_owned())?;
+        let document_ids = documents
+            .into_iter()
+            .map(|item| item.id)
+            .filter(|id| is_resource_id(id))
+            .collect::<Vec<_>>();
+        if document_ids.is_empty() {
+            return Err("RAGFlow 上传未返回可解析的文档。".to_owned());
+        }
+        let document_count = document_ids.len();
+        Ok(RagflowUpload {
+            document_ids,
+            document_count,
+            parsing_started: false,
+        })
+    }
+
+    pub fn parse_parse_action_response(body: &str) -> Result<(), String> {
+        parse_envelope(body).map(|_| ())
     }
 
     pub fn parse_agent_list(body: &str) -> Result<Vec<RagflowAgent>, String> {
@@ -407,6 +505,47 @@ impl RagflowClient {
 
 fn is_resource_id(value: &str) -> bool {
     !value.trim().is_empty() && !value.contains(['/', '\\', '\0'])
+}
+
+fn contains_multipart_control(value: &str) -> bool {
+    value.contains(['\r', '\n', '\0'])
+}
+
+fn upload_boundary() -> String {
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    format!("qizhi-{timestamp:x}")
+}
+
+fn build_upload_body(
+    boundary: &str,
+    file_name: &str,
+    file_bytes: &[u8],
+    parent_path: Option<&str>,
+) -> Vec<u8> {
+    let mut body = Vec::with_capacity(file_bytes.len() + 512);
+    let write_text = |body: &mut Vec<u8>, value: &str| body.extend_from_slice(value.as_bytes());
+    write_text(&mut body, &format!("--{boundary}\r\n"));
+    write_text(
+        &mut body,
+        &format!("Content-Disposition: form-data; name=\"file\"; filename=\"{file_name}\"\r\n"),
+    );
+    write_text(&mut body, "Content-Type: application/octet-stream\r\n\r\n");
+    body.extend_from_slice(file_bytes);
+    write_text(&mut body, "\r\n");
+    if let Some(parent_path) = parent_path {
+        write_text(&mut body, &format!("--{boundary}\r\n"));
+        write_text(
+            &mut body,
+            "Content-Disposition: form-data; name=\"parent_path\"\r\n\r\n",
+        );
+        write_text(&mut body, parent_path);
+        write_text(&mut body, "\r\n");
+    }
+    write_text(&mut body, &format!("--{boundary}--\r\n"));
+    body
 }
 
 fn agent_execution_error(error: String) -> String {

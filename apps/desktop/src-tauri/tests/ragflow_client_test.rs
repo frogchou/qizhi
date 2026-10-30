@@ -112,3 +112,28 @@ fn explains_when_an_agent_cannot_reach_its_own_model_service() {
 fn gives_agent_workflows_a_longer_response_window_than_simple_api_calls() {
     assert_eq!(RagflowClient::agent_request_timeout().as_secs(), 120);
 }
+
+#[test]
+fn parses_uploaded_document_ids_before_requesting_dataset_parsing() {
+    let upload = RagflowClient::parse_upload_response(
+        r#"{"code":0,"data":[{"id":"document-1","name":"周报.docx","run":"UNSTART"}]}"#,
+    )
+    .expect("successful upload response parses");
+
+    assert_eq!(upload.document_ids, vec!["document-1"]);
+    assert_eq!(upload.document_count, 1);
+}
+
+#[test]
+fn rejects_an_upload_response_without_document_ids_when_parsing_is_requested() {
+    let error = RagflowClient::parse_upload_response(r#"{"code":0,"data":[]}"#)
+        .expect_err("an empty upload response cannot be parsed later");
+
+    assert_eq!(error, "RAGFlow 上传未返回可解析的文档。".to_owned());
+}
+
+#[test]
+fn accepts_a_successful_parse_action_without_a_data_payload() {
+    RagflowClient::parse_parse_action_response(r#"{"code":0}"#)
+        .expect("the documented parse endpoint may return code only");
+}
