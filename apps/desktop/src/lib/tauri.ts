@@ -128,6 +128,7 @@ export type RagflowKnowledgeQuery = {
 export type RagflowUpload = {
   documentCount: number;
   parsingStarted: boolean;
+  parsingError: string | null;
 };
 
 export const unavailableCommands: QizhiCommands = {

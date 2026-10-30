@@ -113,6 +113,7 @@ pub struct UploadTodayFileInput {
 pub struct RagflowUploadOutput {
     document_count: usize,
     parsing_started: bool,
+    parsing_error: Option<String>,
 }
 
 impl From<RagflowChat> for RagflowChatOutput {
@@ -465,6 +466,7 @@ pub async fn upload_today_file(
             let RagflowUpload {
                 document_count,
                 parsing_started,
+                parsing_error,
                 ..
             } = client(&state)?.upload_document(
                 &file_path,
@@ -475,6 +477,7 @@ pub async fn upload_today_file(
             Ok(RagflowUploadOutput {
                 document_count,
                 parsing_started,
+                parsing_error,
             })
         })();
         match &result {

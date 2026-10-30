@@ -395,7 +395,9 @@ export function TodayPage({ commands }: { commands: QizhiCommands }) {
       setNotice(
         result.parsingStarted
           ? "文件已上传并开始解析。"
-          : "文件已上传；你可在 RAGFlow 中开始解析。",
+          : result.parsingError
+            ? `文件已上传，但未能启动解析：${result.parsingError}`
+            : "文件已上传；你可在 RAGFlow 中开始解析。",
       );
     } catch (error) {
       setUploadError(

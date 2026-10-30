@@ -137,3 +137,19 @@ fn accepts_a_successful_parse_action_without_a_data_payload() {
     RagflowClient::parse_parse_action_response(r#"{"code":0}"#)
         .expect("the documented parse endpoint may return code only");
 }
+
+#[test]
+fn preserves_successful_upload_when_starting_parsing_fails() {
+    let upload = RagflowClient::parse_upload_response(
+        r#"{"code":0,"data":[{"id":"document-1","name":"周报.docx"}]}"#,
+    )
+    .expect("upload parses")
+    .with_parsing_outcome(Err("该知识库使用采集管线。".to_owned()));
+
+    assert!(!upload.parsing_started);
+    assert_eq!(
+        upload.parsing_error,
+        Some("该知识库使用采集管线。".to_owned())
+    );
+    assert_eq!(upload.document_count, 1);
+}

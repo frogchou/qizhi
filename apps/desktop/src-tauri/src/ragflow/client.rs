@@ -69,6 +69,17 @@ pub struct RagflowUpload {
     pub document_ids: Vec<String>,
     pub document_count: usize,
     pub parsing_started: bool,
+    pub parsing_error: Option<String>,
+}
+
+impl RagflowUpload {
+    pub fn with_parsing_outcome(mut self, result: Result<(), String>) -> Self {
+        match result {
+            Ok(()) => self.parsing_started = true,
+            Err(error) => self.parsing_error = Some(error),
+        }
+        self
+    }
 }
 
 #[derive(Deserialize)]
@@ -299,8 +310,8 @@ impl RagflowClient {
         }
         let mut upload = Self::parse_upload_response(&transport.body)?;
         if start_parsing {
-            self.start_parsing(dataset_id, &upload.document_ids)?;
-            upload.parsing_started = true;
+            let parsing_result = self.start_parsing(dataset_id, &upload.document_ids);
+            upload = upload.with_parsing_outcome(parsing_result);
         }
         Ok(upload)
     }
@@ -396,6 +407,7 @@ impl RagflowClient {
             document_ids,
             document_count,
             parsing_started: false,
+            parsing_error: None,
         })
     }
 
