@@ -115,6 +115,15 @@ nav {
 .workspace.today-workspace {
   overflow: hidden;
 }
+.page.today-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.today-page .page-header {
+  flex: 0 0 auto;
+}
 .page {
   margin: 0 auto;
   max-width: 1240px;
@@ -177,8 +186,8 @@ h2 {
 }
 .today-layout {
   display: block;
-  height: calc(100vh - 220px);
-  min-height: 560px;
+  flex: 1;
+  min-height: 0;
 }
 .workspace-toast {
   background: #173f36;
@@ -206,6 +215,7 @@ h2 {
 .file-panel {
   display: flex;
   flex-direction: column;
+  height: 100%;
   min-height: 0;
   overflow: hidden;
 }
@@ -229,7 +239,9 @@ h2 {
 .file-table-wrap {
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 .file-table {
   border-collapse: collapse;
@@ -257,7 +269,8 @@ h2 {
 .file-table th,
 .file-table td {
   border-bottom: 1px solid #edf0ec;
-  padding: 10px 12px;
+  height: 36px;
+  padding: 5px 12px;
   vertical-align: middle;
 }
 .file-table th:nth-child(1),
@@ -285,21 +298,26 @@ h2 {
 }
 .file-title {
   min-width: 0;
-}
-.file-title strong {
-  display: block;
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
-.file-title small,
+.file-title .file-icon {
+  display: inline-block;
+  margin-right: 8px;
+  vertical-align: middle;
+}
+.file-title strong {
+  display: inline-block;
+  max-width: calc(100% - 28px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+  white-space: nowrap;
+}
 .source-cell,
 .file-table time {
   color: #7d8a84;
   font-size: 12px;
-}
-.file-title small {
-  margin-left: 22px;
 }
 .value-tag,
 .row-open {
@@ -313,7 +331,7 @@ h2 {
 .value-tag {
   background: #e7f3ec;
   border-radius: 99px;
-  padding: 4px 8px;
+  padding: 2px 8px;
 }
 .panel-title {
   border-bottom: 1px solid #edf0ec;

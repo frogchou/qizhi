@@ -593,7 +593,6 @@ export function TodayPage({ commands }: { commands: QizhiCommands }) {
                       >
                         <span className="file-icon">▤</span>
                         <strong>{filename(file.canonicalPath)}</strong>
-                        <small>{formatBytes(file.sizeBytes)}</small>
                       </td>
                       <td>
                         <time>{formatTime(file.modifiedAtUtcMs)}</time>

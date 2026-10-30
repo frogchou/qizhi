@@ -130,6 +130,14 @@ describe("TodayPage", () => {
     expect(title.textContent).toContain(longName);
   });
 
+  it("renders each file as one compact table row without a second size line", async () => {
+    render(<TodayPage commands={commands()} />);
+
+    const title = await screen.findByTitle("周报.docx");
+    expect(title.querySelector("small")).toBeNull();
+    expect(document.querySelector(".file-table-wrap")).toBeInTheDocument();
+  });
+
   it("keeps the cached today view usable while a background refresh is running", async () => {
     let completeRefresh: ((value: TodaySnapshot) => void) | undefined;
     const client = commands({ state: "ready", files: [], clusters: [] });

@@ -1,6 +1,10 @@
 use chrono::{Datelike, Local, TimeZone};
 use serde::Serialize;
-use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
+use std::{
+    collections::BTreeMap,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 use tauri::State;
 
 use crate::{
@@ -240,12 +244,16 @@ fn refresh(state: &AppState) -> Result<TodayReady, TodayUnavailable> {
         let records = response
             .candidates
             .into_iter()
-            .map(|candidate| FileRecordInput {
-                canonical_path: candidate.canonical_path,
-                file_identity: candidate.file_reference_number,
-                modified_at_utc_ms: candidate.modified_at_utc_ms,
-                size_bytes: candidate.size_bytes.unwrap_or_default(),
-                source: "本机 NTFS 索引".to_owned(),
+            .map(|candidate| {
+                let size_bytes =
+                    resolved_size_bytes(Path::new(&candidate.canonical_path), candidate.size_bytes);
+                FileRecordInput {
+                    canonical_path: candidate.canonical_path,
+                    file_identity: candidate.file_reference_number,
+                    modified_at_utc_ms: candidate.modified_at_utc_ms,
+                    size_bytes,
+                    source: "本机 NTFS 索引".to_owned(),
+                }
             })
             .collect::<Vec<_>>();
         state
@@ -323,13 +331,20 @@ fn ready_from_files(files: Vec<FileRecord>) -> TodayReady {
         state: "ready",
         files: files
             .into_iter()
-            .map(|file| TodayFile {
-                id: file.id,
-                canonical_path: file.canonical_path,
-                modified_at_utc_ms: file.modified_at_utc_ms,
-                size_bytes: file.size_bytes,
-                source: file.source,
-                status: "待分析",
+            .map(|file| {
+                // Older index snapshots did not contain a size. Enrich them on
+                // read so an upgrade fixes the UI immediately, even before the
+                // next full index synchronization has completed.
+                let size_bytes =
+                    resolved_size_bytes(Path::new(&file.canonical_path), Some(file.size_bytes));
+                TodayFile {
+                    id: file.id,
+                    canonical_path: file.canonical_path,
+                    modified_at_utc_ms: file.modified_at_utc_ms,
+                    size_bytes,
+                    source: file.source,
+                    status: "待分析",
+                }
             })
             .collect(),
         clusters: groups
@@ -404,12 +419,16 @@ pub async fn get_recent_snapshot(
     let records = response
         .candidates
         .into_iter()
-        .map(|candidate| FileRecordInput {
-            canonical_path: candidate.canonical_path,
-            file_identity: candidate.file_reference_number,
-            modified_at_utc_ms: candidate.modified_at_utc_ms,
-            size_bytes: candidate.size_bytes.unwrap_or_default(),
-            source: "本机 NTFS 索引".to_owned(),
+        .map(|candidate| {
+            let size_bytes =
+                resolved_size_bytes(Path::new(&candidate.canonical_path), candidate.size_bytes);
+            FileRecordInput {
+                canonical_path: candidate.canonical_path,
+                file_identity: candidate.file_reference_number,
+                modified_at_utc_ms: candidate.modified_at_utc_ms,
+                size_bytes,
+                source: "本机 NTFS 索引".to_owned(),
+            }
         })
         .collect::<Vec<_>>();
     state
@@ -535,6 +554,18 @@ fn launcher(state: &AppState) -> Result<ExplorerLauncher, String> {
     ))
 }
 
+fn resolved_size_bytes(path: &Path, indexed_size: Option<i64>) -> i64 {
+    if let Some(size) = indexed_size.filter(|size| *size > 0) {
+        return size;
+    }
+
+    std::fs::metadata(path)
+        .ok()
+        .filter(|metadata| metadata.is_file())
+        .and_then(|metadata| i64::try_from(metadata.len()).ok())
+        .unwrap_or_else(|| indexed_size.unwrap_or_default().max(0))
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -547,7 +578,23 @@ mod tests {
         scan::{configuration::ScanRules, file_filter::FileTypeFilter, policy::ScanPolicy},
     };
 
-    use super::{bounds, cached_snapshot_for_range, exclude_parent_from_rules};
+    use super::{
+        bounds, cached_snapshot_for_range, exclude_parent_from_rules, resolved_size_bytes,
+    };
+
+    #[test]
+    fn resolves_missing_ntfs_size_from_file_metadata() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock after epoch")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("qizhi-size-{nonce}.txt"));
+        std::fs::write(&path, b"qizhi-size").expect("write fixture");
+
+        assert_eq!(resolved_size_bytes(&path, None), 10);
+
+        let _ = std::fs::remove_file(path);
+    }
 
     #[test]
     fn uses_local_calendar_midnights_for_today() {

@@ -11,17 +11,20 @@ test.beforeEach(async ({ page }) => {
         if (command === "get_today_snapshot" || command === "refresh_today")
           return Promise.resolve({
             state: "ready",
-            files: [
+            files: Array.from({ length: 80 }, (_, index) => ({
+              id: index + 1,
+              canonicalPath: `D:\\工作\\周报-${String(index + 1).padStart(2, "0")}.docx`,
+              modifiedAtUtcMs: 1793189400000 - index * 60_000,
+              sizeBytes: 1024 + index,
+              source: "本机 NTFS 索引",
+              status: "待分析",
+            })),
+            clusters: [
               {
-                id: 7,
-                canonicalPath: "D:\\工作\\周报.docx",
-                modifiedAtUtcMs: 1793189400000,
-                sizeBytes: 1024,
-                source: "本机文件",
-                status: "待分析",
+                label: "本机 NTFS 索引",
+                fileIds: Array.from({ length: 80 }, (_, index) => index + 1),
               },
             ],
-            clusters: [{ label: "本机文件", fileIds: [7] }],
           });
         if (command === "get_ntfs_indexer_status")
           return Promise.resolve({
@@ -44,19 +47,24 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test("stage 0-1: navigates today settings today and keeps upload disabled", async ({
+test("today file table stays compact and scrolls inside the workspace", async ({
   page,
 }) => {
   await page.goto("/");
-  await expect(page.getByText("周报.docx")).toBeVisible();
-  await page.getByText("周报.docx").click();
-  await expect(
-    page.getByRole("button", { name: "加入知识库（后续版本）" }),
-  ).toBeDisabled();
-  await page.getByRole("button", { name: "设置" }).click();
-  await expect(page.getByRole("heading", { name: "设置" })).toBeVisible();
-  await page.getByRole("button", { name: "今日" }).click();
-  await expect(
-    page.getByRole("heading", { name: "今天产生的文件" }),
-  ).toBeVisible();
+  await expect(page.getByText("周报-01.docx")).toBeVisible();
+
+  const tableViewport = page.locator(".file-table-wrap");
+  await expect(tableViewport).toBeVisible();
+  expect(
+    await tableViewport.evaluate(
+      (element) => element.scrollHeight > element.clientHeight,
+    ),
+  ).toBe(true);
+
+  const firstRowHeight = await page
+    .locator(".file-table tbody tr")
+    .first()
+    .evaluate((element) => element.getBoundingClientRect().height);
+  expect(firstRowHeight).toBeLessThanOrEqual(40);
+  await expect(page.getByText("1 KB", { exact: true })).toHaveCount(0);
 });
