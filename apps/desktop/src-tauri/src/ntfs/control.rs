@@ -135,12 +135,20 @@ impl IndexerControlPlane {
             IndexerRequestKind::ListToday {
                 start_utc_ms,
                 end_utc_ms,
+            }
+            | IndexerRequestKind::ListRange {
+                start_utc_ms,
+                end_utc_ms,
+                ..
             } => {
-                let candidates =
+                let mut candidates =
                     match self.list_visible_candidates(caller_sid, *start_utc_ms, *end_utc_ms) {
                         Ok(candidates) => candidates,
                         Err(message) => return rejected(request, &message),
                     };
+                if let IndexerRequestKind::ListRange { limit, .. } = &request.kind {
+                    candidates.truncate((*limit).min(5_000));
+                }
                 IndexerResponse {
                     protocol_version: INDEXER_PROTOCOL_VERSION,
                     request_id: request.request_id.clone(),

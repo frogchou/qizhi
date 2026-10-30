@@ -166,6 +166,12 @@ pub(crate) fn current_day_bounds() -> (i64, i64) {
     (start.timestamp_millis(), end.timestamp_millis())
 }
 
+fn recent_day_bounds(days: u8) -> (i64, i64) {
+    let (today_start, _) = current_day_bounds();
+    let days = i64::from(days.clamp(1, 5));
+    (today_start - days * 24 * 60 * 60 * 1_000, today_start)
+}
+
 #[cfg(test)]
 fn bounds() -> (i64, i64) {
     current_day_bounds()
@@ -371,6 +377,54 @@ pub async fn get_today_snapshot(
     let policy = ScanPolicy::for_roots(exclusions, roots);
     cached_snapshot_for_range(state.database.files(), start, end, &file_filter, &policy)
         .map_err(|_| unavailable("无法读取已发现的今日文件。"))
+}
+
+#[tauri::command]
+pub async fn get_recent_snapshot(
+    state: State<'_, AppState>,
+    days: u8,
+) -> Result<TodayReady, TodayUnavailable> {
+    let (roots, exclusions, file_categories) = rules(&state)?;
+    let (start, end) = recent_day_bounds(days);
+    let request = IndexerRequest {
+        protocol_version: INDEXER_PROTOCOL_VERSION,
+        request_id: format!("recent-list-{}", chrono::Utc::now().timestamp_millis()),
+        kind: IndexerRequestKind::ListRange {
+            start_utc_ms: start,
+            end_utc_ms: end,
+            limit: 5_000,
+        },
+    };
+    let response = call_indexer_service(&request).map_err(unavailable)?;
+    if response.status != "ready" {
+        return Err(unavailable(response.message.unwrap_or_else(|| {
+            "本地 NTFS 索引服务无法返回过去文件。".to_owned()
+        })));
+    }
+    let records = response
+        .candidates
+        .into_iter()
+        .map(|candidate| FileRecordInput {
+            canonical_path: candidate.canonical_path,
+            file_identity: candidate.file_reference_number,
+            modified_at_utc_ms: candidate.modified_at_utc_ms,
+            size_bytes: candidate.size_bytes.unwrap_or_default(),
+            source: "本机 NTFS 索引".to_owned(),
+        })
+        .collect::<Vec<_>>();
+    state
+        .database
+        .files()
+        .replace_indexed_for_local_day(LocalDayRange::new(start, end), &records)
+        .map_err(|_| unavailable("无法保存过去的本地 NTFS 索引结果。"))?;
+    cached_snapshot_for_range(
+        state.database.files(),
+        start,
+        end,
+        &FileTypeFilter::new(file_categories),
+        &ScanPolicy::for_roots(exclusions, roots),
+    )
+    .map_err(|_| unavailable("无法读取过去的本地 NTFS 索引结果。"))
 }
 #[tauri::command]
 pub fn get_today_scan_status(state: State<'_, AppState>) -> TodayScanStatus {

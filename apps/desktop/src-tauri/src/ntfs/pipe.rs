@@ -30,7 +30,8 @@ pub fn handle_request_bytes(message: &[u8]) -> Vec<u8> {
                 IndexerRequestKind::Configure { .. }
                 | IndexerRequestKind::Build
                 | IndexerRequestKind::Sync
-                | IndexerRequestKind::ListToday { .. } => {
+                | IndexerRequestKind::ListToday { .. }
+                | IndexerRequestKind::ListRange { .. } => {
                     error_response(request.request_id, "本地索引服务尚未完成授权配置")
                 }
             },

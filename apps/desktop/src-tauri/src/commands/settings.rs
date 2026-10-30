@@ -137,7 +137,7 @@ fn configure_local_indexer(rules: &ScanRules) -> Result<(), String> {
 
 #[tauri::command]
 pub fn test_service_connection(input: SaveSettingsInput) -> ConnectionStatus {
-    if !matches!(input.service.as_str(), "openai" | "ragflow")
+    if !matches!(input.service.as_str(), "openai" | "ragflow" | "jev")
         || input.api_key.trim().is_empty()
         || input.api_key.contains(['\r', '\n', '"'])
     {
@@ -159,6 +159,7 @@ pub fn test_service_connection(input: SaveSettingsInput) -> ConnectionStatus {
             base_url.set_path(&format!("{base_path}/api/v1/chats"));
             base_url.set_query(Some("page=1&page_size=1"));
         }
+        "jev" => base_url.set_path(&format!("{base_path}/v1/models")),
         _ => unreachable!("service validated above"),
     }
     match HttpClient::with_timeout(Duration::from_secs(10)).and_then(|client| {
@@ -177,6 +178,7 @@ pub fn test_service_connection(input: SaveSettingsInput) -> ConnectionStatus {
                     message: match input.service.as_str() {
                         "openai" => "OpenAI API 连接正常。".to_owned(),
                         "ragflow" => "RAGFlow API 连接正常。".to_owned(),
+                        "jev" => "TypeSafe AI / JEV 连接正常。".to_owned(),
                         _ => unreachable!("service validated above"),
                     },
                 };

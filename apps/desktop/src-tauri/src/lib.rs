@@ -43,6 +43,7 @@ pub fn run() {
             commands::settings::list_scan_rules,
             commands::settings::save_scan_rules,
             commands::today::get_today_snapshot,
+            commands::today::get_recent_snapshot,
             commands::today::get_today_scan_status,
             commands::today::refresh_today,
             commands::today::reveal_in_explorer,

@@ -131,6 +131,7 @@ const DOCUMENT_EXTENSIONS = new Set([
 
 export function TodayPage({ commands }: { commands: QizhiCommands }) {
   const [snapshot, setSnapshot] = useState<TodaySnapshot | null>(null);
+  const [view, setView] = useState<"today" | "recent">("today");
   const [selected, setSelected] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -240,6 +241,25 @@ export function TodayPage({ commands }: { commands: QizhiCommands }) {
       }
     } finally {
       if (!followExistingScan) setBusy(false);
+    }
+  }
+
+  async function switchView(next: "today" | "recent") {
+    if (next === view) return;
+    setView(next);
+    setSelected(null);
+    if (next === "today") {
+      setSnapshot(await commands.getTodaySnapshot());
+      return;
+    }
+    if (!commands.getRecentSnapshot) {
+      setNotice("当前桌面服务暂不支持过去文件，请更新栖知后重试。");
+      return;
+    }
+    try {
+      setSnapshot(await commands.getRecentSnapshot(5));
+    } catch (error) {
+      setNotice(readableError(error, "无法读取过去五天的文件。"));
     }
   }
 
@@ -438,7 +458,7 @@ export function TodayPage({ commands }: { commands: QizhiCommands }) {
       <header className="page-header">
         <div>
           <p className="eyebrow">今日工作空间</p>
-          <h1>今天产生的文件</h1>
+          <h1>{view === "today" ? "今天产生的文件" : "过去的工作文件"}</h1>
           <p className="muted">按修改时间发现，内容尚未分析。</p>
         </div>
         <div className="header-actions">
@@ -454,6 +474,24 @@ export function TodayPage({ commands }: { commands: QizhiCommands }) {
           </button>
         </div>
       </header>
+      <div className="workspace-tabs" role="tablist" aria-label="工作文件范围">
+        <button
+          aria-selected={view === "today"}
+          onClick={() => void switchView("today")}
+          role="tab"
+          type="button"
+        >
+          今日
+        </button>
+        <button
+          aria-selected={view === "recent"}
+          onClick={() => void switchView("recent")}
+          role="tab"
+          type="button"
+        >
+          过去
+        </button>
+      </div>
       {busy ? <StatusNotice>{scanNotice()}</StatusNotice> : null}
       {notice ? <StatusNotice>{notice}</StatusNotice> : null}
       <div className="today-layout">

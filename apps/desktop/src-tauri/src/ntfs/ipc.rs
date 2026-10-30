@@ -29,6 +29,11 @@ pub enum IndexerRequestKind {
         start_utc_ms: i64,
         end_utc_ms: i64,
     },
+    ListRange {
+        start_utc_ms: i64,
+        end_utc_ms: i64,
+        limit: usize,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -97,7 +102,8 @@ pub fn validate_request(
         }
         IndexerRequestKind::Build
         | IndexerRequestKind::Sync
-        | IndexerRequestKind::ListToday { .. } => {}
+        | IndexerRequestKind::ListToday { .. }
+        | IndexerRequestKind::ListRange { .. } => {}
     }
     if policy.allowed_roots.is_empty() {
         return Err(IpcValidationError::MissingAuthorizedRoots);

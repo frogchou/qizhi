@@ -47,10 +47,14 @@ export function SettingsPage({ commands }: SettingsPageProps) {
   const [ragflowSaved, setRagflowSaved] = useState<MaskedServiceConfig | null>(
     null,
   );
+  const [jevBaseUrl, setJevBaseUrl] = useState("https://api.typesafe.ai");
+  const [jevApiKey, setJevApiKey] = useState("");
+  const [jevSaved, setJevSaved] = useState<MaskedServiceConfig | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [connection, setConnection] = useState<ConnectionState>(null);
   const [ragflowConnection, setRagflowConnection] =
     useState<ConnectionState>(null);
+  const [jevConnection, setJevConnection] = useState<ConnectionState>(null);
   const [ntfsIndexer, setNtfsIndexer] = useState<ConnectionState>(null);
   const [roots, setRoots] = useState<string[]>([]);
   const [exclusions, setExclusions] = useState<string[]>([]);
@@ -78,6 +82,11 @@ export function SettingsPage({ commands }: SettingsPageProps) {
           setRagflowBaseUrl(ragflow.endpoint);
           setRagflowSaved(ragflow);
         }
+        const jev = configs.find((config) => config.service === "jev");
+        if (jev) {
+          setJevBaseUrl(jev.endpoint);
+          setJevSaved(jev);
+        }
       })
       .catch(() => undefined);
     commands
@@ -89,6 +98,25 @@ export function SettingsPage({ commands }: SettingsPageProps) {
       })
       .catch(() => undefined);
   }, [commands]);
+
+  async function testJev() {
+    setJevConnection(
+      await commands.testServiceConnection({
+        service: "jev",
+        endpoint: jevBaseUrl,
+        apiKey: jevApiKey,
+      }),
+    );
+  }
+  async function saveJev() {
+    const result = await commands.saveSettings({
+      service: "jev",
+      endpoint: jevBaseUrl,
+      apiKey: jevApiKey,
+    });
+    setJevSaved(result);
+    setJevApiKey("");
+  }
 
   async function chooseFolder(target: "roots" | "exclusions") {
     setError(null);
@@ -375,13 +403,62 @@ export function SettingsPage({ commands }: SettingsPageProps) {
             ) : null}
           </div>
         </article>
-        <article className="service-card muted-service">
+        <article className="service-card openai-card">
           <div className="service-name">
             <span className="service-icon">T</span>
             <div>
               <h3>TypeSafe AI / JEV</h3>
-              <p>价值判断与敏感信息识别将在下一阶段启用。</p>
+              <p>用于自动评估可安全解析的新文档是否值得进入知识库。</p>
             </div>
+          </div>
+          <div className="service-form">
+            <label>
+              Base URL
+              <input
+                aria-label="JEV Base URL"
+                value={jevBaseUrl}
+                onChange={(event) => setJevBaseUrl(event.currentTarget.value)}
+              />
+            </label>
+            <label>
+              API Key
+              <input
+                aria-label="JEV API Key"
+                type="password"
+                value={jevApiKey}
+                placeholder={jevSaved ? jevSaved.apiKeyMask : "填写后可测试"}
+                onChange={(event) => setJevApiKey(event.currentTarget.value)}
+              />
+            </label>
+            <div className="service-actions">
+              <button
+                type="button"
+                className="button outline"
+                onClick={() => void testJev()}
+                disabled={!jevBaseUrl || !jevApiKey}
+              >
+                测试连接
+              </button>
+              <button
+                type="button"
+                className="button primary"
+                onClick={() => void saveJev()}
+                disabled={!jevBaseUrl || !jevApiKey}
+              >
+                保存
+              </button>
+            </div>
+            {jevConnection ? (
+              <p
+                className={
+                  jevConnection.available
+                    ? "connection-result ready"
+                    : "connection-result"
+                }
+              >
+                {jevConnection.message}
+              </p>
+            ) : null}
           </div>
         </article>
         <article className="service-card openai-card">

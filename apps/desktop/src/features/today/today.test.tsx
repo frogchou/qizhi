@@ -45,6 +45,28 @@ function commands(snapshot: TodaySnapshot = readySnapshot): QizhiCommands {
 }
 
 describe("TodayPage", () => {
+  it("switches to the recent five-day workspace when the past tab is selected", async () => {
+    const pastSnapshot: TodaySnapshot = {
+      state: "ready",
+      files: [
+        {
+          ...readySnapshot.files[0],
+          id: 8,
+          canonicalPath: "D:\\工作\\昨天的方案.md",
+        },
+      ],
+      clusters: [{ label: "本机 NTFS 索引", fileIds: [8] }],
+    };
+    const client = commands();
+    client.getRecentSnapshot = vi.fn().mockResolvedValue(pastSnapshot);
+
+    render(<TodayPage commands={client} />);
+    fireEvent.click(await screen.findByRole("tab", { name: "过去" }));
+
+    expect(await screen.findByText("昨天的方案.md")).toBeInTheDocument();
+    expect(client.getRecentSnapshot).toHaveBeenCalledWith(5);
+  });
+
   it("renders file information, refreshes, and reveals only a selected file", async () => {
     const client = commands();
     render(<TodayPage commands={client} />);

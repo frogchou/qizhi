@@ -14,6 +14,7 @@ export interface QizhiCommands {
   pickFolder(): Promise<string | null>;
   getNtfsIndexerStatus?(): Promise<ConnectionStatus>;
   getTodaySnapshot(): Promise<TodaySnapshot>;
+  getRecentSnapshot?(days: number): Promise<TodaySnapshot>;
   getTodayScanStatus?(): Promise<TodayScanStatus>;
   refreshToday(): Promise<TodaySnapshot>;
   revealInExplorer(id: number): Promise<void>;
@@ -153,6 +154,9 @@ export const unavailableCommands: QizhiCommands = {
       clusters: [],
     };
   },
+  async getRecentSnapshot() {
+    return this.getTodaySnapshot();
+  },
   async refreshToday() {
     return this.getTodaySnapshot();
   },
@@ -205,6 +209,7 @@ export const tauriCommands: QizhiCommands = {
   },
   getNtfsIndexerStatus: () => invoke("get_ntfs_indexer_status"),
   getTodaySnapshot: () => invoke("get_today_snapshot"),
+  getRecentSnapshot: (days) => invoke("get_recent_snapshot", { days }),
   getTodayScanStatus: () => invoke("get_today_scan_status"),
   refreshToday: () => invoke("refresh_today"),
   revealInExplorer: (id) => invoke("reveal_in_explorer", { id }),
