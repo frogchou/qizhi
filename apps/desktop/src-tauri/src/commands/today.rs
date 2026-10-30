@@ -14,7 +14,7 @@ use crate::{
     scan::{
         configuration::ScanRules,
         file_filter::{FileCategory, FileTypeFilter},
-        policy::{AllowedRoot, ScanPolicy, display_path},
+        policy::{AllowedRoot, ScanPolicy, active_roots, display_path},
         progress::TodayScanStatus,
     },
     system::explorer::{ExplorerLauncher, WindowsProcessLauncher},
@@ -76,16 +76,11 @@ fn rules(state: &AppState) -> Result<ActiveRules, TodayUnavailable> {
         .into_iter()
         .map(PathBuf::from)
         .collect::<Vec<_>>();
-    let policy = ScanPolicy::new(exclusions.clone());
-    let roots = allowed_roots
-        .into_iter()
-        .map(PathBuf::from)
-        .map(|root| policy.validate_root(&root))
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|_| unavailable("扫描目录无效，请在设置中重新保存。"))?;
-    if roots.is_empty() {
+    if allowed_roots.is_empty() {
         return Err(unavailable("请先在设置中添加允许扫描的工作目录。"));
     }
+    let roots = active_roots(&allowed_roots, &exclusions)
+        .map_err(|_| unavailable("扫描目录无效，请在设置中重新保存。"))?;
     Ok((roots, exclusions, file_categories))
 }
 
@@ -106,6 +101,21 @@ fn exclude_parent_from_rules(mut rules: ScanRules, file: &FileRecord) -> Result<
 }
 
 fn configure_indexer_after_rule_change(state: &AppState, rules: &ScanRules) {
+    let exclusions = rules
+        .custom_exclusions
+        .iter()
+        .map(PathBuf::from)
+        .collect::<Vec<_>>();
+    let roots = match active_roots(&rules.allowed_roots, &exclusions) {
+        Ok(roots) => roots,
+        Err(_) => {
+            state.logger.error(
+                "today-index",
+                "directory exclusion saved locally but local indexer configuration is invalid",
+            );
+            return;
+        }
+    };
     let request = IndexerRequest {
         protocol_version: INDEXER_PROTOCOL_VERSION,
         request_id: format!(
@@ -113,7 +123,7 @@ fn configure_indexer_after_rule_change(state: &AppState, rules: &ScanRules) {
             chrono::Utc::now().timestamp_millis()
         ),
         kind: IndexerRequestKind::Configure {
-            allowed_roots: rules.allowed_roots.clone(),
+            allowed_roots: roots.iter().map(|root| display_path(&root.0)).collect(),
             excluded_roots: rules.custom_exclusions.clone(),
             file_categories: rules.file_categories.clone(),
         },
@@ -141,7 +151,7 @@ fn configure_indexer_after_rule_change(state: &AppState, rules: &ScanRules) {
     }
 }
 
-fn bounds() -> (i64, i64) {
+pub(crate) fn current_day_bounds() -> (i64, i64) {
     let now = Local::now();
     let today = now.date_naive();
     let start = Local
@@ -155,6 +165,11 @@ fn bounds() -> (i64, i64) {
         .expect("next local midnight is representable");
     (start.timestamp_millis(), end.timestamp_millis())
 }
+
+#[cfg(test)]
+fn bounds() -> (i64, i64) {
+    current_day_bounds()
+}
 fn refresh(state: &AppState) -> Result<TodayReady, TodayUnavailable> {
     if !state.today_scan_progress.start() {
         return Err(unavailable("已有今日扫描正在进行，请等待它完成。"));
@@ -164,7 +179,22 @@ fn refresh(state: &AppState) -> Result<TodayReady, TodayUnavailable> {
         .info("today-index", "today NTFS index synchronization started");
     let result: Result<TodayReady, TodayUnavailable> = (|| {
         let (roots, exclusions, file_categories) = rules(state)?;
-        let (start, end) = bounds();
+        let (start, end) = current_day_bounds();
+        if roots.is_empty() {
+            state
+                .database
+                .files()
+                .replace_indexed_for_local_day(LocalDayRange::new(start, end), &[])
+                .map_err(|_| unavailable("无法更新本地 NTFS 索引结果。"))?;
+            return cached_snapshot_for_range(
+                state.database.files(),
+                start,
+                end,
+                &FileTypeFilter::new(file_categories),
+                &ScanPolicy::for_roots(exclusions, roots),
+            )
+            .map_err(|_| unavailable("无法读取本地 NTFS 索引结果。"));
+        }
         let configure = IndexerRequest {
             protocol_version: INDEXER_PROTOCOL_VERSION,
             request_id: format!("today-configure-{}", chrono::Utc::now().timestamp_millis()),
@@ -263,11 +293,19 @@ fn cached_snapshot_for_range(
         .into_iter()
         // `本机文件` identifies the retired recursive scanner. Do not surface
         // its stale cache as if it were produced by the NTFS indexer.
-        .filter(|file| file.source != "本机文件")
-        .filter(|file| file_filter.allows(std::path::Path::new(&file.canonical_path)))
-        .filter(|file| policy.is_cached_path_allowed(std::path::Path::new(&file.canonical_path)))
+        .filter(|file| is_visible_today_file(file, file_filter, policy))
         .collect();
     Ok(ready_from_files(files))
+}
+
+pub(crate) fn is_visible_today_file(
+    file: &FileRecord,
+    file_filter: &FileTypeFilter,
+    policy: &ScanPolicy,
+) -> bool {
+    file.source != "本机文件"
+        && file_filter.allows(std::path::Path::new(&file.canonical_path))
+        && policy.is_cached_path_allowed(std::path::Path::new(&file.canonical_path))
 }
 
 fn ready_from_files(files: Vec<FileRecord>) -> TodayReady {
@@ -327,7 +365,7 @@ fn ensure_accepted_response(
 pub async fn get_today_snapshot(
     state: State<'_, AppState>,
 ) -> Result<TodayReady, TodayUnavailable> {
-    let (start, end) = bounds();
+    let (start, end) = current_day_bounds();
     let (roots, exclusions, file_categories) = rules(&state)?;
     let file_filter = FileTypeFilter::new(file_categories);
     let policy = ScanPolicy::for_roots(exclusions, roots);
@@ -410,29 +448,25 @@ pub async fn exclude_file_directory(
                     .save(rules)
                     .map_err(|_| "无法保存屏蔽目录。".to_owned())
             })?;
-        configure_indexer_after_rule_change(&state, &saved);
-        let (start, end) = bounds();
+        let (start, end) = current_day_bounds();
         let exclusions = saved
             .custom_exclusions
             .iter()
             .map(PathBuf::from)
             .collect::<Vec<_>>();
-        let validation_policy = ScanPolicy::new(exclusions.clone());
-        let roots = saved
-            .allowed_roots
-            .iter()
-            .map(PathBuf::from)
-            .map(|root| validation_policy.validate_root(&root))
-            .collect::<Result<Vec<_>, _>>()
+        let roots = active_roots(&saved.allowed_roots, &exclusions)
             .map_err(|_| "保存的扫描目录无效，请在设置中重新保存。".to_owned())?;
-        cached_snapshot_for_range(
+        let snapshot = cached_snapshot_for_range(
             state.database.files(),
             start,
             end,
-            &FileTypeFilter::new(saved.file_categories),
+            &FileTypeFilter::new(saved.file_categories.clone()),
             &ScanPolicy::for_roots(exclusions, roots),
         )
-        .map_err(|_| "屏蔽目录后无法刷新今日列表。".to_owned())
+        .map_err(|_| "屏蔽目录后无法刷新今日列表。".to_owned())?;
+        let sync_state = state.clone();
+        std::thread::spawn(move || configure_indexer_after_rule_change(&sync_state, &saved));
+        Ok(snapshot)
     })
     .await
     .map_err(|_| "屏蔽目录时发生意外错误。".to_owned())?

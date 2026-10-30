@@ -1329,10 +1329,15 @@ h2 {
   padding: 12px;
 }
 .upload-file-summary strong,
-.upload-file-summary span {
+.upload-file-summary span,
+.upload-file-path {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.upload-file-path {
+  color: #687970;
+  font-size: 12px;
 }
 .upload-file-summary span,
 .upload-checkbox {

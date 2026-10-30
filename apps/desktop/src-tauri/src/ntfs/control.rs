@@ -56,13 +56,7 @@ impl IndexerControlPlane {
             .iter()
             .map(std::path::PathBuf::from)
             .collect::<Vec<_>>();
-        let validation = crate::scan::policy::ScanPolicy::new(exclusions.clone());
-        let roots = policy
-            .allowed_roots
-            .iter()
-            .map(std::path::PathBuf::from)
-            .map(|root| validation.validate_root(&root))
-            .collect::<Result<Vec<_>, _>>()
+        let roots = crate::scan::policy::active_roots(&policy.allowed_roots, &exclusions)
             .map_err(|_| "本地索引服务保存的扫描范围无效".to_owned())?;
         let visibility = crate::scan::policy::ScanPolicy::for_roots(exclusions, roots);
         let type_filter = crate::scan::file_filter::FileTypeFilter::new(policy.file_categories);

@@ -51,13 +51,9 @@ describe("TodayPage", () => {
     expect(await screen.findByText("周报.docx")).toBeInTheDocument();
     expect(screen.getByText("待分析")).toBeInTheDocument();
     expect(screen.getByText("本机文件")).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "加入知识库（后续版本）" }),
-    ).toBeDisabled();
+    expect(screen.getByRole("button", { name: "上传到知识库" })).toBeDisabled();
     fireEvent.click(screen.getByText("周报.docx"));
-    expect(
-      screen.getByRole("button", { name: "加入知识库（后续版本）" }),
-    ).toBeDisabled();
+    expect(screen.getByRole("button", { name: "上传到知识库" })).toBeEnabled();
     fireEvent.click(screen.getByRole("button", { name: "在资源管理器中定位" }));
     await waitFor(() =>
       expect(client.revealInExplorer).toHaveBeenCalledWith(7),
@@ -374,6 +370,38 @@ describe("TodayPage", () => {
     );
     expect(
       await screen.findByText("文件已上传并开始解析。"),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps the upload result when RAGFlow accepted the file but parsing did not start", async () => {
+    const client = commands() as QizhiCommands & {
+      listRagflowDatasets: ReturnType<typeof vi.fn>;
+      uploadTodayFile: ReturnType<typeof vi.fn>;
+    };
+    client.listRagflowDatasets = vi
+      .fn()
+      .mockResolvedValue([
+        { id: "kb-work", name: "工作资料", description: "" },
+      ]);
+    client.uploadTodayFile = vi.fn().mockResolvedValue({
+      documentCount: 1,
+      documentIds: ["document-1"],
+      parsingStarted: false,
+      parsingError: "RAGFlow 解析服务暂不可用。",
+    });
+    render(<TodayPage commands={client} />);
+
+    fireEvent.contextMenu(await screen.findByText("周报.docx"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "上传到知识库" }));
+    fireEvent.change(await screen.findByLabelText("目标知识库"), {
+      target: { value: "kb-work" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "上传" }));
+
+    expect(
+      await screen.findByText(
+        "文件已上传，但未能启动解析：RAGFlow 解析服务暂不可用。",
+      ),
     ).toBeInTheDocument();
   });
 });

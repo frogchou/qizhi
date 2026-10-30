@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{io::Read, time::Duration};
 
 pub struct HttpResponse {
     pub status: u16,
@@ -68,12 +68,13 @@ impl HttpClient {
         Ok(HttpBytesResponse { status, body })
     }
 
-    pub fn request_bearer_multipart(
+    pub fn request_bearer_multipart<R: Read + Send + 'static>(
         &self,
         url: &str,
         api_key: &str,
         boundary: &str,
-        body: Vec<u8>,
+        body: R,
+        content_length: u64,
     ) -> Result<HttpResponse, String> {
         let response = self
             .client
@@ -84,7 +85,7 @@ impl HttpClient {
                 reqwest::header::CONTENT_TYPE,
                 format!("multipart/form-data; boundary={boundary}"),
             )
-            .body(body)
+            .body(reqwest::blocking::Body::sized(body, content_length))
             .send()
             .map_err(transport_error)?;
         let status = response.status().as_u16();

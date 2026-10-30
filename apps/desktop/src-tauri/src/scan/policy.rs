@@ -10,6 +10,7 @@ pub struct AllowedRoot(pub PathBuf);
 pub struct ScanPolicy {
     exclusions: Vec<PathBuf>,
     allowed_roots: Vec<AllowedRoot>,
+    requires_allowed_root: bool,
 }
 
 impl ScanPolicy {
@@ -17,6 +18,7 @@ impl ScanPolicy {
         Self {
             exclusions: normalized_exclusions(exclusions),
             allowed_roots: vec![],
+            requires_allowed_root: false,
         }
     }
 
@@ -24,6 +26,7 @@ impl ScanPolicy {
         Self {
             exclusions: normalized_exclusions(exclusions),
             allowed_roots,
+            requires_allowed_root: true,
         }
     }
 
@@ -45,7 +48,7 @@ impl ScanPolicy {
         if !canonical.0.is_file() {
             return false;
         }
-        self.allowed_roots.is_empty()
+        !self.requires_allowed_root
             || self
                 .allowed_roots
                 .iter()
@@ -60,7 +63,7 @@ impl ScanPolicy {
             return false;
         }
         let value = comparable_path(path);
-        self.allowed_roots.is_empty()
+        !self.requires_allowed_root
             || self
                 .allowed_roots
                 .iter()
@@ -91,6 +94,26 @@ impl ScanPolicy {
                 .iter()
                 .any(|excluded| is_path_prefix(&value, &comparable_path(excluded)))
     }
+}
+
+/// Validates configured roots without treating a user exclusion as an invalid
+/// setting, then removes roots that are currently excluded. This preserves the
+/// user's scan scope so removing the exclusion can reactivate it later.
+pub fn active_roots(
+    configured_roots: &[String],
+    exclusions: &[PathBuf],
+) -> Result<Vec<AllowedRoot>, AppError> {
+    let validation_policy = ScanPolicy::new(vec![]);
+    let roots = configured_roots
+        .iter()
+        .map(PathBuf::from)
+        .map(|root| validation_policy.validate_root(&root))
+        .collect::<Result<Vec<_>, _>>()?;
+    let exclusion_policy = ScanPolicy::new(exclusions.to_vec());
+    Ok(roots
+        .into_iter()
+        .filter(|root| !exclusion_policy.is_directory_denied(&root.0))
+        .collect())
 }
 
 /// Converts a Windows extended-length path into the form users enter and see.
@@ -150,4 +173,27 @@ fn has_reparse_component(path: &Path) -> bool {
             metadata.file_type().is_symlink()
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ScanPolicy, active_roots, display_path};
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn a_root_bound_policy_with_no_active_roots_hides_cached_paths() {
+        let policy = ScanPolicy::for_roots(vec![], vec![]);
+
+        assert!(!policy.is_cached_path_allowed(Path::new(r"D:\\work\\notes.md")));
+    }
+
+    #[test]
+    fn excluding_a_configured_root_deactivates_it_instead_of_invalidating_rules() {
+        let root = std::env::current_dir().expect("current directory");
+        let configured_roots = vec![display_path(&root)];
+        let roots = active_roots(&configured_roots, &[PathBuf::from(&root)])
+            .expect("a root exclusion remains a valid saved rule");
+
+        assert!(roots.is_empty());
+    }
 }

@@ -541,7 +541,7 @@ export function TodayPage({ commands }: { commands: QizhiCommands }) {
             <BreakableText value={selectedFilename ?? "查看文件上下文"} />
           </h2>
           <p className="muted">
-            本版本只记录安全的文件元信息，不读取或上传内容。
+            默认只记录安全元信息；仅在你确认上传时读取并传输文件。
           </p>
           <button
             className="button secondary full"
@@ -550,8 +550,12 @@ export function TodayPage({ commands }: { commands: QizhiCommands }) {
           >
             在资源管理器中定位
           </button>
-          <button className="button outline full" disabled>
-            加入知识库（后续版本）
+          <button
+            className="button outline full"
+            disabled={selected === null}
+            onClick={() => selected !== null && void openUploadDialog(selected)}
+          >
+            上传到知识库
           </button>
         </aside>
       </div>
@@ -650,6 +654,12 @@ export function TodayPage({ commands }: { commands: QizhiCommands }) {
                 <span>
                   {formatBytes(uploadFile.sizeBytes)} · 已在本机范围内发现
                 </span>
+                <small
+                  className="upload-file-path"
+                  title={uploadFile.canonicalPath}
+                >
+                  {uploadFile.canonicalPath}
+                </small>
               </div>
             ) : (
               <p className="upload-error">所选文件已不在今日列表中。</p>

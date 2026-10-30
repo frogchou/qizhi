@@ -126,6 +126,7 @@ export type RagflowKnowledgeQuery = {
   agentResults: RagflowAgentResult[];
 };
 export type RagflowUpload = {
+  documentIds: string[];
   documentCount: number;
   parsingStarted: boolean;
   parsingError: string | null;

@@ -13,7 +13,7 @@ use crate::{
     scan::{
         configuration::ScanRules,
         file_filter::{FileCategory, default_file_categories},
-        policy::{ScanPolicy, display_path},
+        policy::{ScanPolicy, active_roots, display_path},
     },
 };
 
@@ -107,6 +107,13 @@ fn local_indexer_connection_status(
 }
 
 fn configure_local_indexer(rules: &ScanRules) -> Result<(), String> {
+    let exclusions = rules
+        .custom_exclusions
+        .iter()
+        .map(std::path::PathBuf::from)
+        .collect::<Vec<_>>();
+    let roots = active_roots(&rules.allowed_roots, &exclusions)
+        .map_err(|_| "扫描目录无效，请在设置中重新保存。".to_owned())?;
     let request = IndexerRequest {
         protocol_version: INDEXER_PROTOCOL_VERSION,
         request_id: format!(
@@ -114,7 +121,7 @@ fn configure_local_indexer(rules: &ScanRules) -> Result<(), String> {
             chrono::Utc::now().timestamp_millis()
         ),
         kind: IndexerRequestKind::Configure {
-            allowed_roots: rules.allowed_roots.clone(),
+            allowed_roots: roots.iter().map(|root| display_path(&root.0)).collect(),
             excluded_roots: rules.custom_exclusions.clone(),
             file_categories: rules.file_categories.clone(),
         },
@@ -296,12 +303,7 @@ pub fn save_scan_rules(
     state: State<'_, AppState>,
     input: SaveScanRulesInput,
 ) -> Result<ScanRulesOutput, String> {
-    let exclusions = input
-        .custom_exclusions
-        .iter()
-        .map(std::path::PathBuf::from)
-        .collect();
-    let policy = ScanPolicy::new(exclusions);
+    let policy = ScanPolicy::new(vec![]);
     let roots = input
         .allowed_roots
         .iter()

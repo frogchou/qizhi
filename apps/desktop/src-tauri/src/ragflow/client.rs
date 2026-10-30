@@ -1,4 +1,6 @@
 use std::{
+    fs::File,
+    io::{Cursor, Read},
     path::Path,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -294,17 +296,16 @@ impl RagflowClient {
         if contains_multipart_control(file_name) {
             return Err("文件名包含不支持的字符。".to_owned());
         }
-        let file_bytes = std::fs::read(file_path)
-            .map_err(|_| "无法读取要上传的文件，它可能已移动或没有访问权限。".to_owned())?;
         let parent_path = parent_path.map(str::trim).filter(|value| !value.is_empty());
         if parent_path.is_some_and(contains_multipart_control) {
             return Err("知识库内目录包含不支持的字符。".to_owned());
         }
         let boundary = upload_boundary();
-        let body = build_upload_body(&boundary, file_name, &file_bytes, parent_path);
+        let (body, content_length) =
+            build_upload_body(&boundary, file_name, file_path, parent_path)?;
         let url = self.api_url(&format!("/api/v1/datasets/{dataset_id}/documents"))?;
         let transport = HttpClient::with_timeout(Duration::from_secs(120))?
-            .request_bearer_multipart(&url, &self.api_key, &boundary, body)?;
+            .request_bearer_multipart(&url, &self.api_key, &boundary, body, content_length)?;
         if !(200..300).contains(&transport.status) {
             return Err(format!("RAGFlow 上传未通过（HTTP {}）。", transport.status));
         }
@@ -531,33 +532,87 @@ fn upload_boundary() -> String {
     format!("qizhi-{timestamp:x}")
 }
 
+enum MultipartSegment {
+    Bytes(Cursor<Vec<u8>>),
+    File(File),
+}
+
+struct MultipartUploadBody {
+    segments: Vec<MultipartSegment>,
+    current_segment: usize,
+}
+
+impl Read for MultipartUploadBody {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        while self.current_segment < self.segments.len() {
+            let count = match &mut self.segments[self.current_segment] {
+                MultipartSegment::Bytes(bytes) => bytes.read(buffer),
+                MultipartSegment::File(file) => file.read(buffer),
+            }?;
+            if count != 0 {
+                return Ok(count);
+            }
+            self.current_segment += 1;
+        }
+        Ok(0)
+    }
+}
+
+fn push_multipart_text(
+    segments: &mut Vec<MultipartSegment>,
+    length: &mut u64,
+    text: String,
+) -> Result<(), String> {
+    *length = length
+        .checked_add(text.len() as u64)
+        .ok_or_else(|| "要上传的文件过大。".to_owned())?;
+    segments.push(MultipartSegment::Bytes(Cursor::new(text.into_bytes())));
+    Ok(())
+}
+
 fn build_upload_body(
     boundary: &str,
     file_name: &str,
-    file_bytes: &[u8],
+    file_path: &Path,
     parent_path: Option<&str>,
-) -> Vec<u8> {
-    let mut body = Vec::with_capacity(file_bytes.len() + 512);
-    let write_text = |body: &mut Vec<u8>, value: &str| body.extend_from_slice(value.as_bytes());
-    write_text(&mut body, &format!("--{boundary}\r\n"));
-    write_text(
-        &mut body,
-        &format!("Content-Disposition: form-data; name=\"file\"; filename=\"{file_name}\"\r\n"),
-    );
-    write_text(&mut body, "Content-Type: application/octet-stream\r\n\r\n");
-    body.extend_from_slice(file_bytes);
-    write_text(&mut body, "\r\n");
+) -> Result<(MultipartUploadBody, u64), String> {
+    let file = File::open(file_path)
+        .map_err(|_| "无法读取要上传的文件，它可能已移动或没有访问权限。".to_owned())?;
+    let file_size = file
+        .metadata()
+        .map_err(|_| "无法读取要上传的文件，它可能已移动或没有访问权限。".to_owned())?
+        .len();
+    let mut segments = Vec::new();
+    let mut length = 0_u64;
+    push_multipart_text(
+        &mut segments,
+        &mut length,
+        format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{file_name}\"\r\nContent-Type: application/octet-stream\r\n\r\n"
+        ),
+    )?;
+    length = length
+        .checked_add(file_size)
+        .ok_or_else(|| "要上传的文件过大。".to_owned())?;
+    segments.push(MultipartSegment::File(file));
+    push_multipart_text(&mut segments, &mut length, "\r\n".to_owned())?;
     if let Some(parent_path) = parent_path {
-        write_text(&mut body, &format!("--{boundary}\r\n"));
-        write_text(
-            &mut body,
-            "Content-Disposition: form-data; name=\"parent_path\"\r\n\r\n",
-        );
-        write_text(&mut body, parent_path);
-        write_text(&mut body, "\r\n");
+        push_multipart_text(
+            &mut segments,
+            &mut length,
+            format!(
+                "--{boundary}\r\nContent-Disposition: form-data; name=\"parent_path\"\r\n\r\n{parent_path}\r\n"
+            ),
+        )?;
     }
-    write_text(&mut body, &format!("--{boundary}--\r\n"));
-    body
+    push_multipart_text(&mut segments, &mut length, format!("--{boundary}--\r\n"))?;
+    Ok((
+        MultipartUploadBody {
+            segments,
+            current_segment: 0,
+        },
+        length,
+    ))
 }
 
 fn agent_execution_error(error: String) -> String {
@@ -580,10 +635,39 @@ fn parse_envelope(body: &str) -> Result<Envelope, String> {
 
 #[cfg(test)]
 mod transport_tests {
+    use std::io::Read;
+
+    use super::build_upload_body;
+
     #[test]
     fn ragflow_transport_never_starts_a_shell_process() {
         let source = include_str!("client.rs").to_ascii_lowercase();
         assert!(!source.contains(&["power", "shell.exe"].concat()));
         assert!(!source.contains(&["command", "::new"].concat()));
+    }
+
+    #[test]
+    fn multipart_upload_body_streams_the_file_between_its_form_fields() {
+        let path = std::env::temp_dir().join(format!(
+            "qizhi-upload-{}.txt",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock after epoch")
+                .as_nanos()
+        ));
+        std::fs::write(&path, b"file body").expect("write fixture");
+
+        let (mut body, length) =
+            build_upload_body("boundary", "fixture.txt", &path, Some("项目/资料"))
+                .expect("build streaming multipart body");
+        let mut bytes = Vec::new();
+        body.read_to_end(&mut bytes).expect("read body");
+        let text = String::from_utf8(bytes).expect("utf8 fixture body");
+
+        assert_eq!(length as usize, text.len());
+        assert!(text.contains("filename=\"fixture.txt\""));
+        assert!(text.contains("file body"));
+        assert!(text.contains("name=\"parent_path\""));
+        let _ = std::fs::remove_file(path);
     }
 }

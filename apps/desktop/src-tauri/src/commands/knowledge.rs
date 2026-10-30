@@ -10,7 +10,10 @@ use crate::{
         RagflowAgent, RagflowAgentAnswer, RagflowAnswer, RagflowChat, RagflowChunk, RagflowClient,
         RagflowDataset, RagflowUpload,
     },
-    scan::policy::ScanPolicy,
+    scan::{
+        file_filter::FileTypeFilter,
+        policy::{ScanPolicy, active_roots},
+    },
 };
 
 #[derive(Deserialize)]
@@ -111,6 +114,7 @@ pub struct UploadTodayFileInput {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RagflowUploadOutput {
+    document_ids: Vec<String>,
     document_count: usize,
     parsing_started: bool,
     parsing_error: Option<String>,
@@ -170,7 +174,7 @@ fn client(state: &AppState) -> Result<RagflowClient, String> {
     RagflowClient::from_saved_config(state.database.configs(), WindowsCredentialStore)
 }
 
-fn upload_policy(state: &AppState) -> Result<ScanPolicy, String> {
+fn upload_policy(state: &AppState) -> Result<(ScanPolicy, FileTypeFilter), String> {
     let rules = state
         .scan_rules
         .get()
@@ -180,27 +184,32 @@ fn upload_policy(state: &AppState) -> Result<ScanPolicy, String> {
         .iter()
         .map(PathBuf::from)
         .collect::<Vec<_>>();
-    let validation_policy = ScanPolicy::new(exclusions.clone());
-    let roots = rules
-        .allowed_roots
-        .iter()
-        .map(PathBuf::from)
-        .map(|root| validation_policy.validate_root(&root))
-        .collect::<Result<Vec<_>, _>>()
+    let roots = active_roots(&rules.allowed_roots, &exclusions)
         .map_err(|_| "扫描目录无效，请在设置中重新保存。".to_owned())?;
-    if roots.is_empty() {
+    if rules.allowed_roots.is_empty() {
         return Err("请先在设置中添加允许扫描的工作目录。".to_owned());
     }
-    Ok(ScanPolicy::for_roots(exclusions, roots))
+    Ok((
+        ScanPolicy::for_roots(exclusions, roots),
+        FileTypeFilter::new(rules.file_categories),
+    ))
 }
 
 fn ensure_upload_candidate(
     file: &crate::contracts::FileRecord,
     policy: &ScanPolicy,
+    file_filter: &FileTypeFilter,
 ) -> Result<PathBuf, String> {
     let path = PathBuf::from(&file.canonical_path);
     if !policy.is_allowed(&path) {
         return Err("该文件已不在允许扫描范围内，无法上传。".to_owned());
+    }
+    let (start, end) = crate::commands::today::current_day_bounds();
+    if file.modified_at_utc_ms < start
+        || file.modified_at_utc_ms >= end
+        || !crate::commands::today::is_visible_today_file(file, file_filter, policy)
+    {
+        return Err("所选文件已不在当前今日列表中，无法上传。".to_owned());
     }
     let metadata = std::fs::metadata(&path)
         .map_err(|_| "无法读取要上传的文件，它可能已移动或没有访问权限。".to_owned())?;
@@ -462,8 +471,10 @@ pub async fn upload_today_file(
                 .get_by_id(input.file_id)
                 .map_err(|_| "无法读取所选文件。".to_owned())?
                 .ok_or_else(|| "所选文件已不在今日列表中。".to_owned())?;
-            let file_path = ensure_upload_candidate(&file, &upload_policy(&state)?)?;
+            let (policy, file_filter) = upload_policy(&state)?;
+            let file_path = ensure_upload_candidate(&file, &policy, &file_filter)?;
             let RagflowUpload {
+                document_ids,
                 document_count,
                 parsing_started,
                 parsing_error,
@@ -475,19 +486,28 @@ pub async fn upload_today_file(
                 input.start_parsing,
             )?;
             Ok(RagflowUploadOutput {
+                document_ids,
                 document_count,
                 parsing_started,
                 parsing_error,
             })
         })();
         match &result {
-            Ok(output) => state.logger.info(
-                "ragflow",
-                &format!(
-                    "today file uploaded: {} document(s), parsing_started={}",
-                    output.document_count, output.parsing_started
-                ),
-            ),
+            Ok(output) => {
+                state.logger.info(
+                    "ragflow",
+                    &format!(
+                        "today file uploaded: {} document(s), parsing_started={}",
+                        output.document_count, output.parsing_started
+                    ),
+                );
+                if let Some(error) = &output.parsing_error {
+                    state.logger.error(
+                        "ragflow",
+                        &format!("today file uploaded but parsing did not start: {error}"),
+                    );
+                }
+            }
             Err(error) => state
                 .logger
                 .error("ragflow", &format!("today file upload failed: {error}")),
@@ -502,7 +522,10 @@ pub async fn upload_today_file(
 mod tests {
     use crate::{
         contracts::FileRecord,
-        scan::policy::{AllowedRoot, ScanPolicy},
+        scan::{
+            file_filter::FileTypeFilter,
+            policy::{AllowedRoot, ScanPolicy},
+        },
     };
 
     use super::ensure_upload_candidate;
@@ -524,9 +547,32 @@ mod tests {
             )],
         );
 
-        let error = ensure_upload_candidate(&file, &policy)
+        let error = ensure_upload_candidate(&file, &policy, &FileTypeFilter::default())
             .expect_err("a file outside the approved scan scope cannot be uploaded");
 
         assert_eq!(error, "该文件已不在允许扫描范围内，无法上传。".to_owned());
+    }
+
+    #[test]
+    fn refuses_to_upload_a_record_that_is_no_longer_visible_in_today() {
+        let root = std::env::current_dir().expect("current directory");
+        let path = root.join("Cargo.toml");
+        let file = FileRecord {
+            id: 1,
+            canonical_path: path.to_string_lossy().to_string(),
+            file_identity: "legacy-record".to_owned(),
+            modified_at_utc_ms: chrono::Local::now().timestamp_millis(),
+            size_bytes: 1,
+            source: "本机文件".to_owned(),
+        };
+        let allowed_root = ScanPolicy::new(vec![])
+            .validate_root(&root)
+            .expect("current directory is a valid root");
+        let policy = ScanPolicy::for_roots(vec![], vec![allowed_root]);
+
+        let error = ensure_upload_candidate(&file, &policy, &FileTypeFilter::default())
+            .expect_err("retired scanner records are not current Today candidates");
+
+        assert_eq!(error, "所选文件已不在当前今日列表中，无法上传。");
     }
 }
