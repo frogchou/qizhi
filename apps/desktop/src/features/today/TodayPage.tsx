@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { BreakableText } from "../../components/BreakableText";
 import { StatusNotice } from "../../components/StatusNotice";
 import type {
   QizhiCommands,
@@ -219,6 +218,11 @@ export function TodayPage({ commands }: { commands: QizhiCommands }) {
     window.addEventListener("pointerdown", close);
     return () => window.removeEventListener("pointerdown", close);
   }, [fileMenu]);
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(null), 4_000);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
   async function refresh() {
     setBusy(true);
     setNotice(null);
@@ -308,22 +312,6 @@ export function TodayPage({ commands }: { commands: QizhiCommands }) {
         return factor * (left.modifiedAtUtcMs - right.modifiedAtUtcMs);
       });
   }, [category, query, snapshot, sort]);
-  const selectedFilename =
-    selected === null
-      ? null
-      : filename(
-          snapshot?.files.find((file) => file.id === selected)?.canonicalPath ??
-            "",
-        );
-  async function locate() {
-    if (selected === null) return;
-    try {
-      await commands.revealInExplorer(selected);
-      setNotice("已在资源管理器中定位文件。");
-    } catch {
-      setNotice("无法定位该文件，它可能已移动或不再允许访问。");
-    }
-  }
 
   async function fileAction(
     action: "open" | "text" | "reveal" | "copy" | "delete",
@@ -492,13 +480,17 @@ export function TodayPage({ commands }: { commands: QizhiCommands }) {
           过去
         </button>
       </div>
-      {busy ? <StatusNotice>{scanNotice()}</StatusNotice> : null}
-      {notice ? <StatusNotice>{notice}</StatusNotice> : null}
+      {busy ? <div className="workspace-toast">{scanNotice()}</div> : null}
+      {notice ? <div className="workspace-toast">{notice}</div> : null}
       <div className="today-layout">
         <div className="file-panel">
           <div className="panel-title">
-            <span>文件</span>
-            <span>{visibleFiles.length} 项</span>
+            <span>{view === "today" ? "今日文件" : "过去 5 天"}</span>
+            <span>
+              {visibleFiles.length} 项 ·{" "}
+              {visibleFiles.filter((file) => file.status === "待分析").length}{" "}
+              项评估中
+            </span>
           </div>
           <div className="file-controls" aria-label="今日文件筛选与排序">
             <input
@@ -537,78 +529,102 @@ export function TodayPage({ commands }: { commands: QizhiCommands }) {
           {visibleFiles.length === 0 ? (
             <p className="empty">今天的扫描范围内还没有发现新文件。</p>
           ) : (
-            <ul className="file-list">
-              {visibleFiles.map((file) => (
-                <li key={file.id}>
-                  <button
-                    className={
-                      selected === file.id ? "file-row selected" : "file-row"
-                    }
-                    onClick={() => setSelected(file.id)}
-                    onContextMenu={(event) => {
-                      event.preventDefault();
-                      setSelected(file.id);
-                      setFileMenu({
-                        id: file.id,
-                        x: event.clientX,
-                        y: event.clientY,
-                      });
-                    }}
-                  >
-                    <span className="file-icon">▤</span>
-                    <span className="file-name">
-                      <strong>{filename(file.canonicalPath)}</strong>
-                      <small>
-                        {file.source} · {formatBytes(file.sizeBytes)}
-                      </small>
-                    </span>
-                    <time>{formatTime(file.modifiedAtUtcMs)}</time>
-                    <span className="tag">{file.status}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
+            <div className="file-table-wrap">
+              <table className="file-table">
+                <thead>
+                  <tr>
+                    <th scope="col">
+                      <input aria-label="选择全部文件" type="checkbox" />
+                    </th>
+                    <th scope="col">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setSort(
+                            sort === "name-asc" ? "name-desc" : "name-asc",
+                          )
+                        }
+                      >
+                        文件名
+                      </button>
+                    </th>
+                    <th scope="col">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setSort(
+                            sort === "time-desc" ? "time-asc" : "time-desc",
+                          )
+                        }
+                      >
+                        创建时间
+                      </button>
+                    </th>
+                    <th scope="col">来源</th>
+                    <th scope="col">价值评估</th>
+                    <th scope="col">操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visibleFiles.map((file) => (
+                    <tr
+                      className={selected === file.id ? "selected" : undefined}
+                      key={file.id}
+                      onContextMenu={(event) => {
+                        event.preventDefault();
+                        setSelected(file.id);
+                        setFileMenu({
+                          id: file.id,
+                          x: event.clientX,
+                          y: event.clientY,
+                        });
+                      }}
+                    >
+                      <td>
+                        <input
+                          aria-label={`选择 ${filename(file.canonicalPath)}`}
+                          type="checkbox"
+                          onClick={(event) => event.stopPropagation()}
+                        />
+                      </td>
+                      <td
+                        className="file-title"
+                        title={filename(file.canonicalPath)}
+                      >
+                        <span className="file-icon">▤</span>
+                        <strong>{filename(file.canonicalPath)}</strong>
+                        <small>{formatBytes(file.sizeBytes)}</small>
+                      </td>
+                      <td>
+                        <time>{formatTime(file.modifiedAtUtcMs)}</time>
+                      </td>
+                      <td className="source-cell">{file.source}</td>
+                      <td>
+                        <button
+                          className="value-tag"
+                          type="button"
+                          onClick={() => void openUploadDialog(file.id)}
+                        >
+                          {file.status === "待分析" ? "评估中" : file.status}
+                        </button>
+                      </td>
+                      <td>
+                        <button
+                          className="row-open"
+                          type="button"
+                          onClick={() => void fileAction("open", file.id)}
+                        >
+                          打开
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
-        <aside className="detail-panel">
-          <p className="eyebrow">选择文件</p>
-          <h2
-            className="detail-file-name"
-            title={selectedFilename ?? undefined}
-          >
-            <BreakableText value={selectedFilename ?? "查看文件上下文"} />
-          </h2>
-          <p className="muted">
-            默认只记录安全元信息；仅在你确认上传时读取并传输文件。
-          </p>
-          <button
-            className="button secondary full"
-            disabled={selected === null}
-            onClick={locate}
-          >
-            在资源管理器中定位
-          </button>
-          <button
-            className="button outline full"
-            disabled={selected === null}
-            onClick={() => selected !== null && void openUploadDialog(selected)}
-          >
-            上传到知识库
-          </button>
-        </aside>
       </div>
-      <section className="timeline">
-        <h2>今日活动</h2>
-        {snapshot.clusters.map((cluster) => (
-          <div className="timeline-item" key={cluster.label}>
-            <span className="timeline-dot" />
-            <div>
-              <strong>{cluster.label}</strong>
-              <p>{cluster.fileIds.length} 个文件 · 待分析</p>
-            </div>
-          </div>
-        ))}
-      </section>
       {fileMenu ? (
         <div
           className="file-context-menu"

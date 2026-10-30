@@ -445,7 +445,7 @@ export function SettingsPage({ commands }: SettingsPageProps) {
                 onClick={() => void saveJev()}
                 disabled={!jevBaseUrl || !jevApiKey}
               >
-                保存
+                保存 JEV
               </button>
             </div>
             {jevConnection ? (

@@ -176,11 +176,23 @@ h2 {
   width: 100%;
 }
 .today-layout {
-  display: grid;
-  gap: 18px;
-  grid-template-columns: minmax(460px, 1fr) 290px;
-  height: min(54vh, 590px);
-  min-height: 340px;
+  display: block;
+  height: calc(100vh - 220px);
+  min-height: 560px;
+}
+.workspace-toast {
+  background: #173f36;
+  border-radius: 9px;
+  bottom: 28px;
+  box-shadow: 0 12px 30px rgb(9 38 29 / 22%);
+  color: #fff;
+  font-size: 13px;
+  left: 50%;
+  max-width: min(560px, calc(100vw - 48px));
+  padding: 11px 15px;
+  position: fixed;
+  transform: translateX(-50%);
+  z-index: 50;
 }
 .file-panel,
 .detail-panel,
@@ -196,6 +208,112 @@ h2 {
   flex-direction: column;
   min-height: 0;
   overflow: hidden;
+}
+.workspace-tabs {
+  display: flex;
+  gap: 4px;
+  margin: -10px 0 14px;
+}
+.workspace-tabs button {
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: #718078;
+  font: 600 14px inherit;
+  padding: 8px 12px;
+}
+.workspace-tabs button[aria-selected="true"] {
+  border-color: #176650;
+  color: #124d40;
+}
+.file-table-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.file-table {
+  border-collapse: collapse;
+  table-layout: fixed;
+  width: 100%;
+}
+.file-table th {
+  background: #f7faf8;
+  color: #61736a;
+  font-size: 12px;
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+  text-align: left;
+  z-index: 1;
+}
+.file-table th button {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+}
+.file-table th,
+.file-table td {
+  border-bottom: 1px solid #edf0ec;
+  padding: 10px 12px;
+  vertical-align: middle;
+}
+.file-table th:nth-child(1),
+.file-table td:nth-child(1) {
+  width: 34px;
+}
+.file-table th:nth-child(2) {
+  width: 38%;
+}
+.file-table th:nth-child(3) {
+  width: 112px;
+}
+.file-table th:nth-child(4) {
+  width: 150px;
+}
+.file-table th:nth-child(5) {
+  width: 98px;
+}
+.file-table th:nth-child(6) {
+  width: 62px;
+}
+.file-table tbody tr:hover,
+.file-table tbody tr.selected {
+  background: #f0f7f3;
+}
+.file-title {
+  min-width: 0;
+}
+.file-title strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.file-title small,
+.source-cell,
+.file-table time {
+  color: #7d8a84;
+  font-size: 12px;
+}
+.file-title small {
+  margin-left: 22px;
+}
+.value-tag,
+.row-open {
+  background: transparent;
+  border: 0;
+  color: #176650;
+  cursor: pointer;
+  font: 600 12px inherit;
+  padding: 0;
+}
+.value-tag {
+  background: #e7f3ec;
+  border-radius: 99px;
+  padding: 4px 8px;
 }
 .panel-title {
   border-bottom: 1px solid #edf0ec;
@@ -291,10 +409,6 @@ h2 {
 .empty {
   color: #77837c;
   padding: 28px 18px;
-}
-.timeline {
-  margin-top: 18px;
-  padding: 17px 20px;
 }
 .timeline-item {
   align-items: flex-start;

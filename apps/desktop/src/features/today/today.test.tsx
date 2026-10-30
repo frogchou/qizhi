@@ -71,15 +71,11 @@ describe("TodayPage", () => {
     const client = commands();
     render(<TodayPage commands={client} />);
     expect(await screen.findByText("周报.docx")).toBeInTheDocument();
-    expect(screen.getByText("待分析")).toBeInTheDocument();
+    expect(screen.getByText("评估中")).toBeInTheDocument();
     expect(screen.getByText("本机文件")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "上传到知识库" })).toBeDisabled();
-    fireEvent.click(screen.getByText("周报.docx"));
-    expect(screen.getByRole("button", { name: "上传到知识库" })).toBeEnabled();
-    fireEvent.click(screen.getByRole("button", { name: "在资源管理器中定位" }));
-    await waitFor(() =>
-      expect(client.revealInExplorer).toHaveBeenCalledWith(7),
-    );
+    expect(
+      screen.getByRole("columnheader", { name: "文件名" }),
+    ).toBeInTheDocument();
     await waitFor(() => expect(client.refreshToday).toHaveBeenCalledTimes(1));
     fireEvent.click(screen.getByRole("button", { name: "刷新列表" }));
     await waitFor(() => expect(client.refreshToday).toHaveBeenCalledTimes(2));
@@ -113,7 +109,7 @@ describe("TodayPage", () => {
     ).toBeInTheDocument();
   });
 
-  it("keeps a long selected filename inside the detail panel", async () => {
+  it("keeps a long filename constrained to its table cell", async () => {
     const longName = `${"x".repeat(120)}.txt`;
     render(
       <TodayPage
@@ -129,12 +125,9 @@ describe("TodayPage", () => {
       />,
     );
 
-    fireEvent.click(await screen.findByText(longName));
-    const detailName = document.querySelector(".detail-panel h2");
-    if (!detailName) throw new Error("未渲染文件详情标题");
-    expect(detailName).toHaveAttribute("title", longName);
-    expect(detailName.textContent).toBe(longName);
-    expect(detailName.querySelectorAll("wbr")).toHaveLength(2);
+    const title = await screen.findByTitle(longName);
+    expect(title).toHaveClass("file-title");
+    expect(title.textContent).toContain(longName);
   });
 
   it("keeps the cached today view usable while a background refresh is running", async () => {
@@ -258,7 +251,7 @@ describe("TodayPage", () => {
     fireEvent.change(screen.getByLabelText("排序方式"), {
       target: { value: "name-asc" },
     });
-    const names = screen.getAllByRole("button", { name: /\.docx|\.py|\.md/ });
+    const names = Array.from(document.querySelectorAll(".file-title strong"));
     expect(names.map((item) => item.textContent)).toEqual([
       expect.stringContaining("会议纪要.md"),
       expect.stringContaining("周报.docx"),
