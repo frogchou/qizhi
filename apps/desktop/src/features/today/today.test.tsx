@@ -32,6 +32,8 @@ function commands(snapshot: TodaySnapshot = readySnapshot): QizhiCommands {
     openFileInTextEditor: vi.fn().mockResolvedValue(undefined),
     copyFileToClipboard: vi.fn().mockResolvedValue(undefined),
     deleteFile: vi.fn().mockResolvedValue(undefined),
+    excludeFileDirectory: vi.fn().mockResolvedValue(snapshot),
+    uploadTodayFile: vi.fn(),
     listScanRules: vi.fn().mockResolvedValue({
       allowedRoots: [],
       customExclusions: [],
@@ -307,5 +309,71 @@ describe("TodayPage", () => {
     await waitFor(() =>
       expect(client.copyFileToClipboard).toHaveBeenCalledWith(7),
     );
+  });
+
+  it("blocks the selected file parent and immediately replaces the visible snapshot", async () => {
+    const client = commands() as QizhiCommands & {
+      excludeFileDirectory: ReturnType<typeof vi.fn>;
+    };
+    client.excludeFileDirectory = vi.fn().mockResolvedValue({
+      state: "ready",
+      files: [],
+      clusters: [],
+    });
+    render(<TodayPage commands={client} />);
+    const file = await screen.findByText("周报.docx");
+
+    fireEvent.contextMenu(file);
+    fireEvent.click(screen.getByRole("menuitem", { name: "屏蔽该目录文件" }));
+
+    await waitFor(() =>
+      expect(client.excludeFileDirectory).toHaveBeenCalledWith(7),
+    );
+    expect(
+      await screen.findByText("今天的扫描范围内还没有发现新文件。"),
+    ).toBeInTheDocument();
+  });
+
+  it("requires a knowledge base choice before uploading the selected file", async () => {
+    const client = commands() as QizhiCommands & {
+      listRagflowDatasets: ReturnType<typeof vi.fn>;
+      uploadTodayFile: ReturnType<typeof vi.fn>;
+    };
+    client.listRagflowDatasets = vi
+      .fn()
+      .mockResolvedValue([
+        { id: "kb-work", name: "工作资料", description: "项目文档" },
+      ]);
+    client.uploadTodayFile = vi.fn().mockResolvedValue({
+      documentCount: 1,
+      parsingStarted: true,
+    });
+    render(<TodayPage commands={client} />);
+    const file = await screen.findByText("周报.docx");
+
+    fireEvent.contextMenu(file);
+    fireEvent.click(screen.getByRole("menuitem", { name: "上传到知识库" }));
+
+    expect(
+      await screen.findByRole("dialog", { name: "上传到知识库" }),
+    ).toBeInTheDocument();
+    const upload = screen.getByRole("button", { name: "上传" });
+    expect(upload).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("目标知识库"), {
+      target: { value: "kb-work" },
+    });
+    fireEvent.click(upload);
+
+    await waitFor(() =>
+      expect(client.uploadTodayFile).toHaveBeenCalledWith({
+        fileId: 7,
+        datasetId: "kb-work",
+        parentPath: null,
+        startParsing: true,
+      }),
+    );
+    expect(
+      await screen.findByText("文件已上传并开始解析。"),
+    ).toBeInTheDocument();
   });
 });

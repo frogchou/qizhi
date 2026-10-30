@@ -4,6 +4,7 @@ import { BreakableText } from "../../components/BreakableText";
 import { StatusNotice } from "../../components/StatusNotice";
 import type {
   QizhiCommands,
+  RagflowDataset,
   TodayScanStatus,
   TodaySnapshot,
 } from "../../lib/tauri";
@@ -44,6 +45,7 @@ function wildcardMatches(value: string, query: string) {
 }
 
 type FileMenu = { id: number; x: number; y: number };
+type UploadDialogState = { fileId: number };
 
 function readableError(error: unknown, fallback: string) {
   if (error instanceof Error && error.message.trim()) return error.message;
@@ -139,6 +141,15 @@ export function TodayPage({ commands }: { commands: QizhiCommands }) {
   );
   const [sort, setSort] = useState("time-desc");
   const [fileMenu, setFileMenu] = useState<FileMenu | null>(null);
+  const [uploadDialog, setUploadDialog] = useState<UploadDialogState | null>(
+    null,
+  );
+  const [datasets, setDatasets] = useState<RagflowDataset[]>([]);
+  const [datasetId, setDatasetId] = useState("");
+  const [parentPath, setParentPath] = useState("");
+  const [startParsing, setStartParsing] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [followingExistingScan, setFollowingExistingScan] = useState(false);
   const completingExistingScan = useRef(false);
 
@@ -331,6 +342,74 @@ export function TodayPage({ commands }: { commands: QizhiCommands }) {
     }
   }
 
+  async function excludeDirectory(id: number) {
+    setFileMenu(null);
+    if (!commands.excludeFileDirectory) {
+      setNotice("当前桌面服务不支持目录屏蔽，请更新栖知后重试。");
+      return;
+    }
+    try {
+      const filtered = await commands.excludeFileDirectory(id);
+      setSnapshot(filtered);
+      setSelected(null);
+      setNotice("已屏蔽该目录；该目录下的文件已从今日列表隐藏。");
+    } catch (error) {
+      setNotice(readableError(error, "无法屏蔽该目录，请稍后重试。"));
+    }
+  }
+
+  async function openUploadDialog(id: number) {
+    setFileMenu(null);
+    setUploadDialog({ fileId: id });
+    setDatasetId("");
+    setParentPath("");
+    setStartParsing(true);
+    setUploadError(null);
+    setDatasets([]);
+    try {
+      if (!commands.listRagflowDatasets) {
+        throw new Error("当前桌面服务不支持知识库上传。");
+      }
+      setDatasets(await commands.listRagflowDatasets());
+    } catch (error) {
+      setUploadError(readableError(error, "无法读取可用知识库。"));
+    }
+  }
+
+  async function uploadSelectedFile() {
+    if (!uploadDialog || !datasetId || uploading) return;
+    if (!commands.uploadTodayFile) {
+      setUploadError("当前桌面服务不支持知识库上传，请更新栖知后重试。");
+      return;
+    }
+    setUploading(true);
+    setUploadError(null);
+    try {
+      const result = await commands.uploadTodayFile({
+        fileId: uploadDialog.fileId,
+        datasetId,
+        parentPath: parentPath.trim() || null,
+        startParsing,
+      });
+      setUploadDialog(null);
+      setNotice(
+        result.parsingStarted
+          ? "文件已上传并开始解析。"
+          : "文件已上传；你可在 RAGFlow 中开始解析。",
+      );
+    } catch (error) {
+      setUploadError(
+        readableError(error, "上传失败，请检查知识库连接后重试。"),
+      );
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  const uploadFile = uploadDialog
+    ? (snapshot?.files.find((file) => file.id === uploadDialog.fileId) ?? null)
+    : null;
+
   if (!snapshot)
     return (
       <section className="page loading">
@@ -518,12 +597,118 @@ export function TodayPage({ commands }: { commands: QizhiCommands }) {
             复制文件
           </button>
           <button
+            role="menuitem"
+            onClick={() => void openUploadDialog(fileMenu.id)}
+          >
+            上传到知识库
+          </button>
+          <button
+            role="menuitem"
+            onClick={() => void excludeDirectory(fileMenu.id)}
+          >
+            屏蔽该目录文件
+          </button>
+          <button
             className="danger"
             role="menuitem"
             onClick={() => void fileAction("delete", fileMenu.id)}
           >
             删除文件
           </button>
+        </div>
+      ) : null}
+      {uploadDialog ? (
+        <div className="upload-modal-backdrop" role="presentation">
+          <section
+            aria-label="上传到知识库"
+            aria-modal="true"
+            className="upload-modal"
+            role="dialog"
+          >
+            <header>
+              <div>
+                <p className="eyebrow">RAGFlow 知识库</p>
+                <h2>上传到知识库</h2>
+              </div>
+              <button
+                aria-label="关闭上传对话框"
+                className="modal-close"
+                disabled={uploading}
+                onClick={() => setUploadDialog(null)}
+                type="button"
+              >
+                ×
+              </button>
+            </header>
+            {uploadFile ? (
+              <div className="upload-file-summary">
+                <strong title={uploadFile.canonicalPath}>
+                  {filename(uploadFile.canonicalPath)}
+                </strong>
+                <span>
+                  {formatBytes(uploadFile.sizeBytes)} · 已在本机范围内发现
+                </span>
+              </div>
+            ) : (
+              <p className="upload-error">所选文件已不在今日列表中。</p>
+            )}
+            <label className="upload-field">
+              <span>目标知识库</span>
+              <select
+                aria-label="目标知识库"
+                disabled={uploading || datasets.length === 0}
+                onChange={(event) => setDatasetId(event.currentTarget.value)}
+                value={datasetId}
+              >
+                <option value="">请选择知识库</option>
+                {datasets.map((dataset) => (
+                  <option key={dataset.id} value={dataset.id}>
+                    {dataset.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="upload-field">
+              <span>知识库内目录（可选）</span>
+              <input
+                aria-label="知识库内目录"
+                disabled={uploading}
+                onChange={(event) => setParentPath(event.currentTarget.value)}
+                placeholder="例如：项目资料/周报"
+                value={parentPath}
+              />
+            </label>
+            <label className="upload-checkbox">
+              <input
+                checked={startParsing}
+                disabled={uploading}
+                onChange={(event) =>
+                  setStartParsing(event.currentTarget.checked)
+                }
+                type="checkbox"
+              />
+              上传后立即按知识库现有设置开始解析
+            </label>
+            {uploadError ? <p className="upload-error">{uploadError}</p> : null}
+            <footer>
+              <button
+                className="button secondary"
+                disabled={uploading}
+                onClick={() => setUploadDialog(null)}
+                type="button"
+              >
+                取消
+              </button>
+              <button
+                className="button primary"
+                disabled={!uploadFile || !datasetId || uploading}
+                onClick={() => void uploadSelectedFile()}
+                type="button"
+              >
+                {uploading ? "正在上传…" : "上传"}
+              </button>
+            </footer>
+          </section>
         </div>
       ) : null}
     </section>

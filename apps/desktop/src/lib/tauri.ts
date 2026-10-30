@@ -21,6 +21,7 @@ export interface QizhiCommands {
   openFileInTextEditor(id: number): Promise<void>;
   copyFileToClipboard(id: number): Promise<void>;
   deleteFile(id: number): Promise<void>;
+  excludeFileDirectory?(id: number): Promise<TodaySnapshot>;
   listScanRules(): Promise<ScanRules>;
   saveScanRules(
     input: Pick<
@@ -45,6 +46,12 @@ export interface QizhiCommands {
     documentId: string;
     savePath: string;
   }): Promise<{ savedPath: string }>;
+  uploadTodayFile?(input: {
+    fileId: number;
+    datasetId: string;
+    parentPath: string | null;
+    startParsing: boolean;
+  }): Promise<RagflowUpload>;
 }
 
 export type ConnectionStatus = { available: boolean; message: string };
@@ -118,6 +125,10 @@ export type RagflowKnowledgeQuery = {
   chunks: RagflowChunk[];
   agentResults: RagflowAgentResult[];
 };
+export type RagflowUpload = {
+  documentCount: number;
+  parsingStarted: boolean;
+};
 
 export const unavailableCommands: QizhiCommands = {
   async getSettings() {
@@ -158,6 +169,9 @@ export const unavailableCommands: QizhiCommands = {
   async deleteFile() {
     throw new Error("桌面服务尚未连接");
   },
+  async excludeFileDirectory() {
+    return this.getTodaySnapshot();
+  },
   async listScanRules() {
     return {
       allowedRoots: [],
@@ -167,6 +181,9 @@ export const unavailableCommands: QizhiCommands = {
     };
   },
   async saveScanRules() {
+    throw new Error("桌面服务尚未连接");
+  },
+  async uploadTodayFile() {
     throw new Error("桌面服务尚未连接");
   },
 };
@@ -193,6 +210,7 @@ export const tauriCommands: QizhiCommands = {
   openFileInTextEditor: (id) => invoke("open_file_in_text_editor", { id }),
   copyFileToClipboard: (id) => invoke("copy_file_to_clipboard", { id }),
   deleteFile: (id) => invoke("delete_file", { id }),
+  excludeFileDirectory: (id) => invoke("exclude_file_directory", { id }),
   listScanRules: () => invoke("list_scan_rules"),
   saveScanRules: (input) => invoke("save_scan_rules", { input }),
   listRagflowChats: () => invoke("list_ragflow_chats"),
@@ -203,4 +221,5 @@ export const tauriCommands: QizhiCommands = {
     invoke("query_ragflow_knowledge", { input }),
   downloadRagflowDocument: (input) =>
     invoke("download_ragflow_document", { input }),
+  uploadTodayFile: (input) => invoke("upload_today_file", { input }),
 };
