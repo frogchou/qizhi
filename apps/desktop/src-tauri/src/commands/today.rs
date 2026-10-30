@@ -12,8 +12,9 @@ use crate::{
         pipe::call_indexer_service,
     },
     scan::{
+        configuration::ScanRules,
         file_filter::{FileCategory, FileTypeFilter},
-        policy::{AllowedRoot, ScanPolicy},
+        policy::{AllowedRoot, ScanPolicy, display_path},
         progress::TodayScanStatus,
     },
     system::explorer::{ExplorerLauncher, WindowsProcessLauncher},
@@ -87,6 +88,59 @@ fn rules(state: &AppState) -> Result<ActiveRules, TodayUnavailable> {
     }
     Ok((roots, exclusions, file_categories))
 }
+
+fn exclude_parent_from_rules(mut rules: ScanRules, file: &FileRecord) -> Result<ScanRules, String> {
+    let parent = std::path::Path::new(&file.canonical_path)
+        .parent()
+        .filter(|path| path.is_absolute())
+        .ok_or_else(|| "无法识别该文件所在目录。".to_owned())?;
+    let parent = display_path(parent);
+    if !rules
+        .custom_exclusions
+        .iter()
+        .any(|existing| existing.eq_ignore_ascii_case(&parent))
+    {
+        rules.custom_exclusions.push(parent);
+    }
+    Ok(rules)
+}
+
+fn configure_indexer_after_rule_change(state: &AppState, rules: &ScanRules) {
+    let request = IndexerRequest {
+        protocol_version: INDEXER_PROTOCOL_VERSION,
+        request_id: format!(
+            "today-exclude-configure-{}",
+            chrono::Utc::now().timestamp_millis()
+        ),
+        kind: IndexerRequestKind::Configure {
+            allowed_roots: rules.allowed_roots.clone(),
+            excluded_roots: rules.custom_exclusions.clone(),
+            file_categories: rules.file_categories.clone(),
+        },
+    };
+    match call_indexer_service(&request) {
+        Ok(response) if response.status == "ready" => state.logger.info(
+            "today-index",
+            "directory exclusion synchronized to local NTFS indexer",
+        ),
+        Ok(response) => state.logger.error(
+            "today-index",
+            &format!(
+                "directory exclusion saved locally but indexer synchronization failed: {}",
+                response
+                    .message
+                    .unwrap_or_else(|| "local indexer rejected configuration".to_owned())
+            ),
+        ),
+        Err(error) => state.logger.error(
+            "today-index",
+            &format!(
+                "directory exclusion saved locally but indexer synchronization failed: {error}"
+            ),
+        ),
+    }
+}
+
 fn bounds() -> (i64, i64) {
     let now = Local::now();
     let today = now.date_naive();
@@ -326,6 +380,64 @@ pub fn delete_file(state: State<'_, AppState>, id: i64) -> Result<(), String> {
         .map_err(|error| error.code().to_owned())
 }
 
+#[tauri::command]
+pub async fn exclude_file_directory(
+    state: State<'_, AppState>,
+    id: i64,
+) -> Result<TodayReady, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let file = state
+            .database
+            .files()
+            .get_by_id(id)
+            .map_err(|_| "无法读取所选文件。".to_owned())?
+            .ok_or_else(|| "所选文件已不在今日列表中。".to_owned())?;
+        let (roots, exclusions, _) = rules(&state).map_err(|error| error.remediation)?;
+        if !ScanPolicy::for_roots(exclusions, roots)
+            .is_cached_path_allowed(std::path::Path::new(&file.canonical_path))
+        {
+            return Err("该文件已不在允许扫描范围内，无法更新屏蔽目录。".to_owned());
+        }
+        let saved = state
+            .scan_rules
+            .get()
+            .map_err(|_| "无法读取扫描规则。".to_owned())
+            .and_then(|rules| exclude_parent_from_rules(rules, &file))
+            .and_then(|rules| {
+                state
+                    .scan_rules
+                    .save(rules)
+                    .map_err(|_| "无法保存屏蔽目录。".to_owned())
+            })?;
+        configure_indexer_after_rule_change(&state, &saved);
+        let (start, end) = bounds();
+        let exclusions = saved
+            .custom_exclusions
+            .iter()
+            .map(PathBuf::from)
+            .collect::<Vec<_>>();
+        let validation_policy = ScanPolicy::new(exclusions.clone());
+        let roots = saved
+            .allowed_roots
+            .iter()
+            .map(PathBuf::from)
+            .map(|root| validation_policy.validate_root(&root))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| "保存的扫描目录无效，请在设置中重新保存。".to_owned())?;
+        cached_snapshot_for_range(
+            state.database.files(),
+            start,
+            end,
+            &FileTypeFilter::new(saved.file_categories),
+            &ScanPolicy::for_roots(exclusions, roots),
+        )
+        .map_err(|_| "屏蔽目录后无法刷新今日列表。".to_owned())
+    })
+    .await
+    .map_err(|_| "屏蔽目录时发生意外错误。".to_owned())?
+}
+
 fn launcher(state: &AppState) -> Result<ExplorerLauncher, String> {
     let (roots, exclusions, _) = rules(&state).map_err(|value| value.remediation)?;
     Ok(ExplorerLauncher::new(
@@ -342,12 +454,12 @@ mod tests {
     use chrono::{Local, TimeZone, Timelike};
 
     use crate::{
-        contracts::FileRecordInput,
+        contracts::{FileRecord, FileRecordInput},
         database::Database,
-        scan::{file_filter::FileTypeFilter, policy::ScanPolicy},
+        scan::{configuration::ScanRules, file_filter::FileTypeFilter, policy::ScanPolicy},
     };
 
-    use super::{bounds, cached_snapshot_for_range};
+    use super::{bounds, cached_snapshot_for_range, exclude_parent_from_rules};
 
     #[test]
     fn uses_local_calendar_midnights_for_today() {
@@ -507,6 +619,65 @@ mod tests {
         assert!(snapshot.files.is_empty());
         let _ = std::fs::remove_file(file);
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn excludes_the_selected_file_parent_from_the_cached_today_snapshot() {
+        let database = Database::open(std::path::Path::new(":memory:")).expect("database");
+        let (start, end) = bounds();
+        let repository = database.files();
+        for (canonical_path, identity) in [
+            (r"D:\work\private\notes.md".to_owned(), "private-notes"),
+            (r"D:\work\shared\plan.md".to_owned(), "shared-plan"),
+        ] {
+            repository
+                .upsert(&FileRecordInput {
+                    canonical_path,
+                    file_identity: identity.to_owned(),
+                    modified_at_utc_ms: start + 1,
+                    size_bytes: 12,
+                    source: "本机 NTFS 索引".to_owned(),
+                })
+                .expect("persist today file");
+        }
+        let selected = repository
+            .get_by_identity(r"D:\work\private\notes.md", "private-notes")
+            .expect("read selected file")
+            .expect("selected file exists");
+        let rules = exclude_parent_from_rules(
+            ScanRules {
+                allowed_roots: vec![r"D:\work".to_owned()],
+                custom_exclusions: vec![],
+                file_categories: vec![],
+            },
+            &FileRecord {
+                id: selected.id,
+                canonical_path: selected.canonical_path,
+                file_identity: selected.file_identity,
+                modified_at_utc_ms: selected.modified_at_utc_ms,
+                size_bytes: selected.size_bytes,
+                source: selected.source,
+            },
+        )
+        .expect("selected parent is excluded");
+        let snapshot = cached_snapshot_for_range(
+            repository,
+            start,
+            end,
+            &FileTypeFilter::default(),
+            &ScanPolicy::new(
+                rules
+                    .custom_exclusions
+                    .iter()
+                    .map(std::path::PathBuf::from)
+                    .collect(),
+            ),
+        )
+        .expect("filtered cached snapshot");
+
+        assert_eq!(rules.custom_exclusions, vec![r"D:\work\private"]);
+        assert_eq!(snapshot.files.len(), 1);
+        assert_eq!(snapshot.files[0].canonical_path, r"D:\work\shared\plan.md");
     }
 
     #[test]

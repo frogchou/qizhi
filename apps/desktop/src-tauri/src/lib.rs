@@ -50,6 +50,7 @@ pub fn run() {
             commands::today::open_file_in_text_editor,
             commands::today::copy_file_to_clipboard,
             commands::today::delete_file,
+            commands::today::exclude_file_directory,
             commands::knowledge::list_ragflow_chats,
             commands::knowledge::ask_ragflow_chat,
             commands::knowledge::list_ragflow_datasets,
