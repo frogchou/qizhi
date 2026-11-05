@@ -4,6 +4,7 @@ node_modules/
 .pnpm-store/
 dist/
 target/
+debug/
 coverage/
 test-results/
 playwright-report/
@@ -14,3 +15,7 @@ playwright-report/
 credential-export*/
 *.tmp
 Thumbs.db
+**/*.rs.bk
+*.pdb
+**/mutants.out*/
+rustc-ice-*.txt
