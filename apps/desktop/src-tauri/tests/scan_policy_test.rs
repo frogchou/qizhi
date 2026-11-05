@@ -45,6 +45,8 @@ fn only_allows_files_within_the_canonicalized_work_root() {
         .expect("valid work root");
     let policy = ScanPolicy::for_roots(vec![], vec![allowed]);
     assert!(!policy.is_allowed(&outside_file));
+    assert!(policy.is_allowed_directory(&work_root));
+    assert!(!policy.is_allowed_directory(&outside_root));
 
     let _ = std::fs::remove_file(outside_file);
     let _ = std::fs::remove_dir_all(work_root);

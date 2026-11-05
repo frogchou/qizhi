@@ -1,3 +1,5 @@
+import { BrandLogo } from "./BrandLogo";
+
 export type AppRoute = "today" | "knowledge" | "codex" | "settings";
 type IconName = "today" | "knowledge" | "codex" | "settings";
 const items: { route: AppRoute; label: string; icon: IconName }[] = [
@@ -46,9 +48,7 @@ export function AppSidebar({
   return (
     <aside className="sidebar">
       <div className="brand">
-        <span className="brand-mark" aria-hidden="true">
-          Q
-        </span>
+        <BrandLogo />
         <span>栖知</span>
       </div>
       <nav aria-label="主导航">

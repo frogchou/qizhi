@@ -80,10 +80,28 @@ fn page(next_usn: &str) -> IndexSourcePage {
     }
 }
 
+fn snapshot_page_without_timestamp(next_usn: &str) -> IndexSourcePage {
+    IndexSourcePage {
+        entries: vec![IndexEntry {
+            file_reference_number: "42".to_owned(),
+            parent_file_reference_number: Some("5".to_owned()),
+            name: "notes.md".to_owned(),
+            is_directory: false,
+            file_attributes: 0,
+            size_bytes: None,
+            modified_at_utc_ms: None,
+            last_usn: next_usn.to_owned(),
+            deleted_at_utc_ms: None,
+        }],
+        events: vec![],
+        next_usn: next_usn.to_owned(),
+    }
+}
+
 struct ScriptedSource {
     journals: Mutex<VecDeque<JournalCursor>>,
     snapshot: Mutex<VecDeque<IndexSourcePage>>,
-    replay: Mutex<VecDeque<IndexSourcePage>>,
+    replay_calls: Mutex<VecDeque<VecDeque<IndexSourcePage>>>,
 }
 
 impl UsnVolumeSource for ScriptedSource {
@@ -112,11 +130,46 @@ impl UsnVolumeSource for ScriptedSource {
         _: &UsnCheckpoint,
         on_page: &mut dyn FnMut(IndexSourcePage) -> Result<(), String>,
     ) -> Result<(), String> {
-        while let Some(page) = self.replay.lock().expect("lock").pop_front() {
+        let mut pages = self
+            .replay_calls
+            .lock()
+            .expect("lock")
+            .pop_front()
+            .unwrap_or_default();
+        while let Some(page) = pages.pop_front() {
             on_page(page)?;
         }
         Ok(())
     }
+}
+
+#[test]
+fn bootstrap_replays_retained_history_so_recent_files_are_queryable() {
+    let path = temporary_database_path("ntfs-retained-history");
+    let database = Database::open(&path).expect("database opens");
+    let source = ScriptedSource {
+        journals: Mutex::new(VecDeque::from([JournalCursor {
+            journal_id: "journal-1".to_owned(),
+            first_usn: "1".to_owned(),
+            next_usn: "4".to_owned(),
+            record_major_version: 2,
+        }])),
+        snapshot: Mutex::new(VecDeque::from([snapshot_page_without_timestamp("4")])),
+        replay_calls: Mutex::new(VecDeque::from([VecDeque::from([page("4")])])),
+    };
+    let indexer = NtfsIndexer::new(database.ntfs_index(), source);
+
+    indexer.bootstrap(volume()).expect("bootstrap succeeds");
+    let recent = database
+        .ntfs_index()
+        .list_file_candidates_between(1_793_189_000_000, 1_793_190_000_000)
+        .expect("recent candidates query");
+
+    assert_eq!(recent.len(), 1);
+    assert_eq!(recent[0].canonical_path, r"D:\notes.md");
+
+    drop(database);
+    let _ = std::fs::remove_file(path);
 }
 
 #[test]
@@ -139,7 +192,10 @@ fn bootstraps_a_volume_then_replays_only_new_pages() {
             },
         ])),
         snapshot: Mutex::new(VecDeque::from([page("2")])),
-        replay: Mutex::new(VecDeque::from([page("4")])),
+        replay_calls: Mutex::new(VecDeque::from([
+            VecDeque::new(),
+            VecDeque::from([page("4")]),
+        ])),
     };
     let indexer = NtfsIndexer::new(database.ntfs_index(), source);
 
@@ -179,7 +235,7 @@ fn marks_only_the_affected_volume_for_rebuild_when_its_journal_changes() {
             },
         ])),
         snapshot: Mutex::new(VecDeque::from([page("2")])),
-        replay: Mutex::new(VecDeque::new()),
+        replay_calls: Mutex::new(VecDeque::from([VecDeque::new()])),
     };
     let indexer = NtfsIndexer::new(database.ntfs_index(), source);
     let built = indexer.bootstrap(volume()).expect("bootstrap succeeds");
@@ -219,7 +275,7 @@ fn recovers_an_interrupted_initial_index_by_bootstrapping_after_sync_requests_re
             },
         ])),
         snapshot: Mutex::new(VecDeque::from([page("4")])),
-        replay: Mutex::new(VecDeque::new()),
+        replay_calls: Mutex::new(VecDeque::from([VecDeque::new()])),
     };
     let indexer = NtfsIndexer::new(database.ntfs_index(), source);
     let interrupted = database

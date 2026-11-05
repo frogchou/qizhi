@@ -289,3 +289,95 @@ fn returns_only_candidates_allowed_by_the_saved_service_policy() {
 
     let _ = std::fs::remove_dir_all(root);
 }
+
+#[test]
+fn list_today_range_does_not_silently_truncate_more_than_five_thousand_files() {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock after epoch")
+        .as_nanos();
+    let root = std::env::current_dir()
+        .expect("current directory")
+        .join("target")
+        .join(format!("qizhi-ntfs-unbounded-{nonce}"));
+    std::fs::create_dir_all(&root).expect("create test root");
+    let root = root.canonicalize().expect("canonical root");
+    let database = Database::open(std::path::Path::new(":memory:")).expect("database opens");
+    let volume = database
+        .ntfs_index()
+        .upsert_volume(&VolumeDescriptor {
+            volume_guid: format!("unbounded-{nonce}"),
+            current_mount_path: format!("{}\\", display_path(&root)),
+            serial_number: None,
+            file_system: "NTFS".to_owned(),
+            state: VolumeState::Ready,
+            state_message: None,
+        })
+        .expect("persist volume");
+    let now = 1_700_000_000_000_i64;
+    let mut entries = Vec::with_capacity(5_002);
+    entries.push(IndexEntry {
+        file_reference_number: "root".to_owned(),
+        parent_file_reference_number: None,
+        name: String::new(),
+        is_directory: true,
+        file_attributes: 0,
+        size_bytes: None,
+        modified_at_utc_ms: None,
+        last_usn: "1".to_owned(),
+        deleted_at_utc_ms: None,
+    });
+    entries.extend((0..5_001).map(|index| IndexEntry {
+        file_reference_number: format!("file-{index}"),
+        parent_file_reference_number: Some("root".to_owned()),
+        name: format!("note-{index}.md"),
+        is_directory: false,
+        file_attributes: 0,
+        size_bytes: Some(8),
+        modified_at_utc_ms: Some(now),
+        last_usn: format!("{}", index + 2),
+        deleted_at_utc_ms: None,
+    }));
+    database
+        .ntfs_index()
+        .apply_page(&IndexPage {
+            volume_id: volume.id,
+            entries,
+            events: vec![],
+            checkpoint: UsnCheckpoint {
+                usn_journal_id: "1".to_owned(),
+                next_usn: "5003".to_owned(),
+                first_usn_seen: "1".to_owned(),
+                record_major_version: 2,
+                last_successful_sync_at_utc_ms: now,
+            },
+        })
+        .expect("persist large index page");
+
+    let control = IndexerControlPlane::new(database.ntfs_index());
+    let sid = "S-1-5-21-unbounded";
+    assert_eq!(
+        control
+            .handle(
+                sid,
+                &request(IndexerRequestKind::Configure {
+                    allowed_roots: vec![display_path(&root)],
+                    excluded_roots: vec![],
+                    file_categories: vec![FileCategory::Documents],
+                }),
+            )
+            .status,
+        "ready"
+    );
+    let response = control.handle(
+        sid,
+        &request(IndexerRequestKind::ListToday {
+            start_utc_ms: now - 1,
+            end_utc_ms: now + 1,
+        }),
+    );
+    assert_eq!(response.status, "ready");
+    assert_eq!(response.candidates.len(), 5_001);
+
+    let _ = std::fs::remove_dir_all(root);
+}

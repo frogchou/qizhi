@@ -1,4 +1,5 @@
-use rusqlite::{OptionalExtension, params};
+use chrono::{Datelike, Local, TimeZone, Utc};
+use rusqlite::{OptionalExtension, Transaction, params};
 
 use crate::{
     database::{AppError, Database},
@@ -72,6 +73,8 @@ impl NtfsIndexRepository {
                 )?;
             }
 
+            record_live_activity_events(transaction, page.volume_id, &page.entries)?;
+
             for event in &page.events {
                 transaction.execute(
                     "INSERT INTO discovered_file_events(volume_id,file_reference_number,canonical_path,event_kind,modified_at_utc_ms,size_bytes,source) VALUES (?1,?2,?3,?4,?5,?6,?7) ON CONFLICT(volume_id,file_reference_number) DO UPDATE SET canonical_path=excluded.canonical_path,event_kind=excluded.event_kind,modified_at_utc_ms=excluded.modified_at_utc_ms,size_bytes=excluded.size_bytes,source=excluded.source",
@@ -104,6 +107,10 @@ impl NtfsIndexRepository {
             }
             transaction.execute(
                 "DELETE FROM ntfs_rebuild_entries WHERE volume_id = ?1",
+                [volume_id],
+            )?;
+            transaction.execute(
+                "DELETE FROM ntfs_rebuild_activity_events WHERE volume_id = ?1",
                 [volume_id],
             )?;
             transaction.execute(
@@ -151,6 +158,7 @@ impl NtfsIndexRepository {
                     params![build_id, volume_id, entry.file_reference_number, entry.parent_file_reference_number, entry.name, entry.is_directory, entry.file_attributes, entry.size_bytes, entry.modified_at_utc_ms, entry.last_usn, entry.deleted_at_utc_ms],
                 )?;
             }
+            record_rebuild_activity_events(transaction, build_id, volume_id, &page.entries)?;
             for event in &page.events {
                 transaction.execute(
                     "INSERT INTO ntfs_rebuild_events(build_id,volume_id,file_reference_number,canonical_path,event_kind,modified_at_utc_ms,size_bytes,source) VALUES (?1,?2,?3,?4,?5,?6,?7,?8) ON CONFLICT(build_id,file_reference_number) DO UPDATE SET canonical_path=excluded.canonical_path,event_kind=excluded.event_kind,modified_at_utc_ms=excluded.modified_at_utc_ms,size_bytes=excluded.size_bytes,source=excluded.source",
@@ -185,6 +193,10 @@ impl NtfsIndexRepository {
                 "DELETE FROM discovered_file_events WHERE volume_id = ?1",
                 [volume_id],
             )?;
+            transaction.execute(
+                "DELETE FROM ntfs_activity_events WHERE volume_id = ?1",
+                [volume_id],
+            )?;
             transaction.execute("DELETE FROM ntfs_checkpoints WHERE volume_id = ?1", [volume_id])?;
             transaction.execute(
                 "INSERT INTO ntfs_entries(volume_id,file_reference_number,parent_file_reference_number,name,is_directory,file_attributes,size_bytes,modified_at_utc_ms,last_usn,deleted_at_utc_ms) SELECT volume_id,file_reference_number,parent_file_reference_number,name,is_directory,file_attributes,size_bytes,modified_at_utc_ms,last_usn,deleted_at_utc_ms FROM ntfs_rebuild_entries WHERE build_id = ?1",
@@ -192,6 +204,10 @@ impl NtfsIndexRepository {
             )?;
             transaction.execute(
                 "INSERT INTO discovered_file_events(volume_id,file_reference_number,canonical_path,event_kind,modified_at_utc_ms,size_bytes,source) SELECT volume_id,file_reference_number,canonical_path,event_kind,modified_at_utc_ms,size_bytes,source FROM ntfs_rebuild_events WHERE build_id = ?1",
+                [build_id],
+            )?;
+            transaction.execute(
+                "INSERT INTO ntfs_activity_events(volume_id,file_reference_number,day_start_utc_ms,occurred_at_utc_ms) SELECT volume_id,file_reference_number,day_start_utc_ms,occurred_at_utc_ms FROM ntfs_rebuild_activity_events WHERE build_id = ?1",
                 [build_id],
             )?;
             transaction.execute(
@@ -203,6 +219,10 @@ impl NtfsIndexRepository {
                 params![volume_id, indexed_at_utc_ms],
             )?;
             transaction.execute("DELETE FROM ntfs_rebuild_entries WHERE build_id = ?1", [build_id])?;
+            transaction.execute(
+                "DELETE FROM ntfs_rebuild_activity_events WHERE build_id = ?1",
+                [build_id],
+            )?;
             transaction.execute("DELETE FROM ntfs_rebuild_events WHERE build_id = ?1", [build_id])?;
             transaction.execute(
                 "DELETE FROM ntfs_rebuild_checkpoints WHERE build_id = ?1",
@@ -353,13 +373,30 @@ impl NtfsIndexRepository {
     ) -> Result<Vec<IndexedFileCandidate>, AppError> {
         self.database.with_connection(|connection| {
             let mut statement = connection.prepare(
-                "WITH RECURSIVE candidates AS (
-                    SELECT volume_id,file_reference_number,parent_file_reference_number,name,modified_at_utc_ms,size_bytes
-                    FROM ntfs_entries
-                    WHERE is_directory = 0
-                      AND deleted_at_utc_ms IS NULL
-                      AND modified_at_utc_ms >= ?1
-                      AND modified_at_utc_ms < ?2
+                "WITH RECURSIVE recent_activity AS (
+                    SELECT volume_id,file_reference_number,MAX(occurred_at_utc_ms) AS modified_at_utc_ms
+                    FROM ntfs_activity_events
+                    WHERE occurred_at_utc_ms >= ?1
+                      AND occurred_at_utc_ms < ?2
+                    GROUP BY volume_id,file_reference_number
+                ), candidates AS (
+                    SELECT entry.volume_id,entry.file_reference_number,entry.parent_file_reference_number,entry.name,activity.modified_at_utc_ms,entry.size_bytes
+                    FROM recent_activity activity
+                    JOIN ntfs_entries entry ON entry.volume_id = activity.volume_id AND entry.file_reference_number = activity.file_reference_number
+                    WHERE entry.is_directory = 0
+                      AND entry.deleted_at_utc_ms IS NULL
+                    UNION ALL
+                    SELECT entry.volume_id,entry.file_reference_number,entry.parent_file_reference_number,entry.name,entry.modified_at_utc_ms,entry.size_bytes
+                    FROM ntfs_entries entry
+                    WHERE entry.is_directory = 0
+                      AND entry.deleted_at_utc_ms IS NULL
+                      AND entry.modified_at_utc_ms >= ?1
+                      AND entry.modified_at_utc_ms < ?2
+                      AND NOT EXISTS (
+                        SELECT 1 FROM recent_activity activity
+                        WHERE activity.volume_id = entry.volume_id
+                          AND activity.file_reference_number = entry.file_reference_number
+                      )
                 ), ancestry AS (
                     SELECT volume_id,file_reference_number AS target_reference,parent_file_reference_number,name,modified_at_utc_ms,size_bytes,name AS relative_path,0 AS depth
                     FROM candidates
@@ -395,4 +432,88 @@ impl NtfsIndexRepository {
                 .collect()
         })
     }
+}
+
+// NTFS replay records are activity observations, not just a replacement for
+// the current metadata row.  Keep one latest observation per file per local
+// day so a file that changes again tomorrow is still discoverable as part of
+// today's work.  The service only retains a short recent-work window, which
+// bounds the data even when a volume has a busy USN journal.
+const ACTIVITY_RETENTION_DAYS: i64 = 14;
+
+fn record_live_activity_events(
+    transaction: &Transaction<'_>,
+    volume_id: i64,
+    entries: &[crate::ntfs::IndexEntry],
+) -> rusqlite::Result<()> {
+    for entry in entries {
+        let Some((day_start_utc_ms, occurred_at_utc_ms)) = retained_activity(entry) else {
+            continue;
+        };
+        transaction.execute(
+            "INSERT INTO ntfs_activity_events(volume_id,file_reference_number,day_start_utc_ms,occurred_at_utc_ms) VALUES (?1,?2,?3,?4) ON CONFLICT(volume_id,file_reference_number,day_start_utc_ms) DO UPDATE SET occurred_at_utc_ms = MAX(occurred_at_utc_ms, excluded.occurred_at_utc_ms)",
+            params![
+                volume_id,
+                entry.file_reference_number,
+                day_start_utc_ms,
+                occurred_at_utc_ms,
+            ],
+        )?;
+    }
+    let cutoff = Local::now()
+        .date_naive()
+        .checked_sub_days(chrono::Days::new(ACTIVITY_RETENTION_DAYS as u64))
+        .and_then(local_day_start_utc_ms)
+        .unwrap_or(i64::MIN);
+    transaction.execute(
+        "DELETE FROM ntfs_activity_events WHERE day_start_utc_ms < ?1",
+        [cutoff],
+    )?;
+    Ok(())
+}
+
+fn record_rebuild_activity_events(
+    transaction: &Transaction<'_>,
+    build_id: &str,
+    volume_id: i64,
+    entries: &[crate::ntfs::IndexEntry],
+) -> rusqlite::Result<()> {
+    for entry in entries {
+        let Some((day_start_utc_ms, occurred_at_utc_ms)) = retained_activity(entry) else {
+            continue;
+        };
+        transaction.execute(
+            "INSERT INTO ntfs_rebuild_activity_events(build_id,volume_id,file_reference_number,day_start_utc_ms,occurred_at_utc_ms) VALUES (?1,?2,?3,?4,?5) ON CONFLICT(build_id,file_reference_number,day_start_utc_ms) DO UPDATE SET occurred_at_utc_ms = MAX(occurred_at_utc_ms, excluded.occurred_at_utc_ms)",
+            params![
+                build_id,
+                volume_id,
+                entry.file_reference_number,
+                day_start_utc_ms,
+                occurred_at_utc_ms,
+            ],
+        )?;
+    }
+    Ok(())
+}
+
+fn retained_activity(entry: &crate::ntfs::IndexEntry) -> Option<(i64, i64)> {
+    if entry.is_directory || entry.deleted_at_utc_ms.is_some() {
+        return None;
+    }
+    let occurred_at_utc_ms = entry.modified_at_utc_ms?;
+    let now = Utc::now().timestamp_millis();
+    let earliest = now - ACTIVITY_RETENTION_DAYS * 24 * 60 * 60 * 1_000;
+    if occurred_at_utc_ms < earliest {
+        return None;
+    }
+    let occurred = chrono::DateTime::from_timestamp_millis(occurred_at_utc_ms)?;
+    let day_start = local_day_start_utc_ms(occurred.with_timezone(&Local).date_naive())?;
+    Some((day_start, occurred_at_utc_ms))
+}
+
+fn local_day_start_utc_ms(day: chrono::NaiveDate) -> Option<i64> {
+    Local
+        .with_ymd_and_hms(day.year(), day.month(), day.day(), 0, 0, 0)
+        .earliest()
+        .map(|value| value.timestamp_millis())
 }

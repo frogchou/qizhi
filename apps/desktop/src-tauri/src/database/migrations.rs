@@ -18,6 +18,22 @@ pub fn apply(connection: &Connection) -> Result<()> {
             5,
             include_str!("../../migrations/0005_ntfs_caller_policy_filters.sql"),
         ),
+        (
+            6,
+            include_str!("../../migrations/0006_file_value_assessments.sql"),
+        ),
+        (
+            7,
+            include_str!("../../migrations/0007_jev_value_policy_and_indexer_restart.sql"),
+        ),
+        (8, include_str!("../../migrations/0008_summary_prompts.sql")),
+        (9, include_str!("../../migrations/0009_summary_model.sql")),
+        (
+            10,
+            include_str!("../../migrations/0010_ntfs_activity_history.sql"),
+        ),
+        (11, include_str!("../../migrations/0011_codex_projects.sql")),
+        (12, include_str!("../../migrations/0012_codex_handoffs.sql")),
     ] {
         let applied = connection.query_row(
             "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version = ?1)",

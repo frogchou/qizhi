@@ -48,11 +48,25 @@ impl ScanPolicy {
         if !canonical.0.is_file() {
             return false;
         }
+        self.is_within_allowed_roots(&canonical.0)
+    }
+
+    pub fn is_allowed_directory(&self, path: &Path) -> bool {
+        let Ok(canonical) = self.validate_root(path) else {
+            return false;
+        };
+        if !canonical.0.is_dir() {
+            return false;
+        }
+        self.is_within_allowed_roots(&canonical.0)
+    }
+
+    fn is_within_allowed_roots(&self, canonical: &Path) -> bool {
         !self.requires_allowed_root
             || self
                 .allowed_roots
                 .iter()
-                .any(|root| canonical.0.starts_with(&root.0))
+                .any(|root| canonical.starts_with(&root.0))
     }
 
     /// Applies the same privacy and scan-root boundary to an already stored

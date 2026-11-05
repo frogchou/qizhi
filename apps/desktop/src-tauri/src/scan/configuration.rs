@@ -27,6 +27,19 @@ pub struct ScanRules {
     pub custom_exclusions: Vec<String>,
     #[serde(default = "default_file_categories")]
     pub file_categories: Vec<FileCategory>,
+    #[serde(default = "default_directory_group_threshold")]
+    pub directory_group_threshold: u16,
+}
+
+pub const fn default_directory_group_threshold() -> u16 {
+    5
+}
+
+pub fn validate_directory_group_threshold(value: u16) -> Result<u16, AppError> {
+    (2..=100)
+        .contains(&value)
+        .then_some(value)
+        .ok_or(AppError::InvalidConfig)
 }
 
 impl Default for ScanRules {
@@ -35,6 +48,7 @@ impl Default for ScanRules {
             allowed_roots: vec![],
             custom_exclusions: vec![],
             file_categories: default_file_categories(),
+            directory_group_threshold: default_directory_group_threshold(),
         }
     }
 }
@@ -115,6 +129,7 @@ impl ScanRuleStore {
             .map_err(|_| AppError::Storage)
     }
     pub fn save(&self, mut rules: ScanRules) -> Result<ScanRules, AppError> {
+        validate_directory_group_threshold(rules.directory_group_threshold)?;
         rules.normalize_user_paths();
         let text = serde_json::to_string(&rules).map_err(|_| AppError::Storage)?;
         fs::write(&self.path, text).map_err(|_| AppError::Storage)?;

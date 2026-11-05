@@ -1,0 +1,336 @@
+.codex-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  background: rgba(16, 38, 34, 0.32);
+  backdrop-filter: blur(3px);
+}
+
+.codex-project-dialog {
+  width: min(440px, calc(100vw - 40px));
+  display: grid;
+  grid-template-columns: 42px 1fr;
+  gap: 16px;
+  padding: 24px;
+  border: 1px solid #d9e5e0;
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 24px 70px rgba(13, 45, 38, 0.2);
+}
+
+.codex-destination-dialog {
+  width: min(680px, calc(100vw - 40px));
+  max-height: min(760px, calc(100vh - 40px));
+  overflow: auto;
+  padding: 0;
+  border: 1px solid #d9e5e0;
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 24px 70px rgba(13, 45, 38, 0.2);
+}
+
+.codex-destination-dialog > header {
+  display: grid;
+  grid-template-columns: 42px 1fr auto;
+  gap: 14px;
+  align-items: start;
+  padding: 22px 24px 18px;
+  border-bottom: 1px solid #e7efec;
+}
+
+.codex-destination-dialog header p,
+.codex-destination-dialog header h2,
+.codex-destination-dialog header span {
+  margin: 0;
+}
+.codex-destination-dialog header p {
+  color: #17705f;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+.codex-destination-dialog header h2 {
+  margin: 3px 0 4px;
+  font-size: 21px;
+  color: #173a34;
+}
+.codex-destination-dialog header span {
+  color: #71837e;
+  font-size: 13px;
+}
+.codex-dialog-close {
+  border: 0;
+  background: transparent;
+  color: #647873;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.codex-dialog-loading,
+.codex-dialog-error {
+  margin: 16px 24px 0;
+  padding: 11px 13px;
+  border-radius: 10px;
+  font-size: 13px;
+}
+.codex-dialog-loading {
+  background: #f2f7f5;
+  color: #58716b;
+}
+.codex-dialog-error {
+  background: #fff2ef;
+  color: #a14331;
+}
+
+.codex-handoff-preview {
+  margin: 18px 24px 0;
+  padding: 15px;
+  border: 1px solid #dce8e3;
+  border-radius: 12px;
+  background: #f8fbfa;
+}
+.codex-handoff-preview > strong {
+  color: #244841;
+}
+.codex-handoff-preview > span {
+  float: right;
+  color: #758782;
+  font-size: 12px;
+}
+.codex-handoff-preview ul {
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.codex-handoff-preview li {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 6px 0;
+  border-top: 1px solid #e5eeeb;
+}
+.codex-handoff-preview li span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #284a43;
+  font-size: 13px;
+}
+.codex-handoff-preview li small,
+.codex-handoff-preview > small {
+  color: #7d8d88;
+}
+.codex-preview-blocked {
+  margin-top: 8px;
+  color: #a14331;
+  font-size: 12px;
+}
+
+.codex-destination-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+  padding: 18px 24px 4px;
+}
+.codex-destination-fields label,
+.codex-inline-create label {
+  display: grid;
+  gap: 6px;
+  color: #34554e;
+  font-size: 12px;
+  font-weight: 650;
+}
+.codex-inline-create input,
+.codex-inline-create textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #d3e1db;
+  border-radius: 9px;
+  padding: 10px 11px;
+  outline: 0;
+  background: #fff;
+  color: #193e36;
+  font: inherit;
+}
+.codex-inline-create input:focus,
+.codex-inline-create textarea:focus {
+  border-color: #69a99b;
+  box-shadow: 0 0 0 3px rgba(69, 144, 127, 0.12);
+}
+.codex-select-control {
+  position: relative;
+  display: block;
+  min-width: 0;
+}
+.codex-select-control select {
+  width: 100%;
+  height: 40px;
+  box-sizing: border-box;
+  appearance: none;
+  border: 1px solid #cfded8;
+  border-radius: 10px;
+  padding: 0 40px 0 12px;
+  outline: 0;
+  background: linear-gradient(180deg, #fff 0%, #fbfdfc 100%);
+  color: #183e36;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 550;
+  cursor: pointer;
+  transition:
+    border-color 0.16s ease,
+    box-shadow 0.16s ease,
+    background 0.16s ease;
+}
+.codex-select-control select:hover {
+  border-color: #a9c5bc;
+  background: #fff;
+}
+.codex-select-control select:focus-visible {
+  border-color: #4f9988;
+  box-shadow: 0 0 0 3px rgba(69, 144, 127, 0.14);
+}
+.codex-select-control svg {
+  position: absolute;
+  top: 50%;
+  right: 13px;
+  width: 16px;
+  height: 16px;
+  pointer-events: none;
+  transform: translateY(-50%);
+  fill: none;
+  stroke: #4d6e66;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+.codex-destination-fields button,
+.codex-inline-create button {
+  height: 38px;
+  border: 1px solid #d3dfda;
+  border-radius: 9px;
+  padding: 0 13px;
+  background: #fff;
+  color: #38544e;
+}
+
+.codex-confirm-row {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  margin: 12px 24px 0;
+  color: #536b65;
+  font-size: 12px;
+}
+.codex-confirm-row input {
+  accent-color: #176f5e;
+}
+.codex-inline-create {
+  margin: 16px 24px 0;
+  padding: 16px;
+  display: grid;
+  gap: 12px;
+  border: 1px solid #dce8e3;
+  border-radius: 12px;
+  background: #fbfdfc;
+}
+.codex-inline-create textarea {
+  min-height: 62px;
+  resize: vertical;
+}
+.codex-inline-create > div {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.codex-inline-create button.primary {
+  border-color: #176f5e;
+  background: #176f5e;
+  color: #fff;
+}
+.codex-destination-dialog > .codex-dialog-actions {
+  padding: 18px 24px 22px;
+}
+
+.codex-dialog-icon {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  color: #fff;
+  background: #176f5e;
+}
+
+.codex-project-dialog p {
+  margin: 0;
+  color: #17705f;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+}
+.codex-project-dialog h2 {
+  margin: 2px 0 4px;
+  font-size: 21px;
+}
+.codex-project-dialog span {
+  color: #758782;
+  font-size: 12px;
+}
+.codex-project-dialog label {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.codex-project-dialog input,
+.codex-project-dialog textarea {
+  border: 1px solid #d3e1db;
+  border-radius: 9px;
+  padding: 10px 11px;
+  outline: 0;
+  font: inherit;
+}
+.codex-project-dialog input:focus,
+.codex-project-dialog textarea:focus {
+  border-color: #69a99b;
+  box-shadow: 0 0 0 3px rgba(69, 144, 127, 0.12);
+}
+.codex-project-dialog textarea {
+  min-height: 78px;
+  resize: vertical;
+}
+.codex-dialog-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.codex-dialog-actions button {
+  border: 1px solid #d3dfda;
+  border-radius: 9px;
+  padding: 8px 14px;
+  background: #fff;
+  color: #38544e;
+}
+.codex-dialog-actions button.primary {
+  border-color: #176f5e;
+  background: #176f5e;
+  color: #fff;
+}
+.codex-dialog-actions button.danger {
+  border-color: #c45f50;
+  background: #b94f40;
+  color: #fff;
+}
+.codex-delete-dialog .codex-dialog-icon {
+  background: #b45647;
+}
+.codex-dialog-actions button:disabled {
+  opacity: 0.45;
+}

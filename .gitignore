@@ -1,8 +1,10 @@
 /.worktrees/
 /.superpowers/
 node_modules/
+.pnpm-store/
 dist/
 target/
+coverage/
 test-results/
 playwright-report/
 .env*
@@ -10,3 +12,5 @@ playwright-report/
 *.sqlite
 *.log
 credential-export*/
+*.tmp
+Thumbs.db

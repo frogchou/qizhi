@@ -12,6 +12,7 @@ pub struct IndexerFileCandidate {
 pub const INDEXER_PIPE_NAME: &str = r"\\.\pipe\qizhi-ntfs-indexer-v1";
 pub const INDEXER_PROTOCOL_VERSION: u16 = 1;
 pub const MAX_IPC_MESSAGE_BYTES: usize = 64 * 1024;
+pub const MAX_IPC_RESPONSE_BYTES: usize = 32 * 1024 * 1024;
 const MAX_SCAN_ROOTS: usize = 64;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

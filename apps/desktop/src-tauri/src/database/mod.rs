@@ -64,6 +64,18 @@ impl Database {
     pub fn configs(&self) -> repositories::ConfigRepository {
         repositories::ConfigRepository::new(self.clone())
     }
+    pub fn value_assessments(&self) -> repositories::ValueAssessmentRepository {
+        repositories::ValueAssessmentRepository::new(self.clone())
+    }
+    pub fn jev_value_policy(&self) -> repositories::JevValuePolicyRepository {
+        repositories::JevValuePolicyRepository::new(self.clone())
+    }
+    pub fn summary_settings(&self) -> repositories::SummarySettingsRepository {
+        repositories::SummarySettingsRepository::new(self.clone())
+    }
+    pub fn codex(&self) -> repositories::CodexRepository {
+        repositories::CodexRepository::new(self.clone())
+    }
 
     pub fn debug_values(&self) -> Result<String, AppError> {
         self.with_connection(|connection| {

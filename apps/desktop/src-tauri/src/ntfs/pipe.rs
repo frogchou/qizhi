@@ -1,6 +1,6 @@
 use crate::ntfs::ipc::{
     INDEXER_PIPE_NAME, INDEXER_PROTOCOL_VERSION, IndexerRequest, IndexerRequestKind,
-    IndexerResponse, MAX_IPC_MESSAGE_BYTES,
+    IndexerResponse, MAX_IPC_MESSAGE_BYTES, MAX_IPC_RESPONSE_BYTES,
 };
 
 // `0x12019b` is the exact pipe-client access mask: read/write data, the
@@ -65,7 +65,26 @@ pub fn serve_controlled_pipe_until_stopped(
 #[cfg(windows)]
 fn serve_pipe_until_stopped(
     stopped: &std::sync::atomic::AtomicBool,
-    handle_request: impl Fn(&str, &[u8]) -> Vec<u8>,
+    handle_request: impl Fn(&str, &[u8]) -> Vec<u8> + Send + Sync + 'static,
+) -> Result<(), String> {
+    serve_pipe_named_until_stopped(INDEXER_PIPE_NAME, stopped, handle_request)
+}
+
+#[cfg(windows)]
+fn serve_pipe_named_until_stopped(
+    pipe_name: &str,
+    stopped: &std::sync::atomic::AtomicBool,
+    handle_request: impl Fn(&str, &[u8]) -> Vec<u8> + Send + Sync + 'static,
+) -> Result<(), String> {
+    serve_pipe_named_with_sddl_until_stopped(pipe_name, INDEXER_PIPE_SDDL, stopped, handle_request)
+}
+
+#[cfg(windows)]
+fn serve_pipe_named_with_sddl_until_stopped(
+    pipe_name: &str,
+    pipe_sddl: &str,
+    stopped: &std::sync::atomic::AtomicBool,
+    handle_request: impl Fn(&str, &[u8]) -> Vec<u8> + Send + Sync + 'static,
 ) -> Result<(), String> {
     use std::sync::atomic::Ordering;
     use windows_sys::Win32::{
@@ -74,17 +93,20 @@ fn serve_pipe_until_stopped(
             Authorization::ConvertStringSecurityDescriptorToSecurityDescriptorW,
             SECURITY_ATTRIBUTES,
         },
-        Storage::FileSystem::{FILE_FLAGS_AND_ATTRIBUTES, PIPE_ACCESS_DUPLEX, ReadFile, WriteFile},
+        Storage::FileSystem::{
+            FILE_FLAGS_AND_ATTRIBUTES, FlushFileBuffers, PIPE_ACCESS_DUPLEX, ReadFile, WriteFile,
+        },
         System::Pipes::{
             ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, PIPE_READMODE_MESSAGE,
-            PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_MESSAGE, PIPE_WAIT,
+            PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_MESSAGE, PIPE_UNLIMITED_INSTANCES, PIPE_WAIT,
         },
     };
 
+    let handle_request = std::sync::Arc::new(handle_request);
     while !stopped.load(Ordering::SeqCst) {
         let mut descriptor = std::ptr::null_mut();
         let mut descriptor_size = 0_u32;
-        let mut sddl = INDEXER_PIPE_SDDL
+        let mut sddl = pipe_sddl
             .encode_utf16()
             .chain(std::iter::once(0))
             .collect::<Vec<_>>();
@@ -105,7 +127,7 @@ fn serve_pipe_until_stopped(
             lpSecurityDescriptor: descriptor,
             bInheritHandle: 0,
         };
-        let mut name = INDEXER_PIPE_NAME
+        let mut name = pipe_name
             .encode_utf16()
             .chain(std::iter::once(0))
             .collect::<Vec<_>>();
@@ -114,7 +136,7 @@ fn serve_pipe_until_stopped(
                 name.as_mut_ptr(),
                 PIPE_ACCESS_DUPLEX as FILE_FLAGS_AND_ATTRIBUTES,
                 PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
-                1,
+                PIPE_UNLIMITED_INSTANCES,
                 MAX_IPC_MESSAGE_BYTES as u32,
                 MAX_IPC_MESSAGE_BYTES as u32,
                 1_000,
@@ -137,38 +159,54 @@ fn serve_pipe_until_stopped(
             }
             return Err(last_pipe_error("本地索引服务管道连接失败"));
         }
-        let mut input = vec![0_u8; MAX_IPC_MESSAGE_BYTES];
-        let mut read = 0_u32;
-        let received = unsafe {
-            ReadFile(
-                handle,
-                input.as_mut_ptr(),
-                input.len() as u32,
-                &mut read,
-                std::ptr::null_mut(),
-            )
-        };
-        if received != 0 {
-            let output = match authenticated_client_sid(handle) {
-                Ok(caller_sid) => handle_request(&caller_sid, &input[..read as usize]),
-                Err(message) => serde_json::to_vec(&error_response(String::new(), &message))
-                    .unwrap_or_else(|_| b"{}".to_vec()),
-            };
-            let mut written = 0_u32;
-            unsafe {
-                let _ = WriteFile(
+        // Process the connected client independently and immediately create
+        // the next pipe instance. A full NTFS synchronization may take tens
+        // of seconds, but health and list requests must remain available.
+        let connected_handle = handle as usize;
+        let handle_request = handle_request.clone();
+        std::thread::spawn(move || {
+            let handle = connected_handle as windows_sys::Win32::Foundation::HANDLE;
+            let mut input = vec![0_u8; MAX_IPC_MESSAGE_BYTES];
+            let mut read = 0_u32;
+            let received = unsafe {
+                ReadFile(
                     handle,
-                    output.as_ptr(),
-                    output.len() as u32,
-                    &mut written,
+                    input.as_mut_ptr(),
+                    input.len() as u32,
+                    &mut read,
                     std::ptr::null_mut(),
-                );
+                )
+            };
+            if received != 0 {
+                let output = match authenticated_client_sid(handle) {
+                    Ok(caller_sid) => handle_request(&caller_sid, &input[..read as usize]),
+                    Err(message) => serde_json::to_vec(&error_response(String::new(), &message))
+                        .unwrap_or_else(|_| b"{}".to_vec()),
+                };
+                let mut written = 0_u32;
+                let wrote = unsafe {
+                    WriteFile(
+                        handle,
+                        output.as_ptr(),
+                        output.len() as u32,
+                        &mut written,
+                        std::ptr::null_mut(),
+                    )
+                };
+                if wrote != 0 && written == output.len() as u32 {
+                    unsafe {
+                        // A message can span multiple client reads. Wait until
+                        // the client consumes it before disconnecting so the
+                        // unread tail is not discarded by DisconnectNamedPipe.
+                        let _ = FlushFileBuffers(handle);
+                    }
+                }
             }
-        }
-        unsafe {
-            let _ = DisconnectNamedPipe(handle);
-            let _ = CloseHandle(handle);
-        }
+            unsafe {
+                let _ = DisconnectNamedPipe(handle);
+                let _ = CloseHandle(handle);
+            }
+        });
     }
     Ok(())
 }
@@ -268,23 +306,32 @@ fn error_response(request_id: String, message: &str) -> IndexerResponse {
 
 #[cfg(windows)]
 pub fn call_indexer_service(request: &IndexerRequest) -> Result<IndexerResponse, String> {
+    call_indexer_service_at(INDEXER_PIPE_NAME, request)
+}
+
+#[cfg(windows)]
+fn call_indexer_service_at(
+    pipe_name_value: &str,
+    request: &IndexerRequest,
+) -> Result<IndexerResponse, String> {
     use windows_sys::Win32::{
-        Foundation::{CloseHandle, GetLastError, INVALID_HANDLE_VALUE},
+        Foundation::{CloseHandle, ERROR_MORE_DATA, GetLastError, INVALID_HANDLE_VALUE},
         Storage::FileSystem::{
-            CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_READ_DATA, FILE_WRITE_DATA, OPEN_EXISTING,
-            ReadFile, SYNCHRONIZE, WriteFile,
+            CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_READ_DATA, FILE_WRITE_ATTRIBUTES,
+            FILE_WRITE_DATA, OPEN_EXISTING, ReadFile, SYNCHRONIZE, WriteFile,
         },
+        System::Pipes::{PIPE_READMODE_MESSAGE, SetNamedPipeHandleState},
     };
 
     let encoded = serde_json::to_vec(request).map_err(|_| "本地索引请求无法编码".to_owned())?;
     if encoded.len() > MAX_IPC_MESSAGE_BYTES {
         return Err("本地索引请求超过大小限制".to_owned());
     }
-    let pipe_name = INDEXER_PIPE_NAME
+    let pipe_name = pipe_name_value
         .encode_utf16()
         .chain(std::iter::once(0))
         .collect::<Vec<_>>();
-    let access = FILE_READ_DATA | FILE_WRITE_DATA | SYNCHRONIZE;
+    let access = FILE_READ_DATA | FILE_WRITE_DATA | FILE_WRITE_ATTRIBUTES | SYNCHRONIZE;
     let mut last_connect_error = 0_u32;
     let mut handle = INVALID_HANDLE_VALUE;
     for attempt in 0..60 {
@@ -315,6 +362,18 @@ pub fn call_indexer_service(request: &IndexerRequest) -> Result<IndexerResponse,
             last_connect_error
         ));
     }
+    let read_mode = PIPE_READMODE_MESSAGE;
+    if unsafe { SetNamedPipeHandleState(handle, &read_mode, std::ptr::null(), std::ptr::null()) }
+        == 0
+    {
+        let error = unsafe { GetLastError() };
+        unsafe {
+            let _ = CloseHandle(handle);
+        }
+        return Err(format!(
+            "无法设置本地索引服务读取模式（Windows 错误 {error}）"
+        ));
+    }
     let mut written = 0_u32;
     let wrote = unsafe {
         WriteFile(
@@ -334,28 +393,45 @@ pub fn call_indexer_service(request: &IndexerRequest) -> Result<IndexerResponse,
             unsafe { GetLastError() }
         ));
     }
-    let mut response = vec![0_u8; MAX_IPC_MESSAGE_BYTES];
-    let mut read = 0_u32;
-    let received = unsafe {
-        ReadFile(
-            handle,
-            response.as_mut_ptr().cast(),
-            response.len() as u32,
-            &mut read,
-            std::ptr::null_mut(),
-        )
-    };
+    let mut response = Vec::with_capacity(MAX_IPC_MESSAGE_BYTES);
+    loop {
+        let mut chunk = vec![0_u8; MAX_IPC_MESSAGE_BYTES];
+        let mut read = 0_u32;
+        let received = unsafe {
+            ReadFile(
+                handle,
+                chunk.as_mut_ptr().cast(),
+                chunk.len() as u32,
+                &mut read,
+                std::ptr::null_mut(),
+            )
+        };
+        let error = if received == 0 {
+            unsafe { GetLastError() }
+        } else {
+            0
+        };
+        if response.len().saturating_add(read as usize) > MAX_IPC_RESPONSE_BYTES {
+            unsafe {
+                let _ = CloseHandle(handle);
+            }
+            return Err("本地索引服务返回的数据超过安全限制".to_owned());
+        }
+        response.extend_from_slice(&chunk[..read as usize]);
+        if received != 0 {
+            break;
+        }
+        if error != ERROR_MORE_DATA {
+            unsafe {
+                let _ = CloseHandle(handle);
+            }
+            return Err(format!("本地索引服务不可用（Windows 错误 {error}）"));
+        }
+    }
     unsafe {
         let _ = CloseHandle(handle);
     }
-    if received == 0 {
-        return Err(format!(
-            "本地索引服务不可用（Windows 错误 {}）",
-            unsafe { GetLastError() }
-        ));
-    }
-    serde_json::from_slice(&response[..read as usize])
-        .map_err(|_| "本地索引服务返回了无效数据".to_owned())
+    serde_json::from_slice(&response).map_err(|_| "本地索引服务返回了无效数据".to_owned())
 }
 
 #[cfg(windows)]
@@ -371,6 +447,211 @@ pub fn call_indexer_service(_: &IndexerRequest) -> Result<IndexerResponse, Strin
 
 #[cfg(test)]
 mod tests {
+    #[cfg(windows)]
+    #[test]
+    fn reads_a_complete_response_larger_than_one_pipe_buffer() {
+        use crate::ntfs::ipc::{
+            INDEXER_PROTOCOL_VERSION, IndexerFileCandidate, IndexerRequest, IndexerRequestKind,
+            IndexerResponse, MAX_IPC_MESSAGE_BYTES,
+        };
+        use std::{
+            sync::{
+                Arc,
+                atomic::{AtomicBool, Ordering},
+            },
+            time::{SystemTime, UNIX_EPOCH},
+        };
+
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let pipe_name = format!(
+            r"\\.\pipe\QizhiNtfsIndexer-large-response-{}-{nonce}",
+            std::process::id()
+        );
+        let candidates = (0..700)
+            .map(|index| IndexerFileCandidate {
+                file_reference_number: format!("{index}"),
+                canonical_path: format!(
+                    r"D:\工作\{:04}-{}.docx",
+                    index,
+                    "long-file-name".repeat(6)
+                ),
+                modified_at_utc_ms: 1_793_189_400_000 + index,
+                size_bytes: Some(1_024 + index),
+            })
+            .collect::<Vec<_>>();
+        let encoded = serde_json::to_vec(&IndexerResponse {
+            protocol_version: INDEXER_PROTOCOL_VERSION,
+            request_id: "large".to_owned(),
+            status: "ready".to_owned(),
+            message: None,
+            candidates: candidates.clone(),
+        })
+        .expect("large response encodes");
+        assert!(encoded.len() > MAX_IPC_MESSAGE_BYTES);
+
+        let stopped = Arc::new(AtomicBool::new(false));
+        let server_pipe = pipe_name.clone();
+        let server_stopped = stopped.clone();
+        let server_candidates = candidates.clone();
+        let server = std::thread::spawn(move || {
+            super::serve_pipe_named_with_sddl_until_stopped(
+                &server_pipe,
+                "D:P(A;;GA;;;WD)",
+                &server_stopped,
+                move |_, message| {
+                    let request =
+                        serde_json::from_slice::<IndexerRequest>(message).expect("request decodes");
+                    serde_json::to_vec(&IndexerResponse {
+                        protocol_version: INDEXER_PROTOCOL_VERSION,
+                        request_id: request.request_id,
+                        status: "ready".to_owned(),
+                        message: None,
+                        candidates: server_candidates.clone(),
+                    })
+                    .expect("response encodes")
+                },
+            )
+        });
+
+        let response = super::call_indexer_service_at(
+            &pipe_name,
+            &IndexerRequest {
+                protocol_version: INDEXER_PROTOCOL_VERSION,
+                request_id: "large".to_owned(),
+                kind: IndexerRequestKind::ListToday {
+                    start_utc_ms: 1,
+                    end_utc_ms: 2,
+                },
+            },
+        );
+
+        stopped.store(true, Ordering::SeqCst);
+        drop(server);
+        let response = response.expect("the complete response is decoded");
+        assert_eq!(response.request_id, "large");
+        assert_eq!(response.candidates.len(), 700);
+        assert_eq!(response.candidates[699], candidates[699]);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_slow_index_request_does_not_block_a_second_pipe_client() {
+        use crate::ntfs::ipc::{INDEXER_PROTOCOL_VERSION, IndexerRequest, IndexerRequestKind};
+        use std::{
+            sync::{
+                Arc, Condvar, Mutex,
+                atomic::{AtomicBool, Ordering},
+                mpsc,
+            },
+            time::{Duration, SystemTime, UNIX_EPOCH},
+        };
+
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let pipe_name = format!(
+            r"\\.\pipe\QizhiNtfsIndexer-test-{}-{nonce}",
+            std::process::id()
+        );
+        let stopped = Arc::new(AtomicBool::new(false));
+        let entered = Arc::new((Mutex::new(false), Condvar::new()));
+        let release = Arc::new((Mutex::new(false), Condvar::new()));
+
+        let server_pipe = pipe_name.clone();
+        let server_stopped = stopped.clone();
+        let server_entered = entered.clone();
+        let server_release = release.clone();
+        let server = std::thread::spawn(move || {
+            let result = super::serve_pipe_named_with_sddl_until_stopped(
+                &server_pipe,
+                "D:P(A;;GA;;;WD)",
+                &server_stopped,
+                move |_, message| {
+                    let request =
+                        serde_json::from_slice::<IndexerRequest>(message).expect("request decodes");
+                    if request.request_id == "slow" {
+                        let (lock, changed) = &*server_entered;
+                        *lock.lock().expect("entered lock") = true;
+                        changed.notify_all();
+
+                        let (lock, changed) = &*server_release;
+                        let released = lock.lock().expect("release lock");
+                        drop(
+                            changed
+                                .wait_while(released, |released| !*released)
+                                .expect("release wait"),
+                        );
+                    }
+                    super::handle_request_bytes(message)
+                },
+            );
+            result
+        });
+
+        let slow_pipe = pipe_name.clone();
+        let slow = std::thread::spawn(move || {
+            super::call_indexer_service_at(
+                &slow_pipe,
+                &IndexerRequest {
+                    protocol_version: INDEXER_PROTOCOL_VERSION,
+                    request_id: "slow".to_owned(),
+                    kind: IndexerRequestKind::Health,
+                },
+            )
+        });
+
+        let (lock, changed) = &*entered;
+        let entered_guard = lock.lock().expect("entered lock");
+        let (entered_guard, _) = changed
+            .wait_timeout_while(entered_guard, Duration::from_secs(3), |entered| !*entered)
+            .expect("entered wait");
+        let slow_entered = *entered_guard;
+        drop(entered_guard);
+
+        let (fast_finished_tx, fast_finished_rx) = mpsc::channel();
+        let fast_pipe = pipe_name.clone();
+        let fast = std::thread::spawn(move || {
+            let response = super::call_indexer_service_at(
+                &fast_pipe,
+                &IndexerRequest {
+                    protocol_version: INDEXER_PROTOCOL_VERSION,
+                    request_id: "fast".to_owned(),
+                    kind: IndexerRequestKind::Health,
+                },
+            );
+            let _ = fast_finished_tx.send(());
+            response
+        });
+        let fast_completed_while_slow_was_running = fast_finished_rx
+            .recv_timeout(Duration::from_millis(750))
+            .is_ok();
+
+        let (lock, changed) = &*release;
+        *lock.lock().expect("release lock") = true;
+        changed.notify_all();
+        let slow_response = slow.join().expect("slow client joins");
+        let fast_response = fast.join().expect("fast client joins");
+
+        stopped.store(true, Ordering::SeqCst);
+        // The production service owns the blocking accept loop for the
+        // lifetime of its process. This unique test pipe is reclaimed when
+        // the test process exits, so detaching avoids inventing a test-only
+        // shutdown API.
+        drop(server);
+
+        assert!(slow_entered, "the slow request must reach the real server");
+        assert_eq!(slow_response.expect("slow response").status, "ready");
+        assert_eq!(fast_response.expect("fast response").status, "ready");
+        assert!(
+            fast_completed_while_slow_was_running,
+            "a long index request must not monopolize the only pipe instance"
+        );
+    }
+
     #[cfg(windows)]
     #[test]
     fn pipe_acl_grants_only_the_documented_client_rights() {

@@ -47,11 +47,18 @@ impl FileTypeFilter {
 /// have a defined downstream extraction path. Media, executables, archives,
 /// and unknown binaries remain outside the work discovery surface.
 const DOCUMENT_EXTENSIONS: &[&str] = &[
-    "txt", "md", "markdown", "csv", "tsv", "json", "yaml", "yml", "toml", "xml", "html", "htm",
-    "pdf", "doc", "docx", "odt", "rtf", "xls", "xlsx", "ods", "ppt", "pptx", "odp",
+    "txt", "md", "markdown", "csv", "tsv", "pdf", "doc", "docx", "odt", "rtf", "xls", "xlsx",
+    "ods", "ppt", "pptx", "odp",
 ];
 
 const SOURCE_CODE_EXTENSIONS: &[&str] = &[
+    "json",
+    "yaml",
+    "yml",
+    "toml",
+    "xml",
+    "html",
+    "htm",
     "rs",
     "py",
     "js",
@@ -87,3 +94,43 @@ const SOURCE_CODE_EXTENSIONS: &[&str] = &[
     "gradle",
     "groovy",
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::{FileCategory, FileTypeFilter};
+    use std::path::Path;
+
+    #[test]
+    fn documents_include_office_and_text_but_exclude_code_and_configuration() {
+        let filter = FileTypeFilter::new(vec![FileCategory::Documents]);
+
+        for path in [
+            "report.docx",
+            "sheet.xlsx",
+            "slides.pptx",
+            "note.txt",
+            "readme.md",
+        ] {
+            assert!(
+                filter.allows(Path::new(path)),
+                "{path} should be a document"
+            );
+        }
+        for path in ["package.json", "settings.toml", "main.rs", "report.py"] {
+            assert!(!filter.allows(Path::new(path)), "{path} is not a document");
+        }
+    }
+
+    #[test]
+    fn source_code_includes_configuration_and_programming_files() {
+        let filter = FileTypeFilter::new(vec![FileCategory::SourceCode]);
+
+        for path in ["package.json", "settings.toml", "main.rs", "report.py"] {
+            assert!(
+                filter.allows(Path::new(path)),
+                "{path} should be source code"
+            );
+        }
+        assert!(!filter.allows(Path::new("report.docx")));
+    }
+}

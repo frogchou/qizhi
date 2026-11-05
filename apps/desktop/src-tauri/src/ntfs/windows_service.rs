@@ -229,9 +229,9 @@ fn install_service() -> Result<(), String> {
     use windows_sys::Win32::System::Services::{
         ChangeServiceConfig2W, ChangeServiceConfigW, CloseServiceHandle, CreateServiceW,
         OpenSCManagerW, OpenServiceW, SC_MANAGER_CONNECT, SC_MANAGER_CREATE_SERVICE,
-        SERVICE_ALL_ACCESS, SERVICE_CONFIG_SERVICE_SID_INFO, SERVICE_DEMAND_START,
+        SERVICE_ALL_ACCESS, SERVICE_AUTO_START, SERVICE_CONFIG_SERVICE_SID_INFO,
         SERVICE_ERROR_NORMAL, SERVICE_SID_INFO, SERVICE_SID_TYPE_UNRESTRICTED,
-        SERVICE_WIN32_OWN_PROCESS, StartServiceW,
+        SERVICE_WIN32_OWN_PROCESS,
     };
 
     let manager = unsafe {
@@ -256,7 +256,7 @@ fn install_service() -> Result<(), String> {
             display_name.as_mut_ptr(),
             SERVICE_ALL_ACCESS,
             SERVICE_WIN32_OWN_PROCESS,
-            SERVICE_DEMAND_START,
+            SERVICE_AUTO_START,
             SERVICE_ERROR_NORMAL,
             binary_path.as_mut_ptr(),
             std::ptr::null(),
@@ -278,7 +278,7 @@ fn install_service() -> Result<(), String> {
             ChangeServiceConfigW(
                 service,
                 SERVICE_WIN32_OWN_PROCESS,
-                SERVICE_DEMAND_START,
+                SERVICE_AUTO_START,
                 SERVICE_ERROR_NORMAL,
                 binary_path.as_mut_ptr(),
                 std::ptr::null(),
@@ -314,15 +314,74 @@ fn install_service() -> Result<(), String> {
         }
         return Err(last_error("无法配置本地索引服务身份"));
     }
-    let started = unsafe { StartServiceW(service, 0, std::ptr::null()) };
-    let start_error =
-        (started == 0).then(|| unsafe { windows_sys::Win32::Foundation::GetLastError() });
+    // The installer may have replaced the executable while the previous
+    // service process is still alive. Always perform a controlled restart so
+    // migrations and the new indexer code actually take effect on upgrade.
+    let restart_result = restart_service(service);
     unsafe {
         let _ = CloseServiceHandle(service);
         let _ = CloseServiceHandle(manager);
     }
-    if let Some(error) = start_error.filter(|error| *error != 1_056) {
-        return Err(format!("无法启动本地索引服务（Windows 错误 {error}）"));
+    restart_result
+}
+
+#[cfg(windows)]
+fn restart_service(service: *mut c_void) -> Result<(), String> {
+    use windows_sys::Win32::{
+        Foundation::GetLastError,
+        System::Services::{
+            ControlService, QueryServiceStatusEx, SC_STATUS_PROCESS_INFO, SERVICE_CONTROL_STOP,
+            SERVICE_STATUS, SERVICE_STATUS_PROCESS, SERVICE_STOPPED, StartServiceW,
+        },
+    };
+
+    let mut status = SERVICE_STATUS::default();
+    let stopped = unsafe { ControlService(service, SERVICE_CONTROL_STOP, &mut status) };
+    if stopped == 0 {
+        let error = unsafe { GetLastError() };
+        // 1062 means the service was already stopped. 1061 is a short
+        // transition where it cannot accept another stop control yet; the
+        // status loop below still waits for the terminal state.
+        if error != 1_062 && error != 1_061 {
+            return Err(format!("无法停止旧版本地索引服务（Windows 错误 {error}）"));
+        }
+    }
+
+    let mut process_status = SERVICE_STATUS_PROCESS::default();
+    let mut bytes_needed = 0_u32;
+    let mut reached_stopped = false;
+    for _ in 0..100 {
+        let queried = unsafe {
+            QueryServiceStatusEx(
+                service,
+                SC_STATUS_PROCESS_INFO,
+                (&mut process_status as *mut SERVICE_STATUS_PROCESS).cast(),
+                std::mem::size_of::<SERVICE_STATUS_PROCESS>() as u32,
+                &mut bytes_needed,
+            )
+        };
+        if queried == 0 {
+            return Err(format!(
+                "无法读取本地索引服务状态（Windows 错误 {}）",
+                unsafe { GetLastError() }
+            ));
+        }
+        if process_status.dwCurrentState == SERVICE_STOPPED {
+            reached_stopped = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    if !reached_stopped {
+        return Err("等待旧版本地索引服务停止超时".to_owned());
+    }
+
+    let started = unsafe { StartServiceW(service, 0, std::ptr::null()) };
+    if started == 0 {
+        let error = unsafe { GetLastError() };
+        if error != 1_056 {
+            return Err(format!("无法启动本地索引服务（Windows 错误 {error}）"));
+        }
     }
     Ok(())
 }

@@ -119,6 +119,25 @@ impl<S: UsnVolumeSource> NtfsIndexer<S> {
                     .map_err(|error| error.to_string())
             })
             .map_err(IndexerError::Source)?;
+        // FSCTL_ENUM_USN_DATA intentionally returns zero timestamps for MFT
+        // enumeration records. Replay the retained journal from FirstUsn so
+        // the new index also contains the real timestamps needed by Today and
+        // Past, without recursively walking the filesystem.
+        let history_checkpoint = UsnCheckpoint {
+            usn_journal_id: journal.journal_id.clone(),
+            next_usn: journal.first_usn.clone(),
+            first_usn_seen: journal.first_usn.clone(),
+            record_major_version: journal.record_major_version,
+            last_successful_sync_at_utc_ms: Utc::now().timestamp_millis(),
+        };
+        self.source
+            .visit_replay_pages(&descriptor, &history_checkpoint, &mut |page| {
+                processed_records += page.entries.len();
+                next_usn = page.next_usn.clone();
+                self.stage_source_page(&volume, &build_id, &journal, page)
+                    .map_err(|error| error.to_string())
+            })
+            .map_err(IndexerError::Source)?;
         if processed_records == 0 {
             self.stage_source_page(
                 &volume,

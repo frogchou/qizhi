@@ -1,0 +1,66 @@
+.artifact-actions {
+  display: flex;
+  gap: 7px;
+  margin-top: 5px;
+}
+
+.artifact-actions button {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: #176f5e;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.codex-context-item:has(.material-remove) {
+  grid-template-columns: 30px minmax(0, 1fr) 22px;
+}
+
+.material-remove {
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 6px;
+  color: #7b8b87;
+  background: transparent;
+}
+
+.material-remove:hover {
+  color: #8f4039;
+  background: #f7e9e7;
+}
+
+.codex-artifact-upload-dialog select {
+  width: 100%;
+  border: 1px solid #ccd9d4;
+  border-radius: 8px;
+  background: #fff;
+  padding: 9px 10px;
+  color: #173432;
+}
+
+.codex-upload-check {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center;
+  gap: 8px;
+}
+
+.codex-upload-check input {
+  width: auto !important;
+}
+
+.codex-upload-error {
+  border-radius: 8px;
+  background: #fff4e7;
+  color: #98531f;
+  padding: 9px 11px;
+  font-size: 12px;
+}
+
+.codex-upload-history {
+  margin: 0;
+  color: #6b7f79;
+  font-size: 11px;
+}

@@ -11,7 +11,9 @@ use crate::{
         pipe::call_indexer_service,
     },
     scan::{
-        configuration::ScanRules,
+        configuration::{
+            ScanRules, default_directory_group_threshold, validate_directory_group_threshold,
+        },
         file_filter::{FileCategory, default_file_categories},
         policy::{ScanPolicy, active_roots, display_path},
     },
@@ -153,23 +155,42 @@ pub fn test_service_connection(input: SaveSettingsInput) -> ConnectionStatus {
         };
     };
     let base_path = base_url.path().trim_end_matches('/');
-    match input.service.as_str() {
-        "openai" => base_url.set_path(&format!("{base_path}/models")),
+    let (method, body) = match input.service.as_str() {
+        "openai" => {
+            base_url.set_path(&format!("{base_path}/models"));
+            (reqwest::Method::GET, None)
+        }
         "ragflow" => {
             base_url.set_path(&format!("{base_path}/api/v1/chats"));
             base_url.set_query(Some("page=1&page_size=1"));
+            (reqwest::Method::GET, None)
         }
-        "jev" => base_url.set_path(&format!("{base_path}/v1/models")),
+        "jev" => {
+            // Listing models alone is not enough: a proxy can permit GET
+            // requests while blocking the POST request used for JEV scoring.
+            base_url.set_path(&format!("{base_path}/v1/systemone"));
+            (
+                reqwest::Method::POST,
+                Some(
+                    serde_json::json!({
+                        "model": "jev-latest",
+                        "state": "JEV connection test",
+                        "questions": {
+                            "connection": {
+                                "type": "noul",
+                                "instructions": "Is this a JEV connection test?"
+                            }
+                        }
+                    })
+                    .to_string(),
+                ),
+            )
+        }
         _ => unreachable!("service validated above"),
-    }
-    match HttpClient::with_timeout(Duration::from_secs(10)).and_then(|client| {
-        client.request_bearer(
-            reqwest::Method::GET,
-            base_url.as_str(),
-            &input.api_key,
-            None,
-        )
-    }) {
+    };
+    match HttpClient::with_timeout(Duration::from_secs(10))
+        .and_then(|client| client.request_bearer(method, base_url.as_str(), &input.api_key, body))
+    {
         Ok(response) => {
             let status = response.status.to_string();
             if connection_is_usable(&input.service, &status, &response.body) {
@@ -185,13 +206,7 @@ pub fn test_service_connection(input: SaveSettingsInput) -> ConnectionStatus {
             }
             ConnectionStatus {
                 available: false,
-                message: format!(
-                    "连接未通过{}。",
-                    status
-                        .strip_prefix('0')
-                        .map(|code| format!("（HTTP {code}）"))
-                        .unwrap_or_default()
-                ),
+                message: connection_failure_message(&input.service, response.status),
             }
         }
         Err(message) => ConnectionStatus {
@@ -199,6 +214,13 @@ pub fn test_service_connection(input: SaveSettingsInput) -> ConnectionStatus {
             message,
         },
     }
+}
+
+fn connection_failure_message(service: &str, status: u16) -> String {
+    if service == "jev" && status == 451 {
+        return "JEV 价值评估请求被拒绝（HTTP 451）。请确认网络或代理允许访问 TypeSafe AI 的 /v1/systemone 接口。".to_owned();
+    }
+    format!("连接未通过（HTTP {status}）。")
 }
 
 fn connection_is_usable(service: &str, status: &str, body: &str) -> bool {
@@ -214,7 +236,9 @@ fn connection_is_usable(service: &str, status: &str, body: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{connection_is_usable, local_indexer_connection_status};
+    use super::{
+        connection_failure_message, connection_is_usable, local_indexer_connection_status,
+    };
     use crate::ntfs::ipc::{INDEXER_PROTOCOL_VERSION, IndexerResponse};
 
     #[test]
@@ -241,6 +265,14 @@ mod tests {
             "200",
             r#"{"code":0,"message":"success","data":[]}"#,
         ));
+    }
+
+    #[test]
+    fn explains_when_jev_inference_is_blocked_upstream() {
+        assert_eq!(
+            connection_failure_message("jev", 451),
+            "JEV 价值评估请求被拒绝（HTTP 451）。请确认网络或代理允许访问 TypeSafe AI 的 /v1/systemone 接口。"
+        );
     }
 
     #[test]
@@ -271,6 +303,8 @@ pub struct SaveScanRulesInput {
     custom_exclusions: Vec<String>,
     #[serde(default = "default_file_categories")]
     file_categories: Vec<FileCategory>,
+    #[serde(default = "default_directory_group_threshold")]
+    directory_group_threshold: u16,
 }
 
 #[derive(Serialize)]
@@ -279,6 +313,7 @@ pub struct ScanRulesOutput {
     allowed_roots: Vec<String>,
     custom_exclusions: Vec<String>,
     file_categories: Vec<FileCategory>,
+    directory_group_threshold: u16,
     locked_exclusions: Vec<String>,
 }
 
@@ -287,6 +322,7 @@ fn rules_output(value: ScanRules) -> ScanRulesOutput {
         allowed_roots: value.allowed_roots,
         custom_exclusions: value.custom_exclusions,
         file_categories: value.file_categories,
+        directory_group_threshold: value.directory_group_threshold,
         locked_exclusions: ScanRules::default().locked_exclusions(),
     }
 }
@@ -305,6 +341,12 @@ pub fn save_scan_rules(
     state: State<'_, AppState>,
     input: SaveScanRulesInput,
 ) -> Result<ScanRulesOutput, String> {
+    validate_directory_group_threshold(input.directory_group_threshold)
+        .map_err(|error| error.code().to_owned())?;
+    let previous = state
+        .scan_rules
+        .get()
+        .map_err(|error| error.code().to_owned())?;
     let policy = ScanPolicy::new(vec![]);
     let roots = input
         .allowed_roots
@@ -325,16 +367,25 @@ pub fn save_scan_rules(
                 .collect(),
             custom_exclusions: input.custom_exclusions,
             file_categories: input.file_categories,
+            directory_group_threshold: input.directory_group_threshold,
         })
         .map_err(|error| error.code().to_owned())?;
-    match configure_local_indexer(&saved) {
-        Ok(()) => state
-            .logger
-            .info("ntfs-indexer", "scan scope synchronized to local indexer"),
-        Err(error) => state.logger.error(
-            "ntfs-indexer",
-            &format!("scan scope saved locally but indexer synchronization failed: {error}"),
-        ),
+    if indexer_fields_changed(&previous, &saved) {
+        match configure_local_indexer(&saved) {
+            Ok(()) => state
+                .logger
+                .info("ntfs-indexer", "scan scope synchronized to local indexer"),
+            Err(error) => state.logger.error(
+                "ntfs-indexer",
+                &format!("scan scope saved locally but indexer synchronization failed: {error}"),
+            ),
+        }
     }
     Ok(rules_output(saved))
+}
+
+pub fn indexer_fields_changed(previous: &ScanRules, next: &ScanRules) -> bool {
+    previous.allowed_roots != next.allowed_roots
+        || previous.custom_exclusions != next.custom_exclusions
+        || previous.file_categories != next.file_categories
 }

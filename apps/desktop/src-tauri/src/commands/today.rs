@@ -1,7 +1,7 @@
 use chrono::{Datelike, Local, TimeZone};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -22,7 +22,43 @@ use crate::{
         progress::TodayScanStatus,
     },
     system::explorer::{ExplorerLauncher, WindowsProcessLauncher},
+    today_workspace::{
+        WorkspaceBuildInput, WorkspaceCategory, WorkspacePage, WorkspaceSort, WorkspaceTree,
+    },
 };
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum WorkspaceScope {
+    Today,
+    Recent,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceQueryInput {
+    pub scope: WorkspaceScope,
+    pub days: Option<u8>,
+    pub category: WorkspaceCategory,
+    pub search: String,
+    pub sort: WorkspaceSort,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceSelectionInput {
+    pub query_id: String,
+    pub file_ids: Vec<i64>,
+    pub directory_ids: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceSelectionOutput {
+    pub file_ids: Vec<i64>,
+    pub file_count: usize,
+    pub batch_count: usize,
+}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -51,7 +87,7 @@ pub struct TodayReady {
 #[serde(rename_all = "camelCase")]
 pub struct TodayUnavailable {
     state: &'static str,
-    remediation: String,
+    pub(crate) remediation: String,
     files: Vec<TodayFile>,
     clusters: Vec<TodayCluster>,
 }
@@ -64,8 +100,8 @@ fn unavailable(message: impl Into<String>) -> TodayUnavailable {
         clusters: vec![],
     }
 }
-type ActiveRules = (Vec<AllowedRoot>, Vec<PathBuf>, Vec<FileCategory>);
-fn rules(state: &AppState) -> Result<ActiveRules, TodayUnavailable> {
+pub(crate) type ActiveRules = (Vec<AllowedRoot>, Vec<PathBuf>, Vec<FileCategory>);
+pub(crate) fn rules(state: &AppState) -> Result<ActiveRules, TodayUnavailable> {
     let rules = state
         .scan_rules
         .get()
@@ -155,7 +191,7 @@ fn configure_indexer_after_rule_change(state: &AppState, rules: &ScanRules) {
     }
 }
 
-pub(crate) fn current_day_bounds() -> (i64, i64) {
+pub fn current_day_bounds() -> (i64, i64) {
     let now = Local::now();
     let today = now.date_naive();
     let start = Local
@@ -382,6 +418,168 @@ fn ensure_accepted_response(
     }
 }
 
+pub fn query_workspace(
+    state: &AppState,
+    input: WorkspaceQueryInput,
+) -> Result<WorkspacePage, String> {
+    let saved_rules = state
+        .scan_rules
+        .get()
+        .map_err(|_| "无法读取本地扫描规则。".to_owned())?;
+    if saved_rules.allowed_roots.is_empty() {
+        return Err("请先在设置中添加允许扫描的工作目录。".to_owned());
+    }
+    let exclusions = saved_rules
+        .custom_exclusions
+        .iter()
+        .map(PathBuf::from)
+        .collect::<Vec<_>>();
+    let roots = active_roots(&saved_rules.allowed_roots, &exclusions)
+        .map_err(|_| "扫描目录无效，请在设置中重新保存。".to_owned())?;
+    let (start, end) = match input.scope {
+        WorkspaceScope::Today => current_day_bounds(),
+        WorkspaceScope::Recent => recent_day_bounds(input.days.unwrap_or(5)),
+    };
+    let policy = ScanPolicy::for_roots(exclusions, roots.clone());
+    let file_filter = FileTypeFilter::new(saved_rules.file_categories.clone());
+    let files = state
+        .database
+        .files()
+        .list_for_local_day(LocalDayRange::new(start, end))
+        .map_err(|_| "无法读取本地工作文件索引。".to_owned())?
+        .into_iter()
+        .filter(|file| is_visible_today_file(file, &file_filter, &policy))
+        .collect::<Vec<_>>();
+    let mut value_statuses = state
+        .database
+        .value_assessments()
+        .list_current_for_files(&files)
+        .map_err(|_| "无法读取文件价值评估状态。".to_owned())?
+        .into_iter()
+        .map(|(file_id, assessment)| (file_id, assessment.status))
+        .collect::<std::collections::HashMap<_, _>>();
+    let document_filter = FileTypeFilter::new(vec![FileCategory::Documents]);
+    for file in &files {
+        if !document_filter.allows(Path::new(&file.canonical_path)) {
+            value_statuses.insert(file.id, "unsupported".to_owned());
+        }
+    }
+    let tree = WorkspaceTree::build(WorkspaceBuildInput {
+        files,
+        allowed_roots: roots.iter().map(|root| display_path(&root.0)).collect(),
+        threshold: saved_rules.directory_group_threshold,
+        category: input.category,
+        search: input.search,
+        value_statuses,
+    })
+    .map_err(|_| "无法整理工作文件目录，请检查扫描范围设置。".to_owned())?;
+    let query_id = state.workspace_queries.insert(tree, input.sort)?;
+    state.workspace_queries.page(&query_id, None, 0)
+}
+
+pub fn expand_workspace_query(
+    state: &AppState,
+    query_id: &str,
+    directory_id: &str,
+    cursor: usize,
+) -> Result<WorkspacePage, String> {
+    state
+        .workspace_queries
+        .page(query_id, Some(directory_id), cursor)
+}
+
+pub fn resolve_workspace_selection(
+    state: &AppState,
+    input: WorkspaceSelectionInput,
+) -> Result<WorkspaceSelectionOutput, String> {
+    let candidate_ids =
+        state
+            .workspace_queries
+            .resolve(&input.query_id, &input.file_ids, &input.directory_ids)?;
+    let (roots, exclusions, file_categories) = rules(state).map_err(|error| error.remediation)?;
+    let policy = ScanPolicy::for_roots(exclusions, roots);
+    let filter = FileTypeFilter::new(file_categories);
+    let repository = state.database.files();
+    let mut safe_ids = BTreeSet::new();
+    for file_id in candidate_ids {
+        let Some(file) = repository
+            .get_by_id(file_id)
+            .map_err(|_| "无法重新核对所选文件。".to_owned())?
+        else {
+            continue;
+        };
+        let path = Path::new(&file.canonical_path);
+        if filter.allows(path) && policy.is_allowed(path) {
+            safe_ids.insert(file.id);
+        }
+    }
+    let file_ids = safe_ids.into_iter().collect::<Vec<_>>();
+    Ok(WorkspaceSelectionOutput {
+        file_count: file_ids.len(),
+        batch_count: file_ids.len().div_ceil(20),
+        file_ids,
+    })
+}
+
+pub fn workspace_directory_path(
+    state: &AppState,
+    query_id: &str,
+    directory_id: &str,
+) -> Result<PathBuf, String> {
+    let path = PathBuf::from(
+        state
+            .workspace_queries
+            .directory_path(query_id, directory_id)?,
+    );
+    let (roots, exclusions, _) = rules(state).map_err(|error| error.remediation)?;
+    let policy = ScanPolicy::for_roots(exclusions, roots);
+    if !policy.is_allowed_directory(&path) {
+        return Err("该目录已不存在或已被排除，请刷新列表。".to_owned());
+    }
+    Ok(path)
+}
+
+#[tauri::command]
+pub async fn query_today_workspace(
+    state: State<'_, AppState>,
+    input: WorkspaceQueryInput,
+) -> Result<WorkspacePage, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || query_workspace(&state, input))
+        .await
+        .map_err(|_| "整理工作文件时发生意外错误。".to_owned())?
+}
+
+#[tauri::command]
+pub fn expand_today_workspace(
+    state: State<'_, AppState>,
+    query_id: String,
+    directory_id: String,
+    cursor: usize,
+) -> Result<WorkspacePage, String> {
+    expand_workspace_query(&state, &query_id, &directory_id, cursor)
+}
+
+#[tauri::command]
+pub fn resolve_today_workspace_selection(
+    state: State<'_, AppState>,
+    input: WorkspaceSelectionInput,
+) -> Result<WorkspaceSelectionOutput, String> {
+    resolve_workspace_selection(&state, input)
+}
+
+#[tauri::command]
+pub fn open_today_workspace_directory(
+    state: State<'_, AppState>,
+    query_id: String,
+    directory_id: String,
+) -> Result<(), String> {
+    let path = workspace_directory_path(&state, &query_id, &directory_id)?;
+    launcher(&state)?
+        .open_directory_path(&path)
+        .map_err(|error| error.code().to_owned())
+}
+
 #[tauri::command]
 pub async fn get_today_snapshot(
     state: State<'_, AppState>,
@@ -399,51 +597,96 @@ pub async fn get_recent_snapshot(
     state: State<'_, AppState>,
     days: u8,
 ) -> Result<TodayReady, TodayUnavailable> {
-    let (roots, exclusions, file_categories) = rules(&state)?;
-    let (start, end) = recent_day_bounds(days);
-    let request = IndexerRequest {
-        protocol_version: INDEXER_PROTOCOL_VERSION,
-        request_id: format!("recent-list-{}", chrono::Utc::now().timestamp_millis()),
-        kind: IndexerRequestKind::ListRange {
-            start_utc_ms: start,
-            end_utc_ms: end,
-            limit: 5_000,
-        },
-    };
-    let response = call_indexer_service(&request).map_err(unavailable)?;
-    if response.status != "ready" {
-        return Err(unavailable(response.message.unwrap_or_else(|| {
-            "本地 NTFS 索引服务无法返回过去文件。".to_owned()
-        })));
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || recent_snapshot(&state, days))
+        .await
+        .map_err(|_| unavailable("读取过去文件时发生意外错误。"))?
+}
+
+fn recent_snapshot(state: &AppState, days: u8) -> Result<TodayReady, TodayUnavailable> {
+    state.logger.info(
+        "today-index",
+        &format!("past NTFS index synchronization started for {days} days"),
+    );
+    let result = (|| {
+        let (roots, exclusions, file_categories) = rules(&state)?;
+        let (start, end) = recent_day_bounds(days);
+        let configure = IndexerRequest {
+            protocol_version: INDEXER_PROTOCOL_VERSION,
+            request_id: format!("recent-configure-{}", chrono::Utc::now().timestamp_millis()),
+            kind: IndexerRequestKind::Configure {
+                allowed_roots: roots.iter().map(|root| display_path(&root.0)).collect(),
+                excluded_roots: exclusions.iter().map(|path| display_path(path)).collect(),
+                file_categories: file_categories.clone(),
+            },
+        };
+        ensure_ready_response(call_indexer_service(&configure))?;
+        let sync = IndexerRequest {
+            protocol_version: INDEXER_PROTOCOL_VERSION,
+            request_id: format!("recent-sync-{}", chrono::Utc::now().timestamp_millis()),
+            kind: IndexerRequestKind::Sync,
+        };
+        ensure_accepted_response(call_indexer_service(&sync))?;
+        let request = IndexerRequest {
+            protocol_version: INDEXER_PROTOCOL_VERSION,
+            request_id: format!("recent-list-{}", chrono::Utc::now().timestamp_millis()),
+            kind: IndexerRequestKind::ListToday {
+                start_utc_ms: start,
+                end_utc_ms: end,
+            },
+        };
+        let response = call_indexer_service(&request).map_err(unavailable)?;
+        if response.status != "ready" {
+            return Err(unavailable(response.message.unwrap_or_else(|| {
+                "本地 NTFS 索引服务无法返回过去文件。".to_owned()
+            })));
+        }
+        let records = response
+            .candidates
+            .into_iter()
+            .map(|candidate| {
+                let size_bytes =
+                    resolved_size_bytes(Path::new(&candidate.canonical_path), candidate.size_bytes);
+                FileRecordInput {
+                    canonical_path: candidate.canonical_path,
+                    file_identity: candidate.file_reference_number,
+                    modified_at_utc_ms: candidate.modified_at_utc_ms,
+                    size_bytes,
+                    source: "本机 NTFS 索引".to_owned(),
+                }
+            })
+            .collect::<Vec<_>>();
+        state
+            .database
+            .files()
+            .replace_indexed_for_local_day(LocalDayRange::new(start, end), &records)
+            .map_err(|_| unavailable("无法保存过去的本地 NTFS 索引结果。"))?;
+        cached_snapshot_for_range(
+            state.database.files(),
+            start,
+            end,
+            &FileTypeFilter::new(file_categories),
+            &ScanPolicy::for_roots(exclusions, roots),
+        )
+        .map_err(|_| unavailable("无法读取过去的本地 NTFS 索引结果。"))
+    })();
+    match &result {
+        Ok(snapshot) => state.logger.info(
+            "today-index",
+            &format!(
+                "past NTFS index synchronization completed with {} files",
+                snapshot.files.len()
+            ),
+        ),
+        Err(error) => state.logger.error(
+            "today-index",
+            &format!(
+                "past NTFS index synchronization failed: {}",
+                error.remediation
+            ),
+        ),
     }
-    let records = response
-        .candidates
-        .into_iter()
-        .map(|candidate| {
-            let size_bytes =
-                resolved_size_bytes(Path::new(&candidate.canonical_path), candidate.size_bytes);
-            FileRecordInput {
-                canonical_path: candidate.canonical_path,
-                file_identity: candidate.file_reference_number,
-                modified_at_utc_ms: candidate.modified_at_utc_ms,
-                size_bytes,
-                source: "本机 NTFS 索引".to_owned(),
-            }
-        })
-        .collect::<Vec<_>>();
-    state
-        .database
-        .files()
-        .replace_indexed_for_local_day(LocalDayRange::new(start, end), &records)
-        .map_err(|_| unavailable("无法保存过去的本地 NTFS 索引结果。"))?;
-    cached_snapshot_for_range(
-        state.database.files(),
-        start,
-        end,
-        &FileTypeFilter::new(file_categories),
-        &ScanPolicy::for_roots(exclusions, roots),
-    )
-    .map_err(|_| unavailable("无法读取过去的本地 NTFS 索引结果。"))
+    result
 }
 #[tauri::command]
 pub fn get_today_scan_status(state: State<'_, AppState>) -> TodayScanStatus {
@@ -579,7 +822,8 @@ mod tests {
     };
 
     use super::{
-        bounds, cached_snapshot_for_range, exclude_parent_from_rules, resolved_size_bytes,
+        bounds, cached_snapshot_for_range, exclude_parent_from_rules, ready_from_files,
+        resolved_size_bytes,
     };
 
     #[test]
@@ -610,6 +854,15 @@ mod tests {
         assert_eq!((start.hour(), start.minute(), start.second()), (0, 0, 0));
         assert_eq!((end.hour(), end.minute(), end.second()), (0, 0, 0));
         assert!(end > start);
+    }
+
+    #[test]
+    fn an_empty_index_result_is_a_ready_empty_snapshot() {
+        let snapshot = ready_from_files(Vec::new());
+
+        assert_eq!(snapshot.state, "ready");
+        assert!(snapshot.files.is_empty());
+        assert!(snapshot.clusters.is_empty());
     }
 
     #[test]
@@ -784,6 +1037,7 @@ mod tests {
                 allowed_roots: vec![r"D:\work".to_owned()],
                 custom_exclusions: vec![],
                 file_categories: vec![],
+                directory_group_threshold: 5,
             },
             &FileRecord {
                 id: selected.id,

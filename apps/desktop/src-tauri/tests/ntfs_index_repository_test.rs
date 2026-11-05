@@ -154,6 +154,91 @@ fn rebuilds_a_candidate_path_from_ntfs_parent_references() {
 }
 
 #[test]
+fn keeps_a_today_activity_visible_after_the_file_changes_again_later() {
+    let path = temporary_database_path("ntfs-activity-history");
+    let database = Database::open(&path).expect("database opens");
+    let repository = database.ntfs_index();
+    let volume = repository
+        .upsert_volume(&work_volume())
+        .expect("volume persists");
+    let today = chrono::Utc::now().timestamp_millis();
+    let tomorrow = today + 86_400_000;
+
+    repository
+        .apply_page(&IndexPage {
+            volume_id: volume.id,
+            entries: vec![
+                IndexEntry {
+                    file_reference_number: "5".to_owned(),
+                    parent_file_reference_number: None,
+                    name: String::new(),
+                    is_directory: true,
+                    file_attributes: 0x10,
+                    size_bytes: None,
+                    modified_at_utc_ms: None,
+                    last_usn: "1".to_owned(),
+                    deleted_at_utc_ms: None,
+                },
+                IndexEntry {
+                    file_reference_number: "42".to_owned(),
+                    parent_file_reference_number: Some("5".to_owned()),
+                    name: "updated-today.docx".to_owned(),
+                    is_directory: false,
+                    file_attributes: 0,
+                    size_bytes: Some(1024),
+                    modified_at_utc_ms: Some(today),
+                    last_usn: "2".to_owned(),
+                    deleted_at_utc_ms: None,
+                },
+            ],
+            events: vec![],
+            checkpoint: UsnCheckpoint {
+                usn_journal_id: "journal-1".to_owned(),
+                next_usn: "3".to_owned(),
+                first_usn_seen: "1".to_owned(),
+                record_major_version: 2,
+                last_successful_sync_at_utc_ms: today,
+            },
+        })
+        .expect("today activity applies");
+    repository
+        .apply_page(&IndexPage {
+            volume_id: volume.id,
+            entries: vec![IndexEntry {
+                file_reference_number: "42".to_owned(),
+                parent_file_reference_number: Some("5".to_owned()),
+                name: "updated-today.docx".to_owned(),
+                is_directory: false,
+                file_attributes: 0,
+                size_bytes: Some(2048),
+                modified_at_utc_ms: Some(tomorrow),
+                last_usn: "4".to_owned(),
+                deleted_at_utc_ms: None,
+            }],
+            events: vec![],
+            checkpoint: UsnCheckpoint {
+                usn_journal_id: "journal-1".to_owned(),
+                next_usn: "5".to_owned(),
+                first_usn_seen: "1".to_owned(),
+                record_major_version: 2,
+                last_successful_sync_at_utc_ms: tomorrow,
+            },
+        })
+        .expect("later activity applies");
+
+    let candidates = repository
+        .list_file_candidates_between(today - 1, today + 1)
+        .expect("today candidates read");
+
+    assert_eq!(candidates.len(), 1);
+    assert_eq!(candidates[0].canonical_path, r"D:\updated-today.docx");
+    assert_eq!(candidates[0].modified_at_utc_ms, today);
+
+    drop(database);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
 fn rejects_a_page_for_an_unknown_volume_without_advancing_a_checkpoint() {
     let path = temporary_database_path("ntfs-index-atomic");
     let database = Database::open(&path).expect("database opens");

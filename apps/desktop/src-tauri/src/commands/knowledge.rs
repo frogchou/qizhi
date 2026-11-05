@@ -1,13 +1,19 @@
-use std::{fs::OpenOptions, io::Write, path::PathBuf};
+use std::{
+    collections::{HashMap, HashSet},
+    fs::OpenOptions,
+    io::Write,
+    path::PathBuf,
+};
 
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{State, ipc::Channel};
 
 use crate::{
     app_state::AppState,
     config::secret_store::WindowsCredentialStore,
     ragflow::client::{
-        RagflowAgent, RagflowAgentAnswer, RagflowAnswer, RagflowChat, RagflowChunk, RagflowClient,
+        RagflowAgent, RagflowAgentReference, RagflowAgentSource, RagflowAgentStep,
+        RagflowAgentStreamEvent, RagflowAnswer, RagflowChat, RagflowChunk, RagflowClient,
         RagflowDataset, RagflowUpload,
     },
     scan::{
@@ -23,7 +29,7 @@ pub struct AskRagflowInput {
     question: String,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RagflowChatOutput {
     id: String,
@@ -54,7 +60,7 @@ pub struct RagflowAgentOutput {
     description: String,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RagflowChunkOutput {
     id: String,
@@ -65,19 +71,76 @@ pub struct RagflowChunkOutput {
     similarity: f64,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RagflowAgentResultOutput {
-    agent_id: String,
-    answer: Option<String>,
-    error: Option<String>,
+    pub agent_id: String,
+    pub answer: Option<String>,
+    pub error: Option<String>,
+    pub session_id: Option<String>,
+    pub session_invalid: bool,
+    pub steps: Vec<RagflowAgentStep>,
+    pub references: Vec<RagflowAgentReference>,
+    pub sources: Vec<RagflowAgentSource>,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RagflowKnowledgeQueryOutput {
-    chunks: Vec<RagflowChunkOutput>,
-    agent_results: Vec<RagflowAgentResultOutput>,
+    pub selection_token: String,
+    pub chunks: Vec<RagflowChunkOutput>,
+    pub retrieval_error: Option<String>,
+    pub agent_results: Vec<RagflowAgentResultOutput>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum KnowledgeQueryStreamEvent {
+    RetrievalStarted,
+    RetrievalCompleted {
+        chunks: Vec<RagflowChunkOutput>,
+    },
+    RetrievalFailed {
+        error: String,
+    },
+    AgentStarted {
+        agent_id: String,
+    },
+    AgentAnswerReset {
+        agent_id: String,
+        message_id: String,
+    },
+    AgentDelta {
+        agent_id: String,
+        delta: String,
+    },
+    AgentThinking {
+        agent_id: String,
+        active: bool,
+    },
+    AgentStep {
+        agent_id: String,
+        step: RagflowAgentStep,
+    },
+    AgentReferences {
+        agent_id: String,
+        references: Vec<RagflowAgentReference>,
+        sources: Vec<RagflowAgentSource>,
+    },
+    AgentCompleted {
+        agent_id: String,
+        session_id: Option<String>,
+    },
+    AgentFailed {
+        agent_id: String,
+        error: String,
+        session_invalid: bool,
+    },
+    Completed,
 }
 
 #[derive(Deserialize)]
@@ -86,6 +149,17 @@ pub struct QueryRagflowKnowledgeInput {
     question: String,
     dataset_ids: Vec<String>,
     agent_ids: Vec<String>,
+    #[serde(default)]
+    agent_sessions: HashMap<String, String>,
+}
+
+pub fn unique_agent_ids(agent_ids: Vec<String>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    agent_ids
+        .into_iter()
+        .map(|id| id.trim().to_owned())
+        .filter(|id| !id.is_empty() && seen.insert(id.clone()))
+        .collect()
 }
 
 #[derive(Deserialize)]
@@ -328,42 +402,210 @@ pub async fn list_ragflow_agents(
 pub async fn query_ragflow_knowledge(
     state: State<'_, AppState>,
     input: QueryRagflowKnowledgeInput,
+    on_event: Channel<KnowledgeQueryStreamEvent>,
 ) -> Result<RagflowKnowledgeQueryOutput, String> {
     if input.question.trim().is_empty()
         || (input.dataset_ids.is_empty() && input.agent_ids.is_empty())
     {
         return Err("请输入关键词，并至少选择一个知识库或 Agent。".to_owned());
     }
+    let agent_ids = unique_agent_ids(input.agent_ids);
+    if input.dataset_ids.is_empty() && agent_ids.is_empty() {
+        return Err("请输入关键词，并至少选择一个知识库或 Agent。".to_owned());
+    }
     let state = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let result = (|| {
             let client = client(&state)?;
-            let chunks = if input.dataset_ids.is_empty() {
-                Ok(vec![])
+            let retrieval_handle = if input.dataset_ids.is_empty() {
+                None
             } else {
-                client
-                    .retrieve(&input.question, input.dataset_ids)
-                    .map(|items| items.into_iter().map(Into::into).collect())
-            }?;
-            let handles = input.agent_ids.into_iter().map(|agent_id| {
                 let client = client.clone();
                 let question = input.question.clone();
-                std::thread::spawn(move || match client.ask_agent(&agent_id, &question) {
-                    Ok(RagflowAgentAnswer { answer, .. }) => RagflowAgentResultOutput {
-                        agent_id,
-                        answer: Some(answer),
-                        error: None,
-                    },
-                    Err(error) => RagflowAgentResultOutput {
-                        agent_id,
-                        answer: None,
-                        error: Some(error),
-                    },
+                let dataset_ids = input.dataset_ids.clone();
+                let events = on_event.clone();
+                let _ = events.send(KnowledgeQueryStreamEvent::RetrievalStarted);
+                Some(std::thread::spawn(move || {
+                    match client.retrieve(&question, dataset_ids) {
+                        Ok(items) => {
+                            let chunks = items.into_iter().map(Into::into).collect::<Vec<_>>();
+                            let _ = events.send(KnowledgeQueryStreamEvent::RetrievalCompleted {
+                                chunks: chunks.clone(),
+                            });
+                            Ok(chunks)
+                        }
+                        Err(error) => {
+                            let _ = events.send(KnowledgeQueryStreamEvent::RetrievalFailed {
+                                error: error.clone(),
+                            });
+                            Err(error)
+                        }
+                    }
+                }))
+            };
+            let handles = agent_ids
+                .into_iter()
+                .map(|agent_id| {
+                    let client = client.clone();
+                    let question = input.question.clone();
+                    let session_id = input.agent_sessions.get(&agent_id).cloned();
+                    let events = on_event.clone();
+                    let worker_agent_id = agent_id.clone();
+                    let handle = std::thread::spawn(move || {
+                        let _ = events.send(KnowledgeQueryStreamEvent::AgentStarted {
+                            agent_id: worker_agent_id.clone(),
+                        });
+                        let mut streamed_answer = String::new();
+                        let mut steps = Vec::new();
+                        let mut references = Vec::new();
+                        let mut sources = Vec::new();
+                        let answer = client.ask_agent_streaming(
+                            &worker_agent_id,
+                            &question,
+                            session_id.as_deref(),
+                            |event| {
+                                match event {
+                                    RagflowAgentStreamEvent::AnswerReset { message_id } => {
+                                        streamed_answer.clear();
+                                        let _ = events.send(
+                                            KnowledgeQueryStreamEvent::AgentAnswerReset {
+                                                agent_id: worker_agent_id.clone(),
+                                                message_id,
+                                            },
+                                        );
+                                    }
+                                    RagflowAgentStreamEvent::Delta { delta } => {
+                                        streamed_answer.push_str(&delta);
+                                        let _ =
+                                            events.send(KnowledgeQueryStreamEvent::AgentDelta {
+                                                agent_id: worker_agent_id.clone(),
+                                                delta,
+                                            });
+                                    }
+                                    RagflowAgentStreamEvent::Thinking { active } => {
+                                        let _ =
+                                            events.send(KnowledgeQueryStreamEvent::AgentThinking {
+                                                agent_id: worker_agent_id.clone(),
+                                                active,
+                                            });
+                                    }
+                                    RagflowAgentStreamEvent::Step(step) => {
+                                        steps.push(step.clone());
+                                        let _ = events.send(KnowledgeQueryStreamEvent::AgentStep {
+                                            agent_id: worker_agent_id.clone(),
+                                            step,
+                                        });
+                                    }
+                                    RagflowAgentStreamEvent::References {
+                                        references: next_references,
+                                        sources: next_sources,
+                                    } => {
+                                        references = next_references.clone();
+                                        sources = next_sources.clone();
+                                        let _ = events.send(
+                                            KnowledgeQueryStreamEvent::AgentReferences {
+                                                agent_id: worker_agent_id.clone(),
+                                                references: next_references,
+                                                sources: next_sources,
+                                            },
+                                        );
+                                    }
+                                }
+                                Ok(())
+                            },
+                        );
+                        match answer {
+                            Ok(answer) => {
+                                let session_id =
+                                    (!answer.session_id.is_empty()).then_some(answer.session_id);
+                                let _ = events.send(KnowledgeQueryStreamEvent::AgentCompleted {
+                                    agent_id: worker_agent_id.clone(),
+                                    session_id: session_id.clone(),
+                                });
+                                RagflowAgentResultOutput {
+                                    agent_id: worker_agent_id,
+                                    answer: Some(answer.answer),
+                                    error: None,
+                                    session_id,
+                                    session_invalid: false,
+                                    steps,
+                                    references: answer.references,
+                                    sources: answer.sources,
+                                }
+                            }
+                            Err(error) => {
+                                let session_invalid = is_invalid_agent_session(&error);
+                                let _ = events.send(KnowledgeQueryStreamEvent::AgentFailed {
+                                    agent_id: worker_agent_id.clone(),
+                                    error: error.clone(),
+                                    session_invalid,
+                                });
+                                RagflowAgentResultOutput {
+                                    agent_id: worker_agent_id,
+                                    answer: (!streamed_answer.is_empty())
+                                        .then_some(streamed_answer),
+                                    error: Some(error),
+                                    session_id,
+                                    session_invalid,
+                                    steps,
+                                    references,
+                                    sources,
+                                }
+                            }
+                        }
+                    });
+                    (agent_id, handle)
                 })
-            });
-            let agent_results = handles.filter_map(|handle| handle.join().ok()).collect();
+                .collect::<Vec<_>>();
+            let mut agent_results = Vec::new();
+            for (agent_id, handle) in handles {
+                match handle.join() {
+                    Ok(output) => agent_results.push(output),
+                    Err(_) => {
+                        let error = "Agent 工作线程意外终止。".to_owned();
+                        let _ = on_event.send(KnowledgeQueryStreamEvent::AgentFailed {
+                            agent_id: agent_id.clone(),
+                            error: error.clone(),
+                            session_invalid: false,
+                        });
+                        agent_results.push(RagflowAgentResultOutput {
+                            agent_id,
+                            answer: None,
+                            error: Some(error),
+                            session_id: None,
+                            session_invalid: false,
+                            steps: vec![],
+                            references: vec![],
+                            sources: vec![],
+                        });
+                    }
+                }
+            }
+            let (chunks, retrieval_error) = match retrieval_handle {
+                None => (vec![], None),
+                Some(handle) => match handle.join() {
+                    Ok(Ok(chunks)) => (chunks, None),
+                    Ok(Err(error)) => (vec![], Some(error)),
+                    Err(_) => (vec![], Some("知识库检索线程意外终止。".to_owned())),
+                },
+            };
+            let _ = on_event.send(KnowledgeQueryStreamEvent::Completed);
+            let selection_token = state.knowledge_selections.register(
+                chunks
+                    .iter()
+                    .map(|chunk| (chunk.dataset_id.clone(), chunk.document_id.clone()))
+                    .chain(agent_results.iter().flat_map(|result| {
+                        result
+                            .sources
+                            .iter()
+                            .map(|source| (source.dataset_id.clone(), source.document_id.clone()))
+                            .collect::<Vec<_>>()
+                    })),
+            );
             Ok(RagflowKnowledgeQueryOutput {
+                selection_token,
                 chunks,
+                retrieval_error,
                 agent_results,
             })
         })();
@@ -406,6 +648,14 @@ pub async fn query_ragflow_knowledge(
     })
     .await
     .map_err(|_| "查询 RAGFlow 知识库时发生意外错误。".to_owned())?
+}
+
+fn is_invalid_agent_session(error: &str) -> bool {
+    let normalized = error.to_ascii_lowercase();
+    normalized.contains("session")
+        && (normalized.contains("not found")
+            || normalized.contains("invalid")
+            || normalized.contains("expired"))
 }
 
 #[tauri::command]

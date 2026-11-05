@@ -1,10 +1,29 @@
 import { useEffect, useState } from "react";
 
 import type { MaskedServiceConfig } from "../../lib/contracts";
-import type { FileCategory, QizhiCommands } from "../../lib/tauri";
+import type {
+  FileCategory,
+  JevValuePolicy,
+  QizhiCommands,
+} from "../../lib/tauri";
+import { SummarySettingsSection } from "./SummarySettingsSection";
+import { CodexSettingsSection } from "./CodexSettingsSection";
 
 type SettingsPageProps = { commands: QizhiCommands };
 type ConnectionState = { available: boolean; message: string } | null;
+
+const DEFAULT_JEV_POLICY: JevValuePolicy = {
+  instructions:
+    "根据文件名和实际内容，评估这个文件对计算机办公工作的长期知识价值。重点考虑是否包含可复用的知识、分析、决策、方案、数据、重要代码或正式交付成果；不要仅因篇幅长而给高分。",
+  criteria: [
+    "几乎没有工作价值：缓存、模板噪声、空内容、自动生成或不可复用的临时文件",
+    "较低工作价值：重复内容、短期中间产物，后续很少需要查找或复用",
+    "一般工作价值：记录了具体工作信息，对当前任务或个人回顾有帮助",
+    "较高工作价值：包含可复用的知识、分析、决策、方案、数据或重要代码",
+    "很高工作价值：关键交付物、正式结论、核心设计或值得长期进入知识库的资料",
+  ],
+  valuableThreshold: 2.5,
+};
 
 function displayPath(path: string) {
   return path.replace(/^\\\\\?\\UNC\\/i, "\\\\").replace(/^\\\\\?\\/, "");
@@ -55,6 +74,14 @@ export function SettingsPage({ commands }: SettingsPageProps) {
   const [ragflowConnection, setRagflowConnection] =
     useState<ConnectionState>(null);
   const [jevConnection, setJevConnection] = useState<ConnectionState>(null);
+  const [jevInstructions, setJevInstructions] = useState(
+    DEFAULT_JEV_POLICY.instructions,
+  );
+  const [jevCriteria, setJevCriteria] = useState(
+    DEFAULT_JEV_POLICY.criteria.join("\n"),
+  );
+  const [jevThreshold, setJevThreshold] = useState("2.5");
+  const [jevPolicyNotice, setJevPolicyNotice] = useState<string | null>(null);
   const [ntfsIndexer, setNtfsIndexer] = useState<ConnectionState>(null);
   const [roots, setRoots] = useState<string[]>([]);
   const [exclusions, setExclusions] = useState<string[]>([]);
@@ -63,6 +90,7 @@ export function SettingsPage({ commands }: SettingsPageProps) {
     "documents",
     "sourceCode",
   ]);
+  const [directoryGroupThreshold, setDirectoryGroupThreshold] = useState("5");
 
   useEffect(() => {
     commands
@@ -95,6 +123,15 @@ export function SettingsPage({ commands }: SettingsPageProps) {
         setRoots(rules.allowedRoots);
         setExclusions(rules.customExclusions);
         setFileCategories(rules.fileCategories ?? ["documents", "sourceCode"]);
+        setDirectoryGroupThreshold(String(rules.directoryGroupThreshold ?? 5));
+      })
+      .catch(() => undefined);
+    commands
+      .getJevValuePolicy?.()
+      .then((policy) => {
+        setJevInstructions(policy.instructions);
+        setJevCriteria(policy.criteria.join("\n"));
+        setJevThreshold(String(policy.valuableThreshold));
       })
       .catch(() => undefined);
   }, [commands]);
@@ -118,6 +155,37 @@ export function SettingsPage({ commands }: SettingsPageProps) {
     setJevApiKey("");
   }
 
+  async function saveJevPolicy() {
+    setError(null);
+    setJevPolicyNotice(null);
+    const criteria = jevCriteria
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    const valuableThreshold = Number(jevThreshold);
+    if (!commands.saveJevValuePolicy) {
+      setError("当前版本暂不支持保存 JEV 评估标准，请更新栖知后重试。");
+      return;
+    }
+    try {
+      const savedPolicy = await commands.saveJevValuePolicy({
+        instructions: jevInstructions.trim(),
+        criteria,
+        valuableThreshold,
+      });
+      setJevInstructions(savedPolicy.instructions);
+      setJevCriteria(savedPolicy.criteria.join("\n"));
+      setJevThreshold(String(savedPolicy.valuableThreshold));
+      setJevPolicyNotice(
+        "评估标准已保存；现有文件会按新标准重新进行价值判断。",
+      );
+    } catch {
+      setError(
+        "评估标准未保存：说明不能为空，分级需要 2—10 项，阈值需位于最低分与最高分之间。",
+      );
+    }
+  }
+
   async function chooseFolder(target: "roots" | "exclusions") {
     setError(null);
     try {
@@ -135,15 +203,30 @@ export function SettingsPage({ commands }: SettingsPageProps) {
   async function saveScanRules() {
     setError(null);
     setScanRulesNotice(null);
+    const parsedDirectoryGroupThreshold = Number(directoryGroupThreshold);
+    if (
+      !Number.isInteger(parsedDirectoryGroupThreshold) ||
+      parsedDirectoryGroupThreshold < 2 ||
+      parsedDirectoryGroupThreshold > 100
+    ) {
+      setError("目录聚合阈值必须在 2 到 100 之间。");
+      return;
+    }
     try {
       const savedRules = await commands.saveScanRules({
         allowedRoots: roots,
         customExclusions: exclusions,
         fileCategories,
+        directoryGroupThreshold: parsedDirectoryGroupThreshold,
       });
       setRoots(savedRules.allowedRoots);
       setExclusions(savedRules.customExclusions);
       setFileCategories(savedRules.fileCategories);
+      setDirectoryGroupThreshold(
+        String(
+          savedRules.directoryGroupThreshold ?? parsedDirectoryGroupThreshold,
+        ),
+      );
       setScanRulesNotice(
         `扫描规则已保存：${savedRules.allowedRoots.length} 个扫描范围，${savedRules.customExclusions.length} 个排除目录。`,
       );
@@ -294,7 +377,7 @@ export function SettingsPage({ commands }: SettingsPageProps) {
                 toggleFileCategory("documents", event.currentTarget.checked)
               }
             />
-            常见文档与文本（PDF、Office、Markdown、CSV、JSON 等）
+            常见文档与文本（PDF、Office、Markdown、TXT、CSV 等）
           </label>
           <label>
             <input
@@ -308,19 +391,51 @@ export function SettingsPage({ commands }: SettingsPageProps) {
             等）
           </label>
         </div>
-        <button
-          type="button"
-          className="button primary"
-          onClick={saveScanRules}
-        >
-          保存扫描范围
-        </button>
-        {scanRulesNotice ? (
-          <p className="settings-success" role="status">
-            {scanRulesNotice}
+        <div className="path-section today-display-settings">
+          <h3>今日页面展示</h3>
+          <p>
+            同一目录达到指定数量的变化文件或变化子目录后，在“今日”中折叠为目录组。
           </p>
-        ) : null}
+          <label className="threshold-setting-row">
+            <span className="threshold-setting-copy">
+              <strong>目录聚合阈值</strong>
+              <small>可设置 2–100，默认 5 项</small>
+            </span>
+            <span className="threshold-setting-control">
+              <input
+                aria-label="目录聚合阈值"
+                max="100"
+                min="2"
+                onChange={(event) =>
+                  setDirectoryGroupThreshold(event.currentTarget.value)
+                }
+                step="1"
+                type="number"
+                value={directoryGroupThreshold}
+              />
+              <span aria-hidden="true">项</span>
+            </span>
+          </label>
+        </div>
+        <div className="settings-block-actions">
+          {scanRulesNotice ? (
+            <p className="settings-success" role="status">
+              {scanRulesNotice}
+            </p>
+          ) : (
+            <span />
+          )}
+          <button
+            type="button"
+            className="button primary"
+            onClick={saveScanRules}
+          >
+            保存扫描范围
+          </button>
+        </div>
       </section>
+
+      <SummarySettingsSection commands={commands} />
 
       <section className="settings-block" aria-labelledby="services-title">
         <div>
@@ -459,6 +574,67 @@ export function SettingsPage({ commands }: SettingsPageProps) {
                 {jevConnection.message}
               </p>
             ) : null}
+            <div className="jev-policy-form">
+              <div className="jev-policy-heading">
+                <h4>价值评估标准</h4>
+                <p>
+                  JEV 按从低到高的分级给出分数；达到阈值的文件会标记为“有价值”。
+                </p>
+              </div>
+              <label>
+                JEV 评估说明
+                <textarea
+                  aria-label="JEV 评估说明"
+                  value={jevInstructions}
+                  rows={4}
+                  onChange={(event) =>
+                    setJevInstructions(event.currentTarget.value)
+                  }
+                />
+              </label>
+              <label>
+                JEV 分级标准
+                <textarea
+                  aria-label="JEV 分级标准"
+                  value={jevCriteria}
+                  rows={7}
+                  onChange={(event) =>
+                    setJevCriteria(event.currentTarget.value)
+                  }
+                />
+                <span>每行一个等级，按价值从低到高排列（2—10 项）。</span>
+              </label>
+              <label className="jev-threshold-field">
+                JEV 价值阈值
+                <input
+                  aria-label="JEV 价值阈值"
+                  type="number"
+                  min="0"
+                  max={Math.max(
+                    0,
+                    jevCriteria.split(/\r?\n/).filter((line) => line.trim())
+                      .length - 1,
+                  )}
+                  step="0.1"
+                  value={jevThreshold}
+                  onChange={(event) =>
+                    setJevThreshold(event.currentTarget.value)
+                  }
+                />
+              </label>
+              <button
+                type="button"
+                className="button primary"
+                onClick={() => void saveJevPolicy()}
+              >
+                保存评估标准
+              </button>
+              {jevPolicyNotice ? (
+                <p className="connection-result ready" role="status">
+                  {jevPolicyNotice}
+                </p>
+              ) : null}
+            </div>
           </div>
         </article>
         <article className="service-card openai-card">
@@ -528,15 +704,7 @@ export function SettingsPage({ commands }: SettingsPageProps) {
             ) : null}
           </div>
         </article>
-        <article className="service-card muted-service">
-          <div className="service-name">
-            <span className="service-icon">⌘</span>
-            <div>
-              <h3>Codex</h3>
-              <p>本地 CLI 复杂任务将在下一阶段启用。</p>
-            </div>
-          </div>
-        </article>
+        <CodexSettingsSection commands={commands} />
       </section>
       {error ? (
         <p role="alert" className="settings-error">

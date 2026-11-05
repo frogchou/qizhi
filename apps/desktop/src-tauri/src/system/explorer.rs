@@ -64,6 +64,14 @@ impl ExplorerLauncher {
             .launch("notepad.exe", &[file.to_string_lossy().to_string()])
     }
 
+    pub fn open_directory_path(&self, path: &Path) -> Result<(), AppError> {
+        if !self.policy.is_allowed_directory(path) {
+            return Err(AppError::InvalidConfig);
+        }
+        self.process
+            .launch("explorer.exe", &[path.to_string_lossy().to_string()])
+    }
+
     pub fn copy_to_clipboard(&self, file_id: i64) -> Result<(), AppError> {
         let file = self.allowed_path(file_id)?;
         set_file_drop_clipboard(&file)
