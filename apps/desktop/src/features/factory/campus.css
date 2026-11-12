@@ -1,0 +1,360 @@
+/* The neutral white and glass palette follows the map artwork. */
+.fc:has(.fc-day) {
+  --ink: #123e42;
+  --paper: #fbfefd;
+  --line: #d4e2e1;
+  --copper: #007b79;
+}
+.workspace:has(.fc-day),
+.app-shell:has(.fc-day) > .sidebar,
+.fc:has(.fc-day) .fc-events {
+  background: #fbfefd;
+}
+.fc:has(.fc-day) .fc-tabs button[aria-pressed="true"],
+.fc:has(.fc-day) .fc-stats button[aria-pressed="true"] {
+  background: #e0f3ef;
+  border-color: #a6ceca;
+}
+.fc:has(.fc-day) .fc-tools,
+.fc:has(.fc-day) .fc-demo {
+  background: #edf5f4;
+}
+.fc:has(.fc-day) .fc-list button:hover {
+  background: #ecf7f4;
+}
+.fc-map.fc-day {
+  background-color: #f7fbfc;
+  background-image:
+    linear-gradient(#c8d7dc40 1px, transparent 1px),
+    linear-gradient(90deg, #c8d7dc40 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+.fc-day .fc-plate {
+  box-shadow: 0 0 15px #bdcfd02b;
+  --tip-width: min(228px, 58%);
+}
+.fc-day .fc-traffic {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 2;
+}
+.fc-day .fc-power,
+.fc-day .fc-track {
+  pointer-events: none;
+}
+.fc-day .fc-track path {
+  stroke: #139eaa;
+  stroke-width: 2.3;
+  opacity: 0.68;
+}
+.fc-day .fc-track circle {
+  stroke: #138c94;
+  stroke-width: 0.8;
+  fill: #ceffff;
+}
+.fc button.fc-lot {
+  position: absolute;
+  z-index: 3;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  padding: 0;
+  border-radius: 8%;
+  color: #125052;
+}
+.fc-lot::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 8px;
+  border: 1px solid #66e4d6;
+  box-shadow: inset 0 0 14px #40dfd52c;
+  opacity: 0;
+  transition: opacity 0.18s;
+  pointer-events: none;
+}
+.fc-lot.inspecting::before {
+  opacity: 0.85;
+}
+.fc-sign {
+  position: absolute;
+  left: var(--tag-x);
+  top: var(--tag-y);
+  transform: translate(-50%, -50%);
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  padding: 4px 7px;
+  background: #f5fffded;
+  border: 1px solid #79bdb7;
+  border-radius: 5px;
+  box-shadow: 0 2px 4px #0a46572c;
+  font-weight: 700;
+  white-space: nowrap;
+  font-size: clamp(10px, 1cqw + 3px, 15px);
+  transition:
+    transform 0.2s,
+    background 0.2s;
+}
+.fc-sign i,
+.fc-sign b {
+  background: var(--signal);
+}
+.fc-sign i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+.fc-sign b {
+  color: white;
+  border-radius: 3px;
+  padding: 0 4px;
+}
+.fc-lot.inspecting .fc-sign {
+  background: #fff;
+  transform: translate(-50%, calc(-50% - 3px));
+}
+.fc-lot.selected .fc-sign {
+  outline: 2px solid #df9d31;
+  outline-offset: 1px;
+}
+.fc-lot.working .fc-sign i {
+  animation: fc-pulse 1.8s ease-in-out infinite;
+}
+.fc-day .fc-ticket {
+  border-color: #c68d23;
+}
+.fc-ports {
+  position: absolute;
+  z-index: 4;
+  left: 20.8%;
+  width: 10.2%;
+  top: 24.7%;
+  display: flex;
+  justify-content: space-between;
+  pointer-events: none;
+}
+.fc-ports span {
+  display: block;
+  color: #066b6c;
+  font-weight: 700;
+  background: #f7ffffe6;
+  border-radius: 2px;
+  border-bottom: 1.5px solid #09aba3;
+  padding: 1px 3px;
+  font-size: clamp(8px, 1.1cqw, 12px);
+}
+.fc-ports.receiving span {
+  animation: fc-portlight 1.8s ease-in-out infinite;
+}
+.fc-ports span:nth-child(2) {
+  animation-delay: -0.4s;
+}
+.fc-ports span:nth-child(3) {
+  animation-delay: -0.8s;
+}
+.fc-ports span:nth-child(4) {
+  animation-delay: -1.2s;
+}
+@keyframes fc-portlight {
+  50% {
+    box-shadow: 0 0 8px #0bbeb8;
+    background: #c9fff3;
+  }
+}
+.fc-building-tip {
+  position: absolute;
+  z-index: 7;
+  pointer-events: none;
+  width: var(--tip-width);
+  padding: 10px 12px;
+  border: 1px solid #9dc9c5;
+  border-top: 3px solid #159995;
+  border-radius: 7px;
+  background: #fffffff8;
+  box-shadow: 0 5px 17px #16434b29;
+  color: #405d5e;
+  font-size: 12px;
+  line-height: 1.45;
+  animation: fc-tip-in 0.16s ease-out;
+}
+.fc-building-tip strong {
+  color: #104d50;
+  font-size: 14px;
+}
+.fc-tip-extra {
+  margin-top: 4px;
+  color: #137372;
+}
+.fc-building-tip p {
+  margin: 6px 0 2px;
+  font-size: 12px;
+}
+.fc-tip-job {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fc-tip-job span {
+  margin-right: 5px;
+  color: #176c69;
+}
+@keyframes fc-tip-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+.paused .fc-sign i,
+.paused .fc-ports span {
+  animation-play-state: paused !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .fc-lot::before,
+  .fc-sign {
+    transition: none;
+  }
+  .fc .fc-sign i,
+  .fc .fc-ports span,
+  .fc-building-tip {
+    animation: none;
+  }
+}
+@media (max-width: 760px) {
+  .fc-sign {
+    font-size: 9px;
+    padding: 2px 3px;
+    gap: 1px;
+  }
+  .fc-sign i {
+    width: 4px;
+    height: 4px;
+  }
+  .fc-ports span {
+    font-size: 8px;
+    padding: 0;
+  }
+  .fc-building-tip {
+    padding: 4px 6px;
+    font-size: 10px;
+  }
+}
+.fc-day .fc-plate {
+  width: min(100cqw, 159.78cqh);
+  aspect-ratio: 1585/992;
+}
+.fc-stats button.fc-queue-toggle {
+  margin-left: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  min-width: 0;
+}
+.fc-illum {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1;
+}
+.fc-display {
+  --cycle: 4.8s;
+}
+.fc-display[data-loaded="true"] {
+  --cycle: 1.7s;
+}
+.fc-display .fc-face {
+  fill: #06a9ae;
+  opacity: 0.3;
+}
+.fc-display[data-loaded="true"] .fc-face {
+  fill: #18d4d0;
+  opacity: 0.58;
+}
+.fc-display .fc-aura {
+  opacity: 0.54;
+  animation: fc-breathe var(--cycle) ease-in-out var(--phase) infinite alternate;
+}
+.fc-display[data-loaded="true"] .fc-aura {
+  filter: drop-shadow(0 0 7px #43fff3);
+}
+.fc-level {
+  fill: #bdffff;
+  transform-box: fill-box;
+  transform-origin: center bottom;
+  animation: fc-read-level var(--cycle) ease-in-out infinite alternate;
+}
+.fc-readout {
+  stroke: #a5fff8;
+  stroke-width: 1;
+  opacity: 0.8;
+}
+.fc-pilot {
+  fill: #c6ffcb;
+  animation: fc-beacon 3.1s ease-in-out var(--phase) infinite alternate;
+}
+.fc-display[data-loaded="true"] .fc-pilot,
+.fc-equipment-dots.loaded .fc-pilot {
+  animation-duration: 1.6s;
+  filter: drop-shadow(0 0 3px #31f8c0);
+}
+@keyframes fc-breathe {
+  from {
+    opacity: 0.31;
+  }
+  to {
+    opacity: 0.87;
+  }
+}
+@keyframes fc-read-level {
+  0% {
+    transform: scaleY(0.32);
+    opacity: 0.58;
+  }
+  45% {
+    transform: scaleY(0.85);
+  }
+  100% {
+    transform: scaleY(0.57);
+    opacity: 0.95;
+  }
+}
+@keyframes fc-beacon {
+  0%,
+  25% {
+    opacity: 0.35;
+  }
+  80%,
+  100% {
+    opacity: 0.98;
+  }
+}
+.fc-day.paused * {
+  animation-play-state: paused !important;
+}
+.fc-day .fc-control-feed {
+  opacity: 0.68;
+}
+@media (prefers-reduced-motion: reduce) {
+  .fc-day * {
+    animation: none !important;
+    transition: none !important;
+  }
+  .fc-day .fc-track circle {
+    display: none;
+  }
+}
+@media (max-width: 760px) {
+  .fc-day .fc-plate {
+    width: 100%;
+  }
+  .fc-day .fc-ports span {
+    font-size: 6px;
+  }
+  .fc-day .fc-ports {
+    width: 11.5%;
+  }
+}

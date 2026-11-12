@@ -1,15 +1,23 @@
 import { BrandLogo } from "./BrandLogo";
 
-export type AppRoute = "today" | "knowledge" | "codex" | "settings";
-type IconName = "today" | "knowledge" | "codex" | "settings";
+export type AppRoute = "today" | "knowledge" | "codex" | "factory" | "settings";
+type IconName = AppRoute;
 const items: { route: AppRoute; label: string; icon: IconName }[] = [
   { route: "today", label: "今日", icon: "today" },
   { route: "knowledge", label: "知识库", icon: "knowledge" },
   { route: "codex", label: "Codex 工作", icon: "codex" },
+  { route: "factory", label: "智能工厂", icon: "factory" },
   { route: "settings", label: "设置", icon: "settings" },
 ];
 
 function NavIcon({ name }: { name: IconName }) {
+  if (name === "factory")
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M3 20V9l6 3V7l6 4V4h4l2 16Z" />
+        <path d="M7 16h2m3 0h2m3 0h1" />
+      </svg>
+    );
   if (name === "today")
     return (
       <svg viewBox="0 0 24 24" aria-hidden="true">

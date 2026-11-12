@@ -255,6 +255,7 @@ test("summary opens immediately, streams formatted Markdown, and keeps a rounded
 }, testInfo) => {
   await page.setViewportSize({ width: 1280, height: 820 });
   await page.goto("/");
+  await page.getByRole("button", { name: "今日", exact: true }).click();
   await page.getByLabel("选择 周报-01.docx").check();
 
   const group = page.getByRole("group", { name: "今日总结操作" });
@@ -293,6 +294,7 @@ test("today file table stays compact and scrolls inside the workspace", async ({
 }, testInfo) => {
   await page.setViewportSize({ width: 1280, height: 820 });
   await page.goto("/");
+  await page.getByRole("button", { name: "今日", exact: true }).click();
   await expect(page.getByText("周报-01.docx")).toBeVisible();
 
   const tableViewport = page.locator(".file-table-wrap");
@@ -319,6 +321,7 @@ test("today table keeps all columns visible at the minimum desktop viewport", as
 }, testInfo) => {
   await page.setViewportSize({ width: 1024, height: 680 });
   await page.goto("/");
+  await page.getByRole("button", { name: "今日", exact: true }).click();
   await expect(page.getByText("周报-01.docx")).toBeVisible();
 
   await expect(page.locator('[data-file-kind="pdf"]')).toBeVisible();
@@ -360,6 +363,7 @@ test("directory activity expands lazily and search clears its selection", async 
 }, testInfo) => {
   await page.setViewportSize({ width: 1280, height: 820 });
   await page.goto("/");
+  await page.getByRole("button", { name: "今日", exact: true }).click();
   await expect(page.getByText("项目A")).toBeVisible();
 
   const directoryRow = page.locator(".workspace-directory-row").first();

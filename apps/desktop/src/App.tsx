@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import "./App.css";
+import { FactoryPage } from "./features/factory/FactoryPage";
 import { AppSidebar, type AppRoute } from "./components/AppSidebar";
 import { SettingsPage } from "./features/settings/SettingsPage";
 import { KnowledgePage } from "./features/knowledge/KnowledgePage";
@@ -20,7 +21,7 @@ export type CodexNavigationTarget = {
 };
 
 function App({ commands = unavailableCommands }: { commands?: QizhiCommands }) {
-  const [route, setRoute] = useState<AppRoute>("today");
+  const [route, setRoute] = useState<AppRoute>("factory");
   const [knowledgeMounted, setKnowledgeMounted] = useState(false);
   const [codexMounted, setCodexMounted] = useState(false);
   const [codexNavigationTarget, setCodexNavigationTarget] =
@@ -53,7 +54,7 @@ function App({ commands = unavailableCommands }: { commands?: QizhiCommands }) {
         <SettingsPage commands={commands} />
       </section>
     );
-  if (route === "codex") content = null;
+  if (route === "codex" || route === "factory") content = null;
   return (
     <main className="app-shell">
       <AppSidebar active={route} onNavigate={navigate} />
@@ -65,10 +66,16 @@ function App({ commands = unavailableCommands }: { commands?: QizhiCommands }) {
               ? "workspace knowledge-workspace-shell"
               : route === "codex"
                 ? "workspace codex-workspace-shell"
-                : "workspace"
+                : route === "factory"
+                  ? "workspace factory-workspace"
+                  : "workspace"
         }
       >
         {content}
+        <FactoryPage
+          active={route === "factory"}
+          onOpenKnowledge={() => navigate("knowledge")}
+        />
         {knowledgeMounted ? (
           <KnowledgePage
             commands={commands}
