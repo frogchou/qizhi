@@ -1,9 +1,11 @@
 pub mod app_state;
+pub mod basket;
 pub mod codex;
 pub mod commands;
 pub mod config;
 pub mod contracts;
 pub mod database;
+pub mod factory;
 pub mod jev;
 pub mod knowledge_selection;
 pub mod network;
@@ -51,6 +53,10 @@ pub fn run() {
                 .codex()
                 .recover_interrupted_artifact_uploads(recovery_now);
             let codex_runtime = codex::CodexRuntime::new(database.clone(), project_files);
+            app.manage(factory::FactoryBridge::new(database.clone())?);
+            let basket = basket::Basket::new(database.clone(), data_dir.join("material-basket"));
+            let _ = basket.purge_orphans();
+            app.manage(basket);
             app.manage(app_state::AppState {
                 database,
                 scan_rules,
@@ -98,6 +104,20 @@ pub fn run() {
             commands::codex_handoff::list_pending_codex_handoffs,
             commands::codex_handoff::dismiss_codex_handoff_item,
             commands::settings::get_settings,
+            factory::factory_get_settings,
+            factory::factory_save_settings,
+            factory::factory_test_connection,
+            factory::factory_request,
+            factory::factory_cancel_read,
+            factory::factory_download,
+            factory::upload::factory_upload_basket_item,
+            factory::upload::factory_pick_uploads,
+            basket::basket_list,
+            basket::basket_add,
+            basket::basket_pick_local,
+            basket::basket_remove,
+            basket::basket_clear,
+            basket::basket_attach_codex,
             commands::settings::save_settings,
             commands::settings::test_service_connection,
             commands::settings::get_ntfs_indexer_status,

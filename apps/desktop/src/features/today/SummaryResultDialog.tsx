@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
+import { ControlIcon } from "../../components/ControlIcon";
 
 import type { QizhiCommands, RagflowDataset } from "../../lib/tauri";
 
@@ -171,12 +172,12 @@ export function SummaryResultDialog({
           </div>
           <button
             aria-label="关闭总结"
-            className="modal-close"
+            className="ui-icon-button ui-close"
             disabled={busy}
             onClick={onClose}
             type="button"
           >
-            ×
+            <ControlIcon name="x" size={16} />
           </button>
         </header>
         {result.truncated ? (

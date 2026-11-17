@@ -1,0 +1,57 @@
+.knowledge-reference-tools {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0;
+}
+.knowledge-header .header-actions button,
+.knowledge-header > button {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.knowledge-reference-tools > span {
+  color: var(--q-muted, #687d70);
+  font-size: 12px;
+  margin-right: 6px;
+}
+.knowledge-reference-choice {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 9px;
+  border-radius: var(--q-radius, 7px);
+  font-size: 13px;
+  color: var(--q-ink, #243c32);
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.knowledge-reference-choice:hover,
+.knowledge-reference-choice:has(input:checked) {
+  background: var(--q-soft, #eaf3eb);
+}
+.knowledge-reference-choice input,
+.knowledge-page .citation-card input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  margin: 0;
+  accent-color: var(--q-accent, #226b55);
+}
+.knowledge-page .agent-source-card {
+  container-type: inline-size;
+}
+.knowledge-page .agent-source-actions {
+  flex-wrap: wrap;
+}
+@container (max-width: 375px) {
+  .knowledge-page .agent-source-actions {
+    grid-column: 2 / -1;
+  }
+}
+@media (min-width: 981px) and (max-width: 1150px) {
+  .knowledge-page .knowledge-layout-v2 {
+    grid-template-columns: minmax(0, 1fr) minmax(205px, 31%);
+    gap: 18px;
+  }
+}

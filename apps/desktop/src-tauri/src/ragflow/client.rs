@@ -248,6 +248,8 @@ pub struct RagflowClient {
 }
 
 impl RagflowClient {
+    pub(crate) fn configured_endpoint(&self) -> &str { self.base_url.as_str() }
+
     pub fn from_saved_config(
         configs: ConfigRepository,
         secrets: WindowsCredentialStore,

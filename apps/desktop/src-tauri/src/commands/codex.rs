@@ -287,6 +287,13 @@ pub fn refresh_codex_material_with_state(
         .into_iter()
         .find(|material| material.id == material_id)
         .ok_or_else(|| "没有找到要刷新的项目资料。".to_owned())?;
+    if material
+        .origin_reference
+        .as_deref()
+        .is_some_and(|origin| origin.starts_with("basket:"))
+    {
+        return Err("该资料使用已保存的资料筐快照。需要新版本时请重新加入资料。".into());
+    }
     let temporary;
     let source = match material.kind.as_str() {
         "local" => resolve_local_material_source(&state, &material)?,
@@ -654,6 +661,19 @@ fn inspect_material_source(
     state: &AppState,
     material: &CodexMaterial,
 ) -> Result<CodexMaterialSourceStatus, String> {
+    if material
+        .origin_reference
+        .as_deref()
+        .is_some_and(|origin| origin.starts_with("basket:"))
+    {
+        return Ok(CodexMaterialSourceStatus {
+            material_id: material.id.clone(),
+            state: "snapshot_only".into(),
+            source_label: "资料筐快照".into(),
+            refreshable: false,
+            revealable: false,
+        });
+    }
     match material.kind.as_str() {
         "local" => match resolve_local_material_source(state, material) {
             Ok(path) => {

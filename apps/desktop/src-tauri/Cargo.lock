@@ -3045,6 +3045,7 @@ name = "qizhi_desktop"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "futures-util",
  "keyring",
  "pdf-extract",
  "reqwest",
@@ -3056,6 +3057,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-dialog",
  "tauri-plugin-opener",
+ "tempfile",
  "thiserror 2.0.21",
  "url",
  "uuid",

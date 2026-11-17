@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ControlIcon } from "../../components/ControlIcon";
 
 import type {
   CodexModelOption,
@@ -71,7 +72,9 @@ export function CodexSettingsSection({
   return (
     <article className="service-card codex-settings-card">
       <div className="service-name">
-        <span className="service-icon">⌘</span>
+        <span className="service-icon" aria-hidden="true">
+          <ControlIcon name="terminal" size={18} />
+        </span>
         <div>
           <h3>Codex</h3>
           <p>复用本机 Codex 的账号、网络、MCP、Skills 和插件。</p>

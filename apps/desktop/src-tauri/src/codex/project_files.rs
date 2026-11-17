@@ -479,7 +479,7 @@ fn resolve_beneath(base: &Path, relative: &Path) -> Result<PathBuf, ProjectFileE
     Ok(joined)
 }
 
-fn ensure_regular_source(path: &Path) -> Result<(), ProjectFileError> {
+pub(crate) fn ensure_regular_source(path: &Path) -> Result<(), ProjectFileError> {
     let metadata = fs::symlink_metadata(path).map_err(|_| ProjectFileError::Io)?;
     if !metadata.is_file() || metadata.file_type().is_symlink() {
         return Err(ProjectFileError::UnsafePath);
@@ -487,7 +487,7 @@ fn ensure_regular_source(path: &Path) -> Result<(), ProjectFileError> {
     ensure_no_reparse(path)
 }
 
-fn metadata_modified_ms(metadata: &fs::Metadata) -> i64 {
+pub(crate) fn metadata_modified_ms(metadata: &fs::Metadata) -> i64 {
     metadata
         .modified()
         .ok()

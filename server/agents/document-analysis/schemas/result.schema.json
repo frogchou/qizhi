@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["answer", "summary", "documents", "deliveryArtifactPaths"],
+  "properties": {
+    "answer": { "type": "string", "minLength": 1, "description": "完整可阅读 Markdown 答复，包含逐文件内容总结、用途、真实来源及原文依据；不是运行状态或验收结论" },
+    "summary": { "type": "string", "minLength": 1, "description": "简短交付状态，不能替代 answer" },
+    "documents": {
+      "type": "array", "minItems": 1, "maxItems": 30,
+      "items": {
+        "type": "object",
+        "required": ["documentId", "title", "path", "sha256", "purpose", "summary", "keyPoints", "evidence", "limitations"],
+        "properties": {
+          "documentId": { "type": "string", "minLength": 1, "maxLength": 160 },
+          "title": { "type": "string", "minLength": 1 },
+          "path": { "type": "string", "minLength": 1 },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "purpose": { "type": "string", "minLength": 1 },
+          "summary": { "type": "string", "minLength": 1 },
+          "keyPoints": { "type": "array", "items": { "type": "string" } },
+          "evidence": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+          "limitations": { "type": "array", "items": { "type": "string" } }
+        },
+        "additionalProperties": false
+      }
+    },
+    "deliveryArtifactPaths": { "type": "array", "minItems": 1, "maxItems": 1, "items": { "type": "string", "minLength": 1 } }
+  },
+  "additionalProperties": false
+}

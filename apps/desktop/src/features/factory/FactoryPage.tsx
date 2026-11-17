@@ -1,3 +1,4 @@
+import { ControlIcon } from "../../components/ControlIcon";
 import { useEffect, useReducer, useRef, useState, type ReactNode } from "react";
 import { CampusMap } from "./CampusMap";
 import {
@@ -50,8 +51,14 @@ function Modal({
     >
       <header>
         <h2>{title}</h2>
-        <button onClick={close} aria-label="关闭窗口">
-          ×
+        <button
+          type="button"
+          className="ui-icon-button ui-close"
+          onClick={close}
+          aria-label="关闭窗口"
+          title="关闭窗口"
+        >
+          <ControlIcon name="x" size={17} />
         </button>
       </header>
       {children}
@@ -182,14 +189,14 @@ function FactoryView({
         </div>
         <span className="fc-demo">模拟数据</span>
         <button
-          className="fc-primary"
+          className="ui-action ui-primary"
           onClick={() => {
             setTitle("");
             setManual(true);
             setModal("new");
           }}
         >
-          ＋ 新建需求
+          <ControlIcon name="plus" size={16} /> 新建需求
         </button>
       </header>
       <div className="fc-stats">
@@ -264,9 +271,11 @@ function FactoryView({
                 type="button"
                 ref={drawerClose}
                 onClick={overview}
+                className="ui-icon-button ui-close"
                 aria-label="关闭抽屉"
+                title="关闭抽屉"
               >
-                ×
+                <ControlIcon name="x" size={17} />
               </button>
             </div>
             {job ? (
@@ -316,7 +325,7 @@ function FactoryView({
                 <div className="fc-actions">
                   {job.status === "blocked" && (
                     <button
-                      className="fc-primary"
+                      className="ui-action ui-primary"
                       onClick={() => dispatch({ type: "retry", id: job.id })}
                     >
                       重试此节点
@@ -325,7 +334,7 @@ function FactoryView({
                   {job.status === "review" && (
                     <>
                       <button
-                        className="fc-primary"
+                        className="ui-action ui-primary"
                         onClick={() =>
                           dispatch({ type: "approve", id: job.id })
                         }
@@ -341,7 +350,7 @@ function FactoryView({
                   )}
                   {job.status === "done" && (
                     <button
-                      className="fc-primary"
+                      className="ui-action ui-primary"
                       onClick={() => setModal("result")}
                     >
                       查看交付单
@@ -360,7 +369,7 @@ function FactoryView({
                     </div>
                     <button
                       type="button"
-                      className="fc-primary fc-open-knowledge"
+                      className="ui-action ui-primary fc-open-knowledge"
                       onClick={onOpenKnowledge}
                     >
                       打开栖知知识库
@@ -368,7 +377,9 @@ function FactoryView({
                   </>
                 )}
                 {station?.id === "runtime" && (
-                  <div className="fc-tags">模拟运行环境 · Codex / Native</div>
+                  <div className="fc-tags">
+                    模拟运行环境 · Codex 推理 / 本地服务
+                  </div>
                 )}
                 <JobList jobs={visibleJobs} follow={follow} />
               </>
@@ -457,10 +468,14 @@ function FactoryView({
               质检完成后由我审批
             </label>
             <footer>
-              <button type="button" onClick={() => setModal(null)}>
+              <button
+                type="button"
+                className="ui-action ui-quiet"
+                onClick={() => setModal(null)}
+              >
                 取消
               </button>
-              <button disabled={!title.trim()} className="fc-primary">
+              <button disabled={!title.trim()} className="ui-action ui-primary">
                 提交并跟随
               </button>
             </footer>

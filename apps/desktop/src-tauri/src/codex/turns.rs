@@ -378,31 +378,32 @@ impl CodexRuntime {
                 .state
                 .lock()
                 .map_err(|_| CodexRuntimeError::ProcessExited)?;
-            if state.resolved_approvals.contains(&request_id) {
-                return Err(CodexRuntimeError::RequestFailed);
-            }
-            let approval = state
+            state
                 .pending_approvals
                 .remove(&request_id)
-                .ok_or(CodexRuntimeError::RequestFailed)?;
-            state.resolved_approvals.insert(request_id.clone());
-            approval
+                .ok_or(CodexRuntimeError::RequestFailed)?
         };
-        self.ensure_started()?
-            .respond(approval.request_id.clone(), json!({"decision":decision}))?;
-        self.database
-            .codex()
-            .record_approval(&CodexApprovalInput {
-                project_id: approval.project_id,
-                conversation_id: approval.conversation_id,
-                turn_id: approval.local_turn_id,
-                item_id: approval.item_id,
-                action_type: approval.action_type,
-                target_summary: approval.target_summary,
-                decision: decision.to_owned(),
-                created_at_utc_ms: now_ms(),
-            })
-            .map_err(|_| CodexRuntimeError::RequestFailed)
+        let response = approval_response(&approval, decision);
+        if let Err(error) = self
+            .ensure_started()
+            .and_then(|client| client.respond(approval.request_id.clone(), response))
+        {
+            if let Ok(mut state) = self.state.lock() {
+                state.pending_approvals.insert(request_id, approval.clone());
+            }
+            return Err(error);
+        }
+        let _ = self.database.codex().record_approval(&CodexApprovalInput {
+            project_id: approval.project_id,
+            conversation_id: approval.conversation_id,
+            turn_id: approval.local_turn_id,
+            item_id: approval.item_id,
+            action_type: approval.action_type,
+            target_summary: approval.target_summary,
+            decision: decision.to_owned(),
+            created_at_utc_ms: now_ms(),
+        });
+        Ok(())
     }
 }
 
@@ -558,6 +559,8 @@ fn run_event_loop(
                         request_id.clone(),
                         PendingApproval {
                             request_id: request_value,
+                            request_method: method.to_owned(),
+                            request_params: notification.params.clone(),
                             project_id: input.project_id.clone(),
                             conversation_id: input.conversation_id.clone(),
                             local_turn_id: local_turn_id.clone(),
@@ -701,6 +704,28 @@ fn approval_summary(params: &Value) -> String {
         .or_else(|| params.get("cwd").and_then(Value::as_str))
         .map(|value| truncate(value, 800))
         .unwrap_or_else(|| "Codex 请求继续执行此操作。".to_owned())
+}
+
+fn approval_response(approval: &PendingApproval, decision: &str) -> Value {
+    if approval.request_method == "item/permissions/requestApproval" {
+        let permissions = if matches!(decision, "accept" | "acceptForSession") {
+            approval
+                .request_params
+                .get("permissions")
+                .cloned()
+                .unwrap_or_else(|| json!({}))
+        } else {
+            json!({})
+        };
+        let scope = if decision == "acceptForSession" {
+            "session"
+        } else {
+            "turn"
+        };
+        json!({"permissions":permissions,"scope":scope})
+    } else {
+        json!({"decision":decision})
+    }
 }
 
 fn truncate(value: &str, limit: usize) -> String {

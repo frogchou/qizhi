@@ -21,6 +21,8 @@ struct StreamingClient {
     responses: Mutex<HashMap<String, Vec<Value>>>,
     subscribers: Mutex<Vec<mpsc::Sender<AppServerNotification>>>,
     calls: Mutex<Vec<(String, Value)>>,
+    server_responses: Mutex<Vec<(Value, Value)>>,
+    response_failures: Mutex<usize>,
     turn_start_entered: Mutex<Option<mpsc::Sender<()>>>,
     turn_start_release: Mutex<Option<mpsc::Receiver<()>>>,
 }
@@ -43,6 +45,20 @@ impl StreamingClient {
                 })
                 .is_ok()
         });
+    }
+    fn emit_request(&self, id: Value, method: &str, params: Value) {
+        self.subscribers.lock().unwrap().retain(|sender| {
+            sender
+                .send(AppServerNotification {
+                    method: method.to_owned(),
+                    params: params.clone(),
+                    request_id: Some(id.clone()),
+                })
+                .is_ok()
+        });
+    }
+    fn fail_next_server_response(&self) {
+        *self.response_failures.lock().unwrap() += 1;
     }
 }
 impl AppServerClient for StreamingClient {
@@ -77,6 +93,16 @@ impl AppServerClient for StreamingClient {
         let (sender, receiver) = mpsc::channel();
         self.subscribers.lock().unwrap().push(sender);
         receiver
+    }
+    fn respond(&self, id: Value, result: Value) -> Result<(), CodexRuntimeError> {
+        let mut failures = self.response_failures.lock().unwrap();
+        if *failures > 0 {
+            *failures -= 1;
+            return Err(CodexRuntimeError::ProcessExited);
+        }
+        drop(failures);
+        self.server_responses.lock().unwrap().push((id, result));
+        Ok(())
     }
 }
 
@@ -450,6 +476,125 @@ fn marks_the_local_turn_failed_when_codex_rejects_turn_start() {
             .handoff
             .id,
         handoff.id
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn approval_responses_can_be_retried_and_reused_request_ids_do_not_get_stuck() {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!("qizhi-codex-approval-{nonce}"));
+    std::fs::create_dir_all(&root).unwrap();
+    let database = Database::open(&root.join("qizhi.db")).unwrap();
+    let files = CodexProjectFiles::new(root.join("projects"));
+    let project = database
+        .codex()
+        .create_project("项目", None, "managed", 1)
+        .unwrap();
+    let conversation = database
+        .codex()
+        .create_conversation(&project.id, "会话", 2)
+        .unwrap();
+    let client = Arc::new(StreamingClient::default());
+    client.respond_with("initialize", json!({}));
+    client.respond_with("thread/start", json!({"thread":{"id":"thread-approval"}}));
+    client.respond_with(
+        "turn/start",
+        json!({"turn":{"id":"turn-approval","status":"inProgress","items":[]}}),
+    );
+    let runtime = CodexRuntime::with_client(database, files, client.clone());
+    let (event_sender, event_receiver) = mpsc::channel();
+    runtime
+        .start_turn(
+            StartCodexTurnInput {
+                project_id: project.id.clone(),
+                conversation_id: conversation.id,
+                prompt: "创建文档".to_owned(),
+                model: None,
+                reasoning_effort: None,
+                handoff_ids: Vec::new(),
+            },
+            Arc::new(move |event| {
+                let _ = event_sender.send(event);
+            }),
+        )
+        .unwrap();
+
+    client.emit_request(
+        json!(7),
+        "item/permissions/requestApproval",
+        json!({
+            "threadId": "thread-approval",
+            "turnId": "turn-approval",
+            "itemId": "permission-1",
+            "cwd": "workspace",
+            "reason": "生成文件",
+            "permissions": {
+                "network": null,
+                "fileSystem": {"read": null, "write": ["workspace"], "entries": []}
+            }
+        }),
+    );
+    loop {
+        if matches!(
+            event_receiver.recv_timeout(Duration::from_secs(2)).unwrap(),
+            CodexTurnEvent::ApprovalRequested { .. }
+        ) {
+            break;
+        }
+    }
+
+    client.fail_next_server_response();
+    assert!(runtime.resolve_approval("7".to_owned(), "accept").is_err());
+    runtime
+        .resolve_approval("7".to_owned(), "accept")
+        .expect("a transient transport failure must leave the approval retryable");
+    assert_eq!(
+        client.server_responses.lock().unwrap()[0],
+        (
+            json!(7),
+            json!({
+                "permissions": {
+                    "network": null,
+                    "fileSystem": {"read": null, "write": ["workspace"], "entries": []}
+                },
+                "scope": "turn"
+            })
+        )
+    );
+
+    client.emit_request(
+        json!(7),
+        "item/commandExecution/requestApproval",
+        json!({
+            "threadId": "thread-approval",
+            "turnId": "turn-approval",
+            "itemId": "command-2",
+            "command": "echo done"
+        }),
+    );
+    loop {
+        if matches!(
+            event_receiver.recv_timeout(Duration::from_secs(2)).unwrap(),
+            CodexTurnEvent::ApprovalRequested { item_id, .. } if item_id == "command-2"
+        ) {
+            break;
+        }
+    }
+    runtime
+        .resolve_approval("7".to_owned(), "decline")
+        .expect("a request id reused by Codex must identify the new pending approval");
+    assert_eq!(
+        client.server_responses.lock().unwrap()[1],
+        (json!(7), json!({"decision":"decline"}))
+    );
+
+    client.emit(
+        "turn/completed",
+        json!({"threadId":"thread-approval","turn":{"id":"turn-approval","status":"completed","items":[]}}),
     );
     let _ = std::fs::remove_dir_all(root);
 }

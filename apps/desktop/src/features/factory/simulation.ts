@@ -133,14 +133,12 @@ function move(job: Job, step: number, at: number): Job {
   );
 }
 function seed(id: number, title: string, step: number, status: Status): Job {
-  const events = steps
-    .slice(0, step + 1)
-    .map((s, i) => ({
-      at: i * 5,
-      message: s.message,
-      area: s.area,
-      status: "working" as Status,
-    }));
+  const events = steps.slice(0, step + 1).map((s, i) => ({
+    at: i * 5,
+    message: s.message,
+    area: s.area,
+    status: "working" as Status,
+  }));
   const job: Job = {
     id,
     title,

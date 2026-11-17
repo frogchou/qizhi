@@ -248,7 +248,7 @@ fn client(state: &AppState) -> Result<RagflowClient, String> {
     RagflowClient::from_saved_config(state.database.configs(), WindowsCredentialStore)
 }
 
-fn upload_policy(state: &AppState) -> Result<(ScanPolicy, FileTypeFilter), String> {
+pub(crate) fn upload_policy(state: &AppState) -> Result<(ScanPolicy, FileTypeFilter), String> {
     let rules = state
         .scan_rules
         .get()
@@ -590,17 +590,46 @@ pub async fn query_ragflow_knowledge(
                 },
             };
             let _ = on_event.send(KnowledgeQueryStreamEvent::Completed);
-            let selection_token = state.knowledge_selections.register(
-                chunks
-                    .iter()
-                    .map(|chunk| (chunk.dataset_id.clone(), chunk.document_id.clone()))
-                    .chain(agent_results.iter().flat_map(|result| {
-                        result
-                            .sources
-                            .iter()
-                            .map(|source| (source.dataset_id.clone(), source.document_id.clone()))
-                            .collect::<Vec<_>>()
-                    })),
+            let retrieved_at_utc_ms = chrono::Utc::now().timestamp_millis();
+            let evidence = chunks
+                .iter()
+                .map(|c| crate::contracts::CodexRagflowChunkInput {
+                    chunk_id: c.id.clone(),
+                    content: c.content.clone(),
+                    document_name: c.document_name.clone(),
+                    document_id: c.document_id.clone(),
+                    dataset_id: c.dataset_id.clone(),
+                    similarity: c.similarity,
+                    retrieved_at_utc_ms,
+                })
+                .chain(agent_results.iter().flat_map(|result| {
+                    result
+                        .references
+                        .iter()
+                        .map(|c| crate::contracts::CodexRagflowChunkInput {
+                            chunk_id: c.chunk_id.clone(),
+                            content: c.content.clone(),
+                            document_name: c.document_name.clone(),
+                            document_id: c.document_id.clone(),
+                            dataset_id: c.dataset_id.clone(),
+                            similarity: c.similarity,
+                            retrieved_at_utc_ms,
+                        })
+                }))
+                .collect();
+            let selection_token = state.knowledge_selections.register_query(
+                client.configured_endpoint().to_owned(),
+                input.question,
+                evidence,
+                agent_results.iter().flat_map(|result| {
+                    result.sources.iter().map(|source| {
+                        (
+                            source.dataset_id.clone(),
+                            source.document_id.clone(),
+                            source.document_name.clone(),
+                        )
+                    })
+                }),
             );
             Ok(RagflowKnowledgeQueryOutput {
                 selection_token,

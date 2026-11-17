@@ -60,7 +60,6 @@ pub(crate) struct RuntimeState {
     pub(crate) starting_projects: HashSet<String>,
     pub(crate) uploading_projects: HashSet<String>,
     live_threads: HashSet<String>,
-    pub(crate) resolved_approvals: HashSet<String>,
     pub(crate) pending_approvals: HashMap<String, PendingApproval>,
 }
 
@@ -86,6 +85,8 @@ pub(crate) struct ActiveTurn {
 #[derive(Clone)]
 pub(crate) struct PendingApproval {
     pub(crate) request_id: Value,
+    pub(crate) request_method: String,
+    pub(crate) request_params: Value,
     pub(crate) project_id: String,
     pub(crate) conversation_id: String,
     pub(crate) local_turn_id: String,
@@ -184,7 +185,6 @@ impl CodexRuntime {
                 starting_projects: HashSet::new(),
                 uploading_projects: HashSet::new(),
                 live_threads: HashSet::new(),
-                resolved_approvals: HashSet::new(),
                 pending_approvals: HashMap::new(),
             })),
         }

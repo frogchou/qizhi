@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["passed", "criteria", "findings", "summary"],
+  "properties": {
+    "passed": { "type": "boolean" },
+    "criteria": { "type": "array", "items": { "type": "object", "required": ["id", "criterion", "method", "required"], "properties": { "id": { "type": "string" }, "criterion": { "type": "string" }, "method": { "type": "string" }, "required": { "type": "boolean" } } } },
+    "findings": { "type": "array", "items": { "type": "object", "required": ["severity", "message"], "properties": { "severity": { "type": "string" }, "message": { "type": "string" }, "path": { "type": "string" } } } },
+    "summary": { "type": "string" }
+  },
+  "additionalProperties": false
+}

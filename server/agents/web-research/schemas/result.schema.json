@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["query", "sources", "artifacts"],
+  "properties": {
+    "query": { "type": "string" },
+    "sources": { "type": "array", "items": { "type": "object" } },
+    "artifacts": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": true
+}

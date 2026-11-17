@@ -1,0 +1,12 @@
+protocolVersion: v1
+agentId: ragflow-knowledge
+displayName: RAGFlow 知识查询
+version: 1.0.1
+runtime: native
+entryCommand:
+  - ../../node_modules/.bin/tsx
+  - src/main.ts
+selfCheckCommand: ../../node_modules/.bin/tsx src/self-check.ts
+capabilities:
+  - name: knowledge.retrieve
+    description: 在指定企业知识库数据集中检索只读证据

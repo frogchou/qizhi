@@ -1,0 +1,17 @@
+.task-input-picker{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:1px}
+.task-input-picker input{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;clip-path:inset(50%)}
+.task-input-picker .outline-button{cursor:pointer}
+.task-input-picker span,.upload-status{color:#73829a;font-size:12px}
+.upload-status{margin:0;border-left:3px solid #4b5ae2;background:#f4f6ff;padding:7px 9px}
+.pending-input-list{display:grid;gap:6px;padding:0;margin:0;list-style:none}
+.pending-input-list li,.artifact-list li{display:flex;align-items:center;gap:8px;min-width:0}
+.pending-input-list li{border:1px solid #e0e6f0;border-radius:5px;background:#fff;padding:7px 9px;color:#2d3b55;font-size:12px}
+.pending-input-list li>span{color:#2d3dd0;background:#eef1ff;border-radius:4px;padding:2px 4px}
+.pending-input-list li div,.artifact-list li div{min-width:0;flex:1}
+.pending-input-list strong,.pending-input-list small,.artifact-list strong,.artifact-list small{display:block}
+.pending-input-list strong,.artifact-list strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pending-input-list small,.artifact-list small{color:#7b889e;font-size:11px;margin-top:2px}
+.outcome-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+.artifact-list li{margin:7px 0}
+.artifact-list .outline-button{margin-left:auto}
+@media(max-width:780px){.outcome-grid{grid-template-columns:1fr}}

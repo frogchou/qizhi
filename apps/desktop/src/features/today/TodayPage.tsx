@@ -1,3 +1,6 @@
+import { AddToBasketButton } from "../materials/MaterialBasket";
+import { ControlIcon } from "../../components/ControlIcon";
+import "./today-actions.css";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { FileTypeIcon } from "../../components/FileTypeIcon";
@@ -236,6 +239,15 @@ export function TodayPage({
   const evaluatingIds = useRef(new Set<number>());
   const contextMenuRef = useRef<HTMLDivElement>(null);
 
+  function basketSource(fileId?: number) {
+    if (!workspacePage) return null;
+    return {
+      kind: view,
+      queryId: workspacePage.queryId,
+      fileIds: fileId === undefined ? [...selectedFileIds] : [fileId],
+      directoryIds: fileId === undefined ? [...selectedDirectoryIds] : [],
+    };
+  }
   function openCodexHandoff(fileId?: number) {
     if (!workspacePage) {
       setNotice("当前目录查询尚未准备好，请刷新列表后重试。");
@@ -962,7 +974,19 @@ export function TodayPage({
               : "按修改时间发现，内容尚未分析。"}
           </p>
         </div>
-        <div className="header-actions">
+        <div className="header-actions today-selection-toolbar">
+          <AddToBasketButton
+            className="ui-action today-basket-action"
+            label="加入资料筐"
+            source={() => basketSource()}
+            disabled={
+              summaryBusy ||
+              manualEvaluationBusy ||
+              !workspacePage ||
+              (!selectedFileIds.size && !selectedDirectoryIds.size)
+            }
+            onResult={setNotice}
+          />
           <button
             className="button secondary send-codex-action"
             disabled={
@@ -1368,6 +1392,17 @@ export function TodayPage({
           >
             上传到知识库
           </button>
+          <AddToBasketButton
+            role="menuitem"
+            label="加入资料筐"
+            disabled={!workspacePage}
+            source={() => {
+              const selection = basketSource(fileMenu.id);
+              setFileMenu(null);
+              return selection;
+            }}
+            onResult={setNotice}
+          />
           <button role="menuitem" onClick={() => openCodexHandoff(fileMenu.id)}>
             发送到 Codex
           </button>
@@ -1401,12 +1436,12 @@ export function TodayPage({
               </div>
               <button
                 aria-label="关闭上传对话框"
-                className="modal-close"
+                className="ui-icon-button ui-close"
                 disabled={uploading}
                 onClick={() => setUploadDialog(null)}
                 type="button"
               >
-                ×
+                <ControlIcon name="x" size={16} />
               </button>
             </header>
             {uploadFile ? (

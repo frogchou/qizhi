@@ -1,3 +1,5 @@
+import { useMaterialBasket } from "../features/materials/MaterialBasket";
+import { ControlIcon } from "./ControlIcon";
 import { BrandLogo } from "./BrandLogo";
 
 export type AppRoute = "today" | "knowledge" | "codex" | "factory" | "settings";
@@ -49,10 +51,13 @@ function NavIcon({ name }: { name: IconName }) {
 export function AppSidebar({
   active,
   onNavigate,
+  onOpenBasket,
 }: {
   active: AppRoute;
   onNavigate: (route: AppRoute) => void;
+  onOpenBasket?: () => void;
 }) {
+  const basket = useMaterialBasket();
   return (
     <aside className="sidebar">
       <div className="brand">
@@ -63,19 +68,43 @@ export function AppSidebar({
         {items.map((item) => (
           <button
             key={item.route}
+            type="button"
+            aria-label={item.label}
+            title={item.label}
+            aria-current={active === item.route ? "page" : undefined}
             className={active === item.route ? "nav-item active" : "nav-item"}
             onClick={() => onNavigate(item.route)}
           >
             <NavIcon name={item.icon} />
-            {item.label}
+            <span className="nav-label">{item.label}</span>
           </button>
         ))}
       </nav>
-      <p className="sidebar-note">
-        本地优先
-        <br />
-        知识工作空间
-      </p>
+      <div className="sidebar-footer">
+        {onOpenBasket && (
+          <button
+            type="button"
+            className="basket-navigation"
+            aria-label="资料筐"
+            title="资料筐"
+            aria-haspopup="dialog"
+            onClick={onOpenBasket}
+          >
+            <ControlIcon name="basket" size={17} />
+            <span className="basket-nav-label">资料筐</span>
+            {basket.loaded && basket.items.length > 0 && (
+              <span className="basket-nav-count" aria-hidden="true">
+                {basket.items.length}
+              </span>
+            )}
+          </button>
+        )}
+        <p className="sidebar-note">
+          本地优先
+          <br />
+          知识工作空间
+        </p>
+      </div>
     </aside>
   );
 }

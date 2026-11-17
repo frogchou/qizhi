@@ -1,4 +1,10 @@
 import type {
+  BasketItem,
+  BasketSource,
+  BasketResult,
+  BasketAttachment,
+} from "../features/materials/basket-types";
+import type {
   MaskedServiceConfig,
   ServiceConfigurationInput,
 } from "./contracts";
@@ -6,6 +12,12 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 
 export interface QizhiCommands {
+  listBasket?(): Promise<BasketItem[]>;
+  addToBasket?(source: BasketSource): Promise<BasketResult[]>;
+  pickBasketLocal?(): Promise<BasketResult[]>;
+  removeFromBasket?(itemIds: string[]): Promise<void>;
+  clearBasket?(): Promise<void>;
+  attachBasketToCodex?(input: BasketAttachment): Promise<CodexHandoffResult>;
   getCodexStatus?(): Promise<CodexRuntimeStatus>;
   refreshCodexStatus?(): Promise<CodexRuntimeStatus>;
   listCodexModels?(): Promise<CodexModelOption[]>;
@@ -765,6 +777,12 @@ export const unavailableCommands: QizhiCommands = {
 };
 
 export const tauriCommands: QizhiCommands = {
+  listBasket: () => invoke("basket_list"),
+  addToBasket: (source) => invoke("basket_add", { source }),
+  pickBasketLocal: () => invoke("basket_pick_local"),
+  removeFromBasket: (itemIds) => invoke("basket_remove", { itemIds }),
+  clearBasket: () => invoke("basket_clear"),
+  attachBasketToCodex: (input) => invoke("basket_attach_codex", { ...input }),
   getCodexStatus: () => invoke("get_codex_status"),
   refreshCodexStatus: () => invoke("refresh_codex_status"),
   listCodexModels: () => invoke("list_codex_models"),

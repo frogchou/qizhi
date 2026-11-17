@@ -6,7 +6,6 @@
   --copper: #007b79;
 }
 .workspace:has(.fc-day),
-.app-shell:has(.fc-day) > .sidebar,
 .fc:has(.fc-day) .fc-events {
   background: #fbfefd;
 }

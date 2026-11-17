@@ -4,6 +4,14 @@ import { describe, expect, it, vi } from "vitest";
 import type { QizhiCommands } from "../../lib/tauri";
 import { SettingsPage } from "./SettingsPage";
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((innerResolve) => {
+    resolve = innerResolve;
+  });
+  return { promise, resolve };
+}
+
 function commandsForSummarySettings(): QizhiCommands {
   return {
     getSettings: vi.fn().mockResolvedValue([]),
@@ -29,6 +37,90 @@ function commandsForSummarySettings(): QizhiCommands {
 }
 
 describe("SettingsPage", () => {
+  it("shows one settings category at a time and marks the active navigation item", async () => {
+    render(<SettingsPage commands={commandsForSummarySettings()} />);
+
+    const navigation = await screen.findByRole("navigation", {
+      name: "设置分类",
+    });
+    expect(navigation).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "扫描与隐私" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(screen.getByRole("button", { name: "连接服务" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "价值评估" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "今日总结" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Codex 工作" })).toBeVisible();
+
+    expect(
+      document.getElementById("settings-panel-privacy"),
+    ).not.toHaveAttribute("hidden");
+    expect(document.getElementById("settings-panel-services")).toHaveAttribute(
+      "hidden",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "连接服务" }));
+
+    expect(screen.getByRole("button", { name: "连接服务" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(document.getElementById("settings-panel-privacy")).toHaveAttribute(
+      "hidden",
+    );
+    expect(
+      document.getElementById("settings-panel-services"),
+    ).not.toHaveAttribute("hidden");
+  });
+
+  it("preserves unsaved drafts while switching settings categories", async () => {
+    render(<SettingsPage commands={commandsForSummarySettings()} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "连接服务" }));
+    const baseUrl = screen.getByLabelText("OpenAI Base URL");
+    fireEvent.change(baseUrl, {
+      target: { value: "https://draft.example.test/v1" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "扫描与隐私" }));
+    fireEvent.click(screen.getByRole("button", { name: "连接服务" }));
+
+    expect(screen.getByLabelText("OpenAI Base URL")).toHaveValue(
+      "https://draft.example.test/v1",
+    );
+  });
+
+  it("does not change category when asynchronous settings finish loading", async () => {
+    const settings =
+      deferred<Awaited<ReturnType<QizhiCommands["getSettings"]>>>();
+    const commands = {
+      ...commandsForSummarySettings(),
+      getSettings: vi.fn().mockReturnValue(settings.promise),
+    } satisfies QizhiCommands;
+    render(<SettingsPage commands={commands} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "今日总结" }));
+    settings.resolve([
+      {
+        service: "openai",
+        endpoint: "https://loaded.example.test/v1",
+        apiKeyMask: "••••••••",
+        credentialReference: "qizhi/openai/default",
+      },
+    ]);
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("OpenAI Base URL")).toHaveValue(
+        "https://loaded.example.test/v1",
+      ),
+    );
+    expect(screen.getByRole("button", { name: "今日总结" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+  });
+
   it("loads and saves the Today directory grouping threshold", async () => {
     const commands = {
       ...commandsForSummarySettings(),
@@ -135,6 +227,7 @@ describe("SettingsPage", () => {
     } satisfies QizhiCommands;
 
     render(<SettingsPage commands={client} />);
+    fireEvent.click(await screen.findByRole("button", { name: "今日总结" }));
     const summaryHeading = await screen.findByRole("heading", {
       name: "今日总结",
     });
@@ -206,6 +299,7 @@ describe("SettingsPage", () => {
     } satisfies QizhiCommands;
 
     render(<SettingsPage commands={commands} />);
+    fireEvent.click(await screen.findByRole("button", { name: "价值评估" }));
     fireEvent.change(await screen.findByLabelText("JEV 评估说明"), {
       target: { value: "判断资料是否值得复用。" },
     });
@@ -254,6 +348,7 @@ describe("SettingsPage", () => {
     };
 
     render(<SettingsPage commands={commands} />);
+    fireEvent.click(await screen.findByRole("button", { name: "连接服务" }));
     fireEvent.change(screen.getByLabelText("OpenAI Base URL"), {
       target: { value: "https://example.test/v1" },
     });
@@ -406,6 +501,7 @@ describe("SettingsPage", () => {
     };
 
     render(<SettingsPage commands={commands} />);
+    fireEvent.click(await screen.findByRole("button", { name: "连接服务" }));
     fireEvent.change(screen.getByLabelText("RAGFlow Base URL"), {
       target: { value: "http://ragflow.example.test" },
     });

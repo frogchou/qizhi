@@ -6,6 +6,7 @@
 
 | 目录                                | 职责                                                    |
 | ----------------------------------- | ------------------------------------------------------- |
+| [`materials/`](materials/README.md) | 跨页资料筐、来源选择和本轮会话材料                      |
 | [`today/`](today/README.md)         | 今日/过去文件工作台、目录聚合、价值评估、总结与资料交接 |
 | [`knowledge/`](knowledge/README.md) | RAGFlow 检索、Agent 会话、引用与资料下载                |
 | [`codex/`](codex/README.md)         | Codex 项目、会话、资料、任务过程与生成物                |

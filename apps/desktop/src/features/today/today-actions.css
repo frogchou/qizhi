@@ -1,0 +1,22 @@
+.today-selection-toolbar {
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.today-selection-toolbar .today-basket-action {
+  white-space: nowrap;
+}
+.today-page .file-context-menu [role="menuitem"] svg {
+  width: 15px;
+  height: 15px;
+  flex: none;
+}
+@media (max-width: 1150px) {
+  .today-page .page-header:has(.today-selection-toolbar) {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .today-page .today-selection-toolbar {
+    justify-content: flex-start;
+  }
+}

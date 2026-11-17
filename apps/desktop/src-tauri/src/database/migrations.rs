@@ -34,6 +34,14 @@ pub fn apply(connection: &Connection) -> Result<()> {
         ),
         (11, include_str!("../../migrations/0011_codex_projects.sql")),
         (12, include_str!("../../migrations/0012_codex_handoffs.sql")),
+        (
+            13,
+            include_str!("../../migrations/0013_factory_connection.sql"),
+        ),
+        (
+            14,
+            include_str!("../../migrations/0014_material_basket.sql"),
+        ),
     ] {
         let applied = connection.query_row(
             "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version = ?1)",
@@ -43,7 +51,7 @@ pub fn apply(connection: &Connection) -> Result<()> {
         if !applied {
             connection.execute_batch(migration)?;
             connection.execute(
-                "INSERT INTO schema_migrations(version) VALUES (?1)",
+                "INSERT OR IGNORE INTO schema_migrations(version) VALUES (?1)",
                 [version],
             )?;
         }

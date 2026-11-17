@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["evidence", "risks"],
+  "properties": {
+    "evidence": {
+      "type": "array",
+      "description": "带来源字段的 RAGFlow 证据",
+      "items": {
+        "type": "object",
+        "required": ["source", "excerpt"],
+        "properties": {
+          "source": { "type": "string" },
+          "datasetId": { "type": "string" },
+          "documentId": { "type": "string" },
+          "title": { "type": "string" },
+          "excerpt": { "type": "string" },
+          "similarity": { "type": "number" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "risks": { "type": "array", "items": { "type": "string" } }
+  }
+}

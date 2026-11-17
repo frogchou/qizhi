@@ -1,4 +1,5 @@
 import type { CodexHandoffDetails } from "../../lib/tauri";
+import { ControlIcon } from "../../components/ControlIcon";
 
 export function CodexPendingMaterials({
   handoffs,
@@ -21,15 +22,16 @@ export function CodexPendingMaterials({
       <div>
         {items.map(({ handoffId, item }) => (
           <span className="codex-pending-chip" key={item.id}>
-            <i aria-hidden="true">▤</i>
+            <ControlIcon name="file" size={13} />
             <span title={item.displayName}>{item.displayName}</span>
             <button
               type="button"
+              className="ui-icon-button"
               disabled={disabled}
               aria-label={`移除待用资料 ${item.displayName}`}
               onClick={() => void onDismiss(handoffId, item.materialId)}
             >
-              ×
+              <ControlIcon name="x" size={12} />
             </button>
           </span>
         ))}

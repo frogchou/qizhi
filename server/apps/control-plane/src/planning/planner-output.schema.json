@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["intent", "summary", "deliverables", "assumptions", "risks", "nodeReasons", "planJson"],
+  "properties": {
+    "intent": { "type": "string", "minLength": 1, "maxLength": 1000 },
+    "summary": { "type": "string", "minLength": 1, "maxLength": 4000 },
+    "deliverables": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 500 }, "maxItems": 30 },
+    "assumptions": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 1000 }, "maxItems": 30 },
+    "risks": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 1000 }, "maxItems": 30 },
+    "nodeReasons": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["nodeId", "reason"],
+        "properties": {
+          "nodeId": { "type": "string", "minLength": 1, "maxLength": 160 },
+          "reason": { "type": "string", "minLength": 1, "maxLength": 1000 }
+        }
+      }
+    },
+    "planJson": { "type": "string", "minLength": 2, "maxLength": 100000 }
+  }
+}

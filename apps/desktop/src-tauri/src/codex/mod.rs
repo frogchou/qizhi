@@ -7,6 +7,8 @@ mod protocol;
 pub(crate) mod ragflow_materials;
 mod runtime;
 mod turns;
+pub(crate) use handoff::{details_result, mime_type_for};
+pub(crate) use project_files::{ensure_regular_source, metadata_modified_ms};
 
 pub use artifact_upload::{
     ArtifactUploadError, ArtifactUploadRequest, ArtifactUploader, CodexArtifactUploadService,

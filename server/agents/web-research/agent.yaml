@@ -1,0 +1,12 @@
+protocolVersion: v1
+agentId: web-research
+displayName: 互联网资料收集
+version: 1.0.1
+runtime: native
+entryCommand:
+  - ../../node_modules/.bin/tsx
+  - src/main.ts
+selfCheckCommand: ../../node_modules/.bin/tsx src/self-check.ts
+capabilities:
+  - name: research.web
+    description: 在互联网检索公开资料，返回可追溯的摘要和来源链接

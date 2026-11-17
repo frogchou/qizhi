@@ -620,6 +620,38 @@ describe("KnowledgePage", () => {
     );
   });
 
+  it("grows the question composer through five lines and scrolls additional lines", async () => {
+    const client = commands();
+    render(<KnowledgePage commands={client} />);
+    await selectResources();
+    const input = screen.getByLabelText(
+      "询问你的工作知识库",
+    ) as HTMLTextAreaElement;
+    Object.defineProperty(input, "scrollHeight", {
+      configurable: true,
+      get: () => input.value.split("\n").length * 24,
+    });
+
+    fireEvent.change(input, { target: { value: "一\n二" } });
+    await waitFor(() => expect(input.style.height).not.toBe(""));
+    const twoLineHeight = Number.parseFloat(input.style.height);
+
+    fireEvent.change(input, { target: { value: "一\n二\n三\n四\n五" } });
+    await waitFor(() =>
+      expect(Number.parseFloat(input.style.height)).toBeGreaterThan(
+        twoLineHeight,
+      ),
+    );
+    const fiveLineHeight = Number.parseFloat(input.style.height);
+    expect(input.style.overflowY).toBe("hidden");
+
+    fireEvent.change(input, { target: { value: "一\n二\n三\n四\n五\n六" } });
+    await waitFor(() =>
+      expect(Number.parseFloat(input.style.height)).toBe(fiveLineHeight),
+    );
+    expect(input.style.overflowY).toBe("auto");
+  });
+
   it("continues each selected Agent with its own session on a follow-up", async () => {
     const client = commands();
     client.queryRagflowKnowledge = vi

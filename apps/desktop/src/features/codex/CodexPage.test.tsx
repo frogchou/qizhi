@@ -294,6 +294,147 @@ describe("CodexPage", () => {
     expect(screen.getByText("已经整理完成。")).toBeInTheDocument();
   });
 
+  it("renders an in-flight turn only once when it is already present in history", () => {
+    const conversationHistory: CodexConversationHistory = {
+      conversation,
+      turns: [
+        {
+          id: "turn-live-1",
+          conversationId: conversation.id,
+          codexTurnId: "codex-turn-live-1",
+          userText: "生成一份新文档",
+          status: "running",
+          startedAtUtcMs: 1,
+          completedAtUtcMs: null,
+          errorSummary: null,
+          messages: [
+            {
+              id: "message-live-user",
+              turnId: "turn-live-1",
+              role: "user",
+              markdown: "生成一份新文档",
+              status: "completed",
+              createdAtUtcMs: 1,
+            },
+            {
+              id: "message-live-assistant",
+              turnId: "turn-live-1",
+              role: "assistant",
+              markdown: "正在整理资料。",
+              status: "streaming",
+              createdAtUtcMs: 2,
+            },
+          ],
+          processItems: [],
+        },
+      ],
+    };
+    const liveIdentity = { liveTurnId: "turn-live-1" } as Record<
+      string,
+      string
+    >;
+
+    render(
+      <CodexConversation
+        {...liveIdentity}
+        history={conversationHistory}
+        livePrompt="生成一份新文档"
+        liveAnswer="正在整理资料。"
+        events={[]}
+        running
+        onSend={vi.fn()}
+        onStop={vi.fn()}
+        onResolveApproval={vi.fn()}
+      />,
+    );
+
+    expect(screen.getAllByText("生成一份新文档")).toHaveLength(1);
+    expect(screen.getAllByText("正在整理资料。")).toHaveLength(1);
+  });
+
+  it("reports approval failures and keeps the approval available for retry", async () => {
+    const client = commands();
+    client.startCodexTurn = vi
+      .fn()
+      .mockImplementation(async (_input, onEvent) => {
+        onEvent({
+          type: "started",
+          projectId: project.id,
+          conversationId: conversation.id,
+          localTurnId: "turn-approval",
+          codexTurnId: "codex-turn-approval",
+        });
+        onEvent({
+          type: "approvalRequested",
+          localTurnId: "turn-approval",
+          requestId: "approval-7",
+          itemId: "command-1",
+          actionType: "command",
+          targetSummary: "创建报告文件",
+        });
+        return {
+          localTurnId: "turn-approval",
+          codexTurnId: "codex-turn-approval",
+          threadId: "thread-approval",
+        };
+      });
+    client.resolveCodexApproval = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("Codex 审批响应发送失败"));
+    render(<CodexPage commands={client} />);
+
+    const composer = await screen.findByPlaceholderText(/Enter 发送/);
+    fireEvent.change(composer, { target: { value: "生成报告" } });
+    fireEvent.keyDown(composer, { key: "Enter", shiftKey: false });
+    fireEvent.click(await screen.findByRole("button", { name: "允许一次" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Codex 审批响应发送失败",
+    );
+    expect(screen.getByRole("button", { name: "允许一次" })).toBeEnabled();
+  });
+
+  it("grows the task composer through five lines and scrolls additional lines", async () => {
+    render(
+      <CodexConversation
+        history={history}
+        livePrompt=""
+        liveAnswer=""
+        events={[]}
+        running={false}
+        onSend={vi.fn()}
+        onStop={vi.fn()}
+        onResolveApproval={vi.fn()}
+      />,
+    );
+    const input = screen.getByPlaceholderText(
+      /Enter 发送/,
+    ) as HTMLTextAreaElement;
+    Object.defineProperty(input, "scrollHeight", {
+      configurable: true,
+      get: () => input.value.split("\n").length * 24,
+    });
+
+    fireEvent.change(input, { target: { value: "一\n二" } });
+    await waitFor(() => expect(input.style.height).not.toBe(""));
+    const twoLineHeight = Number.parseFloat(input.style.height);
+
+    fireEvent.change(input, { target: { value: "一\n二\n三\n四\n五" } });
+    await waitFor(() =>
+      expect(Number.parseFloat(input.style.height)).toBeGreaterThan(
+        twoLineHeight,
+      ),
+    );
+    const fiveLineHeight = Number.parseFloat(input.style.height);
+    expect(input.style.overflowY).toBe("hidden");
+
+    fireEvent.change(input, { target: { value: "一\n二\n三\n四\n五\n六" } });
+    await waitFor(() =>
+      expect(Number.parseFloat(input.style.height)).toBe(fiveLineHeight),
+    );
+    expect(input.style.overflowY).toBe("auto");
+  });
+
   it("keeps an in-flight turn attached to its own conversation when browsing another one", async () => {
     const second = {
       ...conversation,

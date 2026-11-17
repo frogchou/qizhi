@@ -138,8 +138,11 @@ function animatePark(
     });
   };
   const step = (now: number) => {
-    if (document.hidden || media.matches || settings.current.speed === 0)
+    if (document.hidden || media.matches || settings.current.speed === 0) {
+      svg.dataset.motion = "still";
+      previous = 0;
       return;
+    }
     const dt = previous ? Math.min((now - previous) / 1000, 0.08) : 0;
     previous = now;
     const { active, speed } = settings.current;

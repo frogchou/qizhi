@@ -1,0 +1,204 @@
+.factory-settings {
+  padding: 0;
+  overflow: clip;
+  max-width: 880px;
+}
+.factory-settings-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 0;
+  padding: 22px 26px;
+  border-bottom: 1px solid #e4ece6;
+}
+.factory-settings-head .service-icon {
+  width: 42px;
+  height: 42px;
+  flex-basis: 42px;
+  border-radius: 12px;
+}
+.factory-settings-head h2 {
+  margin: 0;
+  color: var(--q-ink);
+  font-size: 19px;
+  line-height: 1.35;
+  letter-spacing: -0.025em;
+}
+.factory-settings .factory-settings-head p,
+.factory-settings .factory-field-hint {
+  margin: 0;
+  color: var(--q-muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.factory-settings .factory-settings-head p {
+  margin-top: 4px;
+  font-size: 13px;
+}
+.factory-settings-row {
+  display: grid;
+  grid-template-columns: minmax(85px, 146px) minmax(0, 520px);
+  column-gap: 24px;
+  align-items: start;
+  padding: 0 26px;
+  margin: 19px 0;
+}
+.factory-mode-row {
+  padding-block: 0 18px;
+  margin-top: 22px;
+  border-bottom: 1px solid #eaf0eb;
+}
+.factory-field-label {
+  align-self: start;
+  margin: 0;
+  padding-top: 9px;
+  font-weight: 600;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--q-ink);
+}
+.factory-field-stack {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.factory-mode-switch {
+  display: inline-grid;
+  grid-template-columns: 1fr 1fr;
+  justify-self: start;
+  max-width: 100%;
+  gap: 3px;
+  padding: 3px;
+  border-radius: 10px;
+  border: 1px solid #d6e4db;
+  background: #f2f6f3;
+}
+.factory-mode-option {
+  position: relative;
+  min-width: 0;
+  line-height: 1;
+}
+.factory-mode-option input {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.factory-mode-option input:disabled {
+  cursor: not-allowed;
+}
+.factory-mode-option span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 30px;
+  padding: 5px 14px;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  font-family: inherit;
+  font-weight: 600;
+  font-size: 13px;
+  line-height: 1.25;
+  color: var(--q-muted);
+  white-space: nowrap;
+}
+.factory-mode-option input:checked + span {
+  border-color: #c7d9ce;
+  background: white;
+  color: var(--q-accent);
+  box-shadow: 0 1px 3px #203e3020;
+}
+.factory-mode-option input:enabled + span {
+  cursor: pointer;
+}
+.factory-mode-option:hover input:enabled:not(:checked) + span {
+  color: var(--q-ink);
+  background: #e9f1ea;
+}
+.factory-mode-option input:disabled + span {
+  opacity: 0.52;
+}
+.factory-mode-option input:focus-visible + span {
+  outline: 2px solid var(--q-ring);
+  outline-offset: 2px;
+}
+.factory-field-hint.factory-field-info {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+}
+.factory-field-info .ui-glyph {
+  align-self: flex-start;
+  margin-top: 2px;
+}
+.factory-settings-footer {
+  border-top: 1px solid #e4ece6;
+  background: #f9fbf9;
+  padding: 14px 26px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+.factory-settings-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+.factory-feedback {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0;
+  color: var(--q-accent);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.factory-feedback.is-error {
+  color: #9b4138;
+}
+@media (max-width: 760px) {
+  .factory-settings-head {
+    padding: 17px 16px;
+    gap: 11px;
+  }
+  .factory-settings-row {
+    grid-template-columns: minmax(0, 1fr);
+    padding-inline: 16px;
+    row-gap: 6px;
+    margin: 15px 0;
+  }
+  .factory-field-label {
+    padding: 0;
+  }
+  .factory-mode-row {
+    padding-bottom: 15px;
+  }
+  .factory-settings-footer {
+    padding: 12px 16px;
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .factory-settings-actions {
+    justify-content: flex-start;
+  }
+}
+@media (max-width: 390px) {
+  .factory-mode-option span {
+    padding-inline: 9px;
+  }
+}
+@media (forced-colors: active) {
+  .factory-mode-option input:checked + span {
+    border-color: Highlight;
+    color: Highlight;
+  }
+}

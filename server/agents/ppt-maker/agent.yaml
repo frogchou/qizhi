@@ -1,0 +1,12 @@
+protocolVersion: v1
+agentId: ppt-maker
+displayName: PPT 制作
+version: 1.0.1
+runtime: codex
+entryCommand:
+  - ../../node_modules/.bin/tsx
+  - src/main.ts
+selfCheckCommand: ../../node_modules/.bin/tsx src/self-check.ts
+capabilities:
+  - name: presentation.create
+    description: 根据业务简报生成、校验并交付 PowerPoint 演示文稿

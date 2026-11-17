@@ -1,3 +1,6 @@
+import { AddToBasketButton } from "../materials/MaterialBasket";
+import "./knowledge-actions.css";
+import type { BasketSource } from "../materials/basket-types";
 import {
   FormEvent,
   KeyboardEvent,
@@ -10,6 +13,7 @@ import {
 import { save } from "@tauri-apps/plugin-dialog";
 import ReactMarkdown from "react-markdown";
 
+import { AutoGrowTextarea } from "../../components/AutoGrowTextarea";
 import { BreakableText } from "../../components/BreakableText";
 import { StatusNotice } from "../../components/StatusNotice";
 import type {
@@ -167,7 +171,7 @@ function Composer({
       >
         {label}
       </label>
-      <textarea
+      <AutoGrowTextarea
         aria-label={label}
         id={followUp ? "follow-up" : "initial-question"}
         onChange={(event) => onChange(event.currentTarget.value)}
@@ -178,7 +182,6 @@ function Composer({
             : "询问你的工作知识库"
         }
         ref={inputRef}
-        rows={1}
         value={question}
       />
       <button
@@ -327,6 +330,41 @@ function InlineCitation({ reference }: { reference: RagflowAgentReference }) {
   );
 }
 
+type BasketChunkRef = {
+  datasetId: string;
+  documentId: string;
+  chunkId: string;
+};
+const documentKey = (item: { datasetId: string; documentId: string }) =>
+  JSON.stringify([item.datasetId, item.documentId]);
+const chunkKey = (item: BasketChunkRef) =>
+  JSON.stringify([item.datasetId, item.documentId, item.chunkId]);
+function basketSelection(
+  turn: ConversationTurn,
+  chunks: BasketChunkRef[],
+  originals: boolean,
+): BasketSource | null {
+  if (!turn.selectionToken || !chunks.length) return null;
+  const selectionToken = turn.selectionToken;
+  if (originals)
+    return {
+      kind: "ragflowDocuments",
+      selectionToken,
+      documents: [
+        ...new Map(
+          chunks.map((c) => [
+            documentKey(c),
+            { datasetId: c.datasetId, documentId: c.documentId },
+          ]),
+        ).values(),
+      ],
+    };
+  return {
+    kind: "ragflowChunks",
+    selectionToken,
+    chunks: [...new Map(chunks.map((c) => [chunkKey(c), c])).values()],
+  };
+}
 function ConversationAnswer({
   turn,
   agents,
@@ -337,9 +375,11 @@ function ConversationAnswer({
   onSendChunks,
   onSendDocuments,
   onSendAgent,
+  onBasketNotice,
 }: {
   turn: ConversationTurn;
   agents: RagflowAgent[];
+  onBasketNotice: (message: string) => void;
   downloadingChunkId: string | null;
   onDownload: (chunk: RagflowChunk) => void;
   onCopy: (content: string) => void;
@@ -358,6 +398,25 @@ function ConversationAnswer({
   const [selectedChunkIds, setSelectedChunkIds] = useState<Set<string>>(
     new Set(),
   );
+  const [selectedReferences, setSelectedReferences] = useState<Set<string>>(
+    new Set(),
+  );
+  const selectionKey = (c: RagflowChunk) =>
+    chunkKey({
+      datasetId: c.datasetId,
+      documentId: c.documentId,
+      chunkId: c.id,
+    });
+  const chunks = turn.chunks.filter((c) =>
+    selectedChunkIds.has(selectionKey(c)),
+  );
+  const basketChunks = chunks.map((c) => ({
+    datasetId: c.datasetId,
+    documentId: c.documentId,
+    chunkId: c.id,
+  }));
+  const addReferences = (refs: BasketChunkRef[], originals = false) =>
+    basketSelection(turn, refs, originals);
   if (turn.status === "failed" && !turn.agents.length && !turn.chunks.length) {
     return (
       <article className="assistant-panel assistant-failure">
@@ -373,6 +432,20 @@ function ConversationAnswer({
       {turn.agents.map((agentState) => {
         const agent = agents.find((item) => item.id === agentState.agentId);
         const name = agent?.name ?? agentState.agentId;
+        const refs = agentState.references.filter(
+          (r) => r.datasetId && r.documentId && r.chunkId,
+        );
+        const picked = refs
+          .filter((r) =>
+            selectedReferences.has(
+              JSON.stringify([agentState.agentId, chunkKey(r)]),
+            ),
+          )
+          .map((r) => ({
+            datasetId: r.datasetId,
+            documentId: r.documentId,
+            chunkId: r.chunkId,
+          }));
         return (
           <article className="assistant-panel" key={agentState.agentId}>
             <div className="assistant-avatar">
@@ -483,6 +556,63 @@ function ConversationAnswer({
                   </ol>
                 </details>
               ) : null}
+              {refs.length > 0 && (
+                <details className="citation-disclosure">
+                  <summary>引用片段（{refs.length}）</summary>
+                  <div className="knowledge-reference-tools">
+                    <span>已选 {picked.length} 条片段</span>
+                    <AddToBasketButton
+                      label="所选引用片段加入资料筐"
+                      className="ui-action ui-small ui-quiet"
+                      source={() => addReferences(picked)}
+                      disabled={!turn.selectionToken || !picked.length}
+                      onResult={onBasketNotice}
+                    />
+                    <AddToBasketButton
+                      label="所选引用原文件加入资料筐"
+                      className="ui-action ui-small ui-quiet"
+                      source={() => addReferences(picked, true)}
+                      disabled={!turn.selectionToken || !picked.length}
+                      onResult={onBasketNotice}
+                    />
+                  </div>
+                  {refs.map((r) => {
+                    const key = JSON.stringify([
+                      agentState.agentId,
+                      chunkKey(r),
+                    ]);
+                    return (
+                      <label
+                        className="knowledge-reference-choice"
+                        key={r.citationId}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedReferences.has(key)}
+                          aria-label={
+                            "选择引用片段 " +
+                            r.citationId +
+                            " " +
+                            r.documentName
+                          }
+                          onChange={(e) => {
+                            const checked = e.target.checked;
+                            setSelectedReferences((old) => {
+                              const next = new Set(old);
+                              if (checked) next.add(key);
+                              else next.delete(key);
+                              return next;
+                            });
+                          }}
+                        />
+                        <span>
+                          Fig.{r.citationId} · {r.documentName}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </details>
+              )}
               {agentState.sources.length ? (
                 <section
                   aria-label={`${name} 引用资料`}
@@ -504,37 +634,61 @@ function ConversationAnswer({
                             </strong>
                             <small>{source.citationCount} 处引用</small>
                           </span>
-                          <button
-                            aria-label={`下载来源 ${source.documentName || "未命名来源"}`}
-                            disabled={
-                              !canDownload || downloadingChunkId === sourceId
-                            }
-                            onClick={() =>
-                              onDownload({
-                                id: sourceId,
-                                content: "",
-                                documentName: source.documentName,
-                                documentId: source.documentId,
-                                datasetId: source.datasetId,
-                                similarity: 0,
-                              })
-                            }
-                            type="button"
-                          >
-                            <DownloadIcon />
-                            {downloadingChunkId === sourceId
-                              ? "下载中"
-                              : "下载"}
-                          </button>
-                          {canDownload ? (
+                          <div className="agent-source-actions">
+                            {canDownload && (
+                              <AddToBasketButton
+                                label="原文件加入资料筐"
+                                className="ui-action ui-small ui-quiet"
+                                disabled={!turn.selectionToken}
+                                source={() =>
+                                  turn.selectionToken
+                                    ? {
+                                        kind: "ragflowDocuments",
+                                        selectionToken: turn.selectionToken,
+                                        documents: [
+                                          {
+                                            datasetId: source.datasetId,
+                                            documentId: source.documentId,
+                                          },
+                                        ],
+                                      }
+                                    : null
+                                }
+                                onResult={onBasketNotice}
+                              />
+                            )}
                             <button
-                              aria-label={`发送原文 ${source.documentName || "未命名来源"} 到 Codex`}
-                              onClick={() => onSendDocuments(turn, [source])}
+                              aria-label={`下载来源 ${source.documentName || "未命名来源"}`}
+                              disabled={
+                                !canDownload || downloadingChunkId === sourceId
+                              }
+                              onClick={() =>
+                                onDownload({
+                                  id: sourceId,
+                                  content: "",
+                                  documentName: source.documentName,
+                                  documentId: source.documentId,
+                                  datasetId: source.datasetId,
+                                  similarity: 0,
+                                })
+                              }
                               type="button"
                             >
-                              发送原文
+                              <DownloadIcon />
+                              {downloadingChunkId === sourceId
+                                ? "下载中"
+                                : "下载"}
                             </button>
-                          ) : null}
+                            {canDownload ? (
+                              <button
+                                aria-label={`发送原文 ${source.documentName || "未命名来源"} 到 Codex`}
+                                onClick={() => onSendDocuments(turn, [source])}
+                                type="button"
+                              >
+                                发送原文
+                              </button>
+                            ) : null}
+                          </div>
                         </article>
                       );
                     })}
@@ -570,16 +724,30 @@ function ConversationAnswer({
       {turn.chunks.length ? (
         <details className="citation-disclosure">
           <summary>引用来源（{turn.chunks.length}）</summary>
-          <div className="citation-selection-actions">
+          <div className="knowledge-reference-tools">
             <span>已选 {selectedChunkIds.size} 条片段</span>
-            <button
-              disabled={selectedChunkIds.size === 0}
-              onClick={() =>
-                onSendChunks(
-                  turn,
-                  turn.chunks.filter((chunk) => selectedChunkIds.has(chunk.id)),
-                )
+            <AddToBasketButton
+              label="所选片段加入资料筐"
+              className="ui-action ui-small ui-quiet"
+              disabled={!turn.selectionToken || !chunks.length}
+              source={() => addReferences(basketChunks)}
+              onResult={onBasketNotice}
+            />
+            <AddToBasketButton
+              label="所选原文件加入资料筐"
+              className="ui-action ui-small ui-quiet"
+              disabled={
+                !turn.selectionToken ||
+                !chunks.length ||
+                chunks.some((c) => !c.datasetId || !c.documentId)
               }
+              source={() => addReferences(basketChunks, true)}
+              onResult={onBasketNotice}
+            />
+            <button
+              className="ui-action ui-small ui-quiet"
+              disabled={selectedChunkIds.size === 0}
+              onClick={() => onSendChunks(turn, chunks)}
               type="button"
             >
               发送所选片段到 Codex
@@ -587,16 +755,16 @@ function ConversationAnswer({
           </div>
           <div className="citation-list">
             {turn.chunks.map((chunk) => (
-              <article className="citation-card" key={chunk.id}>
+              <article className="citation-card" key={selectionKey(chunk)}>
                 <input
                   aria-label={`选择片段 ${chunk.documentName || "未命名来源"}`}
-                  checked={selectedChunkIds.has(chunk.id)}
+                  checked={selectedChunkIds.has(selectionKey(chunk))}
                   onChange={(event) => {
                     const checked = event.currentTarget.checked;
                     setSelectedChunkIds((current) => {
                       const next = new Set(current);
-                      if (checked) next.add(chunk.id);
-                      else next.delete(chunk.id);
+                      if (checked) next.add(selectionKey(chunk));
+                      else next.delete(selectionKey(chunk));
                       return next;
                     });
                   }}
@@ -1106,6 +1274,7 @@ export function KnowledgePage({
                       onSendChunks={sendChunksToCodex}
                       onSendDocuments={sendDocumentsToCodex}
                       onSendAgent={sendAgentToCodex}
+                      onBasketNotice={setFeedback}
                     />
                   </div>
                 ))}

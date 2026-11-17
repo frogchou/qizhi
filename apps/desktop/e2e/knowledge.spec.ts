@@ -57,6 +57,29 @@ test.beforeEach(async ({ page }) => {
                     error: null,
                   },
                 ],
+                references: [
+                  {
+                    citationId: "315",
+                    chunkId: "chunk-315",
+                    content: "人员名单中的相关资料。",
+                    documentName: "人员名单.docx",
+                    documentId: "document-315",
+                    datasetId: "kb-1",
+                    similarity: 0.91,
+                    docType: "docx",
+                    positions: [],
+                    documentMetadata: {},
+                    url: "",
+                  },
+                ],
+                sources: [
+                  {
+                    documentName: "人员名单.docx",
+                    documentId: "document-315",
+                    datasetId: "kb-1",
+                    citationCount: 1,
+                  },
+                ],
               },
             ],
           });
@@ -113,4 +136,72 @@ test("does not create horizontal overflow on a narrow viewport", async ({
   expect(dimensions.scrollWidth).toBeLessThanOrEqual(
     dimensions.clientWidth + 1,
   );
+});
+
+test("grows the composer through five lines before enabling internal scrolling", async ({
+  page,
+}) => {
+  const composer = page.getByLabel("询问你的工作知识库");
+  await composer.fill("第一行");
+  const oneLineHeight = (await composer.boundingBox())!.height;
+
+  await composer.fill("第一行\n第二行\n第三行");
+  const threeLineHeight = (await composer.boundingBox())!.height;
+  expect(threeLineHeight).toBeGreaterThan(oneLineHeight);
+
+  await composer.fill("第一行\n第二行\n第三行\n第四行\n第五行");
+  const fiveLineHeight = (await composer.boundingBox())!.height;
+  expect(fiveLineHeight).toBeGreaterThan(threeLineHeight);
+  await expect(composer).toHaveCSS("overflow-y", "hidden");
+
+  await composer.fill("第一行\n第二行\n第三行\n第四行\n第五行\n第六行");
+  const overflowState = await composer.evaluate((node) => ({
+    height: node.getBoundingClientRect().height,
+    clientHeight: node.clientHeight,
+    scrollHeight: node.scrollHeight,
+    overflowY: window.getComputedStyle(node).overflowY,
+  }));
+  expect(overflowState.height).toBeCloseTo(fiveLineHeight, 0);
+  expect(overflowState.scrollHeight).toBeGreaterThan(
+    overflowState.clientHeight,
+  );
+  expect(overflowState.overflowY).toBe("auto");
+});
+
+test("keeps citation source actions horizontal inside the source card", async ({
+  page,
+}) => {
+  const composer = page.getByLabel("询问你的工作知识库");
+  await composer.fill("查询人员资料");
+  await composer.press("Enter");
+
+  const card = page.locator(".agent-source-card");
+  const download = page.getByRole("button", {
+    name: "下载来源 人员名单.docx",
+  });
+  const send = page.getByRole("button", {
+    name: "发送原文 人员名单.docx 到 Codex",
+  });
+  await expect(card).toBeVisible();
+  await expect(download).toBeVisible();
+  await expect(send).toBeVisible();
+
+  const layout = await card.evaluate((node) => {
+    const actionButtons = Array.from(node.querySelectorAll("button"));
+    const sendButton = actionButtons.at(-1);
+    const cardRect = node.getBoundingClientRect();
+    const sendRect = sendButton?.getBoundingClientRect();
+    return {
+      cardOverflow: node.scrollWidth - node.clientWidth,
+      sendWidth: sendRect?.width ?? 0,
+      sendHeight: sendRect?.height ?? 0,
+      sendInsideCard:
+        Boolean(sendRect) &&
+        sendRect!.left >= cardRect.left &&
+        sendRect!.right <= cardRect.right,
+    };
+  });
+  expect(layout.sendWidth).toBeGreaterThan(layout.sendHeight);
+  expect(layout.cardOverflow).toBeLessThanOrEqual(1);
+  expect(layout.sendInsideCard).toBe(true);
 });

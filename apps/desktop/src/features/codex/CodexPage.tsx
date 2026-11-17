@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { ControlIcon } from "../../components/ControlIcon";
 
 import type {
   CodexApprovalDecision,
@@ -6,6 +7,7 @@ import type {
   CodexConversation,
   CodexConversationHistory,
   CodexHandoffDetails,
+  CodexHandoffResult,
   CodexMaterial,
   CodexMaterialSourceStatus,
   CodexProject,
@@ -16,6 +18,7 @@ import type {
 import { CodexContextPanel } from "./CodexContextPanel";
 import { CodexArtifactUploadDialog } from "./CodexArtifactUploadDialog";
 import { CodexConversation as ConversationPane } from "./CodexConversation";
+import { CodexBasketAttachment } from "./CodexBasketAttachment";
 import { CodexProjectSidebar } from "./CodexProjectSidebar";
 import "./codex.css";
 import "./codex-artifacts.css";
@@ -39,6 +42,7 @@ export function CodexPage({
 }) {
   type LiveTurnState = {
     projectId: string;
+    localTurnId: string | null;
     prompt: string;
     answer: string;
     events: CodexTurnEvent[];
@@ -86,6 +90,8 @@ export function CodexPage({
   const selectedConversationRef = useRef<string | null>(null);
   const selectedProjectRef = useRef<string | null>(null);
   const pendingHandoffRequestRef = useRef(0);
+  const basketReceipts = useRef(new Map<string, Set<string>>());
+  const [basketBusy, setBasketBusy] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     void loadProjects();
@@ -179,10 +185,21 @@ export function CodexPage({
       setError(message(reason));
     }
   }
+  async function onBasketAttached(result: CodexHandoffResult) {
+    const receipts =
+      basketReceipts.current.get(result.conversationId) ?? new Set<string>();
+    receipts.add(result.handoffId);
+    basketReceipts.current.set(result.conversationId, receipts);
+    await Promise.all([
+      loadProject(result.projectId),
+      loadPendingHandoffs(result.conversationId),
+    ]);
+  }
   async function dismissPending(handoffId: string, materialId: string) {
     if (!conversationId || !commands.dismissCodexHandoffItem) return;
     try {
       await commands.dismissCodexHandoffItem({ handoffId, materialId });
+      basketReceipts.current.get(conversationId)?.delete(handoffId);
       await loadPendingHandoffs(conversationId);
     } catch (reason) {
       setError(message(reason));
@@ -406,13 +423,23 @@ export function CodexPage({
     if (!projectId || !conversationId || !commands.startCodexTurn) return;
     const targetProjectId = projectId;
     const targetConversationId = conversationId;
-    const targetHandoffIds = pendingHandoffs
-      .filter((handoff) => handoff.items.some((item) => item.state === "ready"))
-      .map((handoff) => handoff.handoff.id);
+    const targetHandoffIds = [
+      ...new Set([
+        ...pendingHandoffs
+          .filter(
+            (h) =>
+              h.handoff.conversationId === targetConversationId &&
+              h.items.some((item) => item.state === "ready"),
+          )
+          .map((h) => h.handoff.id),
+        ...(basketReceipts.current.get(targetConversationId) ?? []),
+      ]),
+    ];
     setLiveTurns((current) => ({
       ...current,
       [targetConversationId]: {
         projectId: targetProjectId,
+        localTurnId: null,
         prompt,
         answer: "",
         events: [],
@@ -421,7 +448,7 @@ export function CodexPage({
     }));
     setError("");
     try {
-      await commands.startCodexTurn(
+      const result = await commands.startCodexTurn(
         {
           projectId: targetProjectId,
           conversationId: targetConversationId,
@@ -436,6 +463,7 @@ export function CodexPage({
               ...current,
               [targetConversationId]: {
                 ...active,
+                localTurnId: event.localTurnId,
                 events: [...active.events, event],
                 answer:
                   event.type === "messageDelta"
@@ -461,6 +489,19 @@ export function CodexPage({
           }
         },
       );
+      setLiveTurns((current) => {
+        const active = current[targetConversationId];
+        if (!active) return current;
+        return {
+          ...current,
+          [targetConversationId]: {
+            ...active,
+            localTurnId: result.localTurnId,
+          },
+        };
+      });
+      for (const id of targetHandoffIds)
+        basketReceipts.current.get(targetConversationId)?.delete(id);
       if (selectedConversationRef.current === targetConversationId) {
         setPendingHandoffs((current) =>
           current.filter(
@@ -485,14 +526,23 @@ export function CodexPage({
     requestId: string,
     decision: CodexApprovalDecision,
   ) {
-    await commands.resolveCodexApproval?.(requestId, decision);
-    if (!conversationId) return;
+    const targetConversationId = conversationId;
+    if (!commands.resolveCodexApproval || !targetConversationId) {
+      setError("当前 Codex 连接无法处理审批，请重新进入 Codex 工作后重试。");
+      return;
+    }
+    try {
+      await commands.resolveCodexApproval(requestId, decision);
+    } catch (reason) {
+      setError(message(reason));
+      return;
+    }
     setLiveTurns((current) => {
-      const active = current[conversationId];
+      const active = current[targetConversationId];
       if (!active) return current;
       return {
         ...current,
-        [conversationId]: {
+        [targetConversationId]: {
           ...active,
           events: active.events.filter(
             (event) =>
@@ -592,6 +642,7 @@ export function CodexPage({
         {projects.length ? (
           <ConversationPane
             history={history}
+            liveTurnId={currentLive?.localTurnId ?? null}
             livePrompt={currentLive?.prompt ?? ""}
             liveAnswer={currentLive?.answer ?? ""}
             events={currentLive?.events ?? []}
@@ -601,6 +652,23 @@ export function CodexPage({
             onStop={stop}
             onResolveApproval={resolveApproval}
             pendingHandoffs={pendingHandoffs}
+            attachingBasket={!!conversationId && !!basketBusy[conversationId]}
+            basketAttachment={
+              projectId &&
+              conversationId && (
+                <CodexBasketAttachment
+                  key={conversationId}
+                  projectId={projectId}
+                  conversationId={conversationId}
+                  locked={projectHasRunningTurn}
+                  onAttach={commands.attachBasketToCodex}
+                  onAttached={onBasketAttached}
+                  onBusy={(busy) =>
+                    setBasketBusy((old) => ({ ...old, [conversationId]: busy }))
+                  }
+                />
+              )
+            }
             onDismissPending={dismissPending}
           />
         ) : (
@@ -616,8 +684,13 @@ export function CodexPage({
         {error ? (
           <div className="codex-toast" role="alert">
             {error}
-            <button type="button" onClick={() => setError("")}>
-              ×
+            <button
+              type="button"
+              className="ui-icon-button ui-close"
+              aria-label="关闭错误提示"
+              onClick={() => setError("")}
+            >
+              <ControlIcon name="x" size={16} />
             </button>
           </div>
         ) : null}

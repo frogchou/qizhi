@@ -1,0 +1,37 @@
+{
+  "type": "object",
+  "properties": {
+    "candidates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "format": {
+            "enum": [
+              "json",
+              "html",
+              "text"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "url",
+          "title",
+          "format"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "candidates"
+  ],
+  "additionalProperties": false
+}

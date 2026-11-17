@@ -1,0 +1,334 @@
+import { ControlIcon } from "../../components/ControlIcon";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { factoryHelpGroups, helpFor, type FactoryHelpId } from "./factory-help";
+import { errorText, stateName, statusTone } from "./factory-model";
+
+export function Badge({ value, label }: { value: string; label?: string }) {
+  return (
+    <span className={"fc-badge " + statusTone(value)}>
+      <i />
+      {label ?? stateName(value)}
+    </span>
+  );
+}
+export function Facts({ rows }: { rows: [string, ReactNode][] }) {
+  return (
+    <dl className="live-facts">
+      {rows
+        .filter(([, v]) => v !== undefined && v !== null && v !== "")
+        .map(([name, v]) => (
+          <div key={name}>
+            <dt>{name}</dt>
+            <dd>{v}</dd>
+          </div>
+        ))}
+    </dl>
+  );
+}
+export function Empty({ children }: { children: ReactNode }) {
+  return <p className="fc-empty">{children}</p>;
+}
+
+export function ContextHelp({
+  id,
+  label,
+}: {
+  id: FactoryHelpId;
+  label?: string;
+}) {
+  const help = helpFor(id);
+  const root = useRef<HTMLSpanElement>(null);
+  const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const [pinned, setPinned] = useState(false);
+  const [dismissed, setDismissed] = useState(false);
+  const tooltipId = "factory-help-" + useId().replace(/:/g, "");
+  const visible = !dismissed && (hovered || focused || pinned);
+
+  useEffect(() => {
+    if (!pinned) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        setPinned(false);
+        setDismissed(true);
+      }
+    };
+    document.addEventListener("keydown", closeOnEscape, true);
+    return () => document.removeEventListener("keydown", closeOnEscape, true);
+  }, [pinned]);
+
+  return (
+    <span
+      ref={root}
+      className="live-context-help"
+      onMouseEnter={() => {
+        setDismissed(false);
+        setHovered(true);
+      }}
+      onMouseLeave={() => setHovered(false)}
+      onFocus={() => {
+        setDismissed(false);
+        setFocused(true);
+      }}
+      onBlur={(event) => {
+        if (!root.current?.contains(event.relatedTarget as Node | null)) {
+          setFocused(false);
+        }
+      }}
+      onKeyDown={(event) => {
+        if (event.key !== "Escape" || !visible) return;
+        event.preventDefault();
+        event.stopPropagation();
+        setPinned(false);
+        setDismissed(true);
+      }}
+    >
+      <button
+        type="button"
+        className="live-context-help-trigger"
+        aria-label={label ?? "解释：" + help.title}
+        aria-describedby={visible ? tooltipId : undefined}
+        aria-expanded={visible}
+        onClick={() => {
+          setDismissed(false);
+          setPinned((value) => !value);
+        }}
+      >
+        <span aria-hidden="true">?</span>
+      </button>
+      {visible && (
+        <span id={tooltipId} role="tooltip" className="live-context-popover">
+          <strong>{help.title}</strong>
+          <span>{help.description}</span>
+          {help.detail && <small>{help.detail}</small>}
+          {pinned && <small>按 Escape 关闭</small>}
+        </span>
+      )}
+    </span>
+  );
+}
+export function ReadNotice({
+  read,
+}: {
+  read: { loading: boolean; data: unknown; error: string; retry: () => void };
+}) {
+  if (read.error)
+    return (
+      <div role="alert" className="live-notice error">
+        <span>
+          {read.data ? "显示上次读取结果。" : ""}
+          {read.error}
+        </span>
+        <button
+          type="button"
+          className="ui-action ui-quiet ui-small"
+          onClick={read.retry}
+        >
+          重新读取
+        </button>
+      </div>
+    );
+  if (!read.data && read.loading)
+    return (
+      <p role="status" className="fc-empty">
+        正在读取…
+      </p>
+    );
+  return null;
+}
+export function useAction(onSuccess?: () => void) {
+  const [feedback, setFeedback] = useState({
+    busy: false,
+    message: "",
+    error: false,
+  });
+  const lock = useRef(false);
+  async function run(action: () => Promise<string | void>) {
+    if (lock.current) return;
+    lock.current = true;
+    setFeedback({ busy: true, message: "", error: false });
+    try {
+      const message = await action();
+      setFeedback({ busy: false, message: message ?? "", error: false });
+      onSuccess?.();
+    } catch (error) {
+      setFeedback({ busy: false, message: errorText(error), error: true });
+    } finally {
+      lock.current = false;
+    }
+  }
+  return { ...feedback, run };
+}
+export function ActionNotice({
+  action,
+}: {
+  action: { busy: boolean; message: string; error: boolean };
+}) {
+  if (!action.busy && !action.message) return null;
+  return (
+    <p
+      className={"live-notice" + (action.error ? " error" : "")}
+      role={action.error ? "alert" : "status"}
+    >
+      {action.busy ? "正在提交…" : action.message}
+    </p>
+  );
+}
+export function Modal({
+  title,
+  onClose,
+  closeDisabled = false,
+  children,
+}: {
+  title: string;
+  onClose: () => void;
+  closeDisabled?: boolean;
+  children: ReactNode;
+}) {
+  const ref = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    el?.showModal();
+    return () => el?.close();
+  }, []);
+  return (
+    <dialog
+      ref={ref}
+      className="fc-modal live-modal"
+      aria-label={title}
+      onCancel={(e) => {
+        e.preventDefault();
+        if (!closeDisabled) onClose();
+      }}
+    >
+      <header>
+        <h2>{title}</h2>
+        <button
+          type="button"
+          className="ui-icon-button ui-close"
+          onClick={onClose}
+          disabled={closeDisabled}
+          aria-label="关闭窗口"
+          title="关闭窗口"
+        >
+          <ControlIcon name="x" size={17} />
+        </button>
+      </header>
+      {children}
+    </dialog>
+  );
+}
+export function FactoryGuide() {
+  return (
+    <div className="live-guide">
+      <p className="live-subtle">
+        用于理解园区数字、连线和操作后果；它不会改变正在执行的工单。
+      </p>
+      {factoryHelpGroups.map((group) => (
+        <section key={group.title}>
+          <h3>{group.title}</h3>
+          <p>{group.description}</p>
+          <dl>
+            {group.ids.map((id) => {
+              const item = helpFor(id);
+              return (
+                <div key={id}>
+                  <dt>{item.title}</dt>
+                  <dd>{item.description}</dd>
+                </div>
+              );
+            })}
+          </dl>
+        </section>
+      ))}
+    </div>
+  );
+}
+export function Filter({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: [string, string][];
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="live-filter">
+      {label}
+      <select value={value} onChange={(e) => onChange(e.target.value)}>
+        {options.map(([value, name]) => (
+          <option key={value} value={value}>
+            {name}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+export function Pagination({
+  offset,
+  limit,
+  total,
+  onChange,
+}: {
+  offset: number;
+  limit: number;
+  total: number;
+  onChange: (offset: number) => void;
+}) {
+  if (total <= limit && !offset) return null;
+  return (
+    <nav className="live-pagination" aria-label="列表分页">
+      <button
+        type="button"
+        className="ui-action ui-small"
+        disabled={offset <= 0}
+        onClick={() => onChange(Math.max(0, offset - limit))}
+      >
+        上一页
+      </button>
+      <span>
+        {total === 0
+          ? "0"
+          : Math.min(total, offset + 1) +
+            "–" +
+            Math.min(total, offset + limit)}{" "}
+        / {total}
+      </span>
+      <button
+        type="button"
+        className="ui-action ui-small"
+        disabled={offset + limit >= total}
+        onClick={() => onChange(offset + limit)}
+      >
+        下一页
+      </button>
+    </nav>
+  );
+}
+export function EntryButton({
+  title,
+  meta,
+  badge,
+  onClick,
+  children,
+}: {
+  title: string;
+  meta?: string;
+  badge?: string;
+  onClick: () => void;
+  children?: ReactNode;
+}) {
+  return (
+    <button type="button" className="live-entry" onClick={onClick}>
+      <strong>{title}</strong>
+      {meta && <small>{meta}</small>}
+      {badge && <Badge value={badge} />} {children}
+    </button>
+  );
+}

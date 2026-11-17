@@ -1,9 +1,3 @@
-.app-shell:has(.fc) > .sidebar {
-  flex-basis: 150px;
-  padding-inline: 10px;
-  background: #faf8f3;
-  border-color: #dbd6ca;
-}
 .workspace.factory-workspace {
   padding: 0;
   overflow: auto;
@@ -26,7 +20,7 @@
 .fc * {
   box-sizing: border-box;
 }
-.fc button {
+.fc button:not(:where(.ui-action, .ui-icon-button)) {
   font: inherit;
   color: inherit;
   cursor: pointer;
@@ -35,12 +29,12 @@
   background: #fffdf8;
   padding: 6px 10px;
 }
-.fc button:hover:not(:disabled) {
+.fc button:not(:where(.ui-action, .ui-icon-button)):hover:not(:disabled) {
   border-color: #998f77;
 }
 .fc button:focus-visible,
 .fc textarea:focus-visible {
-  outline: 3px solid #cc8435;
+  outline: 2px solid var(--q-ring, #298477);
   outline-offset: 2px;
 }
 .fc-head {
@@ -324,13 +318,8 @@
 .fc-drawer-head h2 {
   overflow-wrap: anywhere;
 }
-.fc .fc-drawer-head button {
-  flex-shrink: 0;
-  padding: 0;
-  width: 30px;
-  height: 30px;
-  line-height: 1;
-  font-size: 21px;
+.fc .fc-drawer-head > .ui-close {
+  flex: 0 0 auto;
 }
 .fc .fc-open-knowledge {
   margin: 10px 0 4px;
@@ -495,47 +484,61 @@
   width: min(420px, 90vw);
   max-height: 80vh;
   overflow: auto;
-  border: 1px solid #dbd5c8;
-  border-radius: 12px;
-  padding: 20px;
-  background: #fbfaf6;
-  color: var(--ink);
+  border: 1px solid var(--q-border, #ceded9);
+  border-radius: 14px;
+  padding: 20px 22px;
+  background: var(--q-surface, #fff);
+  color: var(--q-ink, #213e38);
   box-shadow: 0 16px 80px #122b2740;
 }
 .fc-modal::backdrop {
-  background: #102a2466;
+  background: rgb(24 47 42 / 36%);
 }
-.fc-modal header,
-.fc-modal footer {
+.fc-modal > header,
+.fc-modal > footer,
+.fc-modal form > footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
 }
-.fc-modal header {
-  margin-bottom: 18px;
+.fc-modal > header {
+  margin-bottom: 16px;
 }
-.fc-modal footer {
+.fc-modal > header h2 {
+  margin: 0;
+  color: var(--q-ink, #213e38);
+  font-size: 19px;
+  font-weight: 650;
+  line-height: 1.4;
+}
+.fc-modal > footer,
+.fc-modal form > footer {
   justify-content: flex-end;
-  margin-top: 18px;
+  margin-top: 16px;
+  border-top: 1px solid var(--q-border, #ceded9);
+  padding-top: 14px;
 }
-.fc-modal label {
+.fc-modal form > label,
+.fc-modal .live-form-pair > label {
   display: block;
   font-size: 14px;
 }
 .fc-modal textarea {
+  font: inherit;
+  color: var(--q-ink, #213e38);
   display: block;
   width: 100%;
   min-height: 96px;
   resize: vertical;
-  border: 1px solid #c0c7bb;
+  border: 1px solid var(--q-border, #ceded9);
   padding: 10px;
-  margin: 8px 0 14px;
+  margin: 6px 0 0;
   border-radius: 7px;
   background: white;
 }
 .fc-check input {
-  accent-color: var(--copper);
+  accent-color: var(--q-accent, #167264);
 }
 .fc-log {
   list-style: none;
@@ -562,9 +565,6 @@
   }
 }
 @media (max-width: 1080px) {
-  .app-shell:has(.fc) > .sidebar {
-    flex-basis: 119px;
-  }
   .fc-inspector {
     padding-inline: 12px;
   }
@@ -576,21 +576,6 @@
   }
 }
 @media (max-width: 760px) {
-  .app-shell:has(.fc) > .sidebar {
-    flex-basis: 58px;
-    padding: 12px 4px;
-  }
-  .app-shell:has(.fc) .sidebar .brand span,
-  .app-shell:has(.fc) .sidebar-note {
-    display: none;
-  }
-  .app-shell:has(.fc) .sidebar .brand {
-    margin: 0 5px 22px;
-  }
-  .app-shell:has(.fc) .nav-item {
-    font-size: 0;
-    gap: 0;
-  }
   .fc {
     height: auto;
     min-height: 100%;
@@ -678,16 +663,8 @@
     animation: none;
   }
 }
-.app-shell:has(.fc) .nav-item {
-  white-space: nowrap;
-}
-.app-shell:has(.fc) .nav-item svg {
-  flex-shrink: 0;
-}
+
 @media (max-width: 760px) {
-  body:has(.fc) {
-    min-width: 0;
-  }
   .fc .fc-ticket {
     max-width: 80px;
   }

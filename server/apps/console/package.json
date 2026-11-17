@@ -1,0 +1,40 @@
+{
+  "name": "middleground",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.26.1",
+  "scripts": {
+    "test": "vitest run",
+    "test:config": "vitest run apps/control-plane/src/config/env.spec.ts",
+    "test:database": "vitest run tests/control-plane/database-migration.spec.ts",
+    "test:protocol": "vitest run tests/contracts/agent-protocol.spec.ts",
+    "protocol:export": "tsx packages/agent-protocol/scripts/export-json-schemas.ts",
+    "console:build": "vite build --config apps/console/vite.config.ts",
+    "agent:validate": "./node_modules/.bin/tsx agents/ragflow-knowledge/src/validate-manifest.ts && ./node_modules/.bin/tsx agents/ppt-maker/src/self-check.ts && ./node_modules/.bin/tsx agents/web-research/src/self-check.ts && ./node_modules/.bin/tsx agents/quality-management/src/self-check.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@fastify/static": "^10.1.2",
+    "@nestjs/common": "^11.1.13",
+    "@nestjs/core": "^11.1.13",
+    "@nestjs/platform-fastify": "^11.1.13",
+    "@sinclair/typebox": "^0.34.41",
+    "pg": "^8.14.1",
+    "reflect-metadata": "^0.2.2",
+    "fastify": "^5.6.2",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "yaml": "^2.8.2",
+    "typeorm": "^0.3.24"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.1",
+    "tsx": "^4.20.6",
+    "typescript": "^5.8.3",
+    "vite": "^7.3.1",
+    "vitest": "^3.2.4"
+  }
+}

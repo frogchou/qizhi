@@ -1,0 +1,108 @@
+.fc-live .live-delivery,
+.fc-live .live-delivery :is(article, section, details) {
+  min-width: 0;
+  max-width: 100%;
+}
+.fc-live .live-delivery-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 14px 0 7px;
+}
+.fc .live-delivery-heading h3 {
+  margin: 0;
+}
+.fc-live .live-delivery-heading button {
+  flex: 0 0 auto;
+  font-size: 12px;
+}
+.fc-live .live-delivery-answer h4 {
+  margin: 0 0 12px;
+  color: #15494b;
+  font-size: 14px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.fc-live .live-delivery-markdown {
+  font-size: 13px;
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+}
+.fc-live .live-delivery-markdown :is(h1, h2, h3, h4, h5, h6) {
+  margin: 18px 0 7px;
+  color: #15494b;
+  font-size: 14px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.fc-live .live-delivery-markdown :is(h1, h2) {
+  font-size: 15px;
+}
+.fc-live .live-delivery-markdown > :first-child {
+  margin-top: 0;
+}
+.fc-live .live-delivery-markdown > :last-child {
+  margin-bottom: 0;
+}
+.fc-live .live-delivery-markdown p {
+  margin: 8px 0;
+}
+.fc-live .live-delivery-markdown :is(ul, ol) {
+  margin: 8px 0;
+  padding-left: 22px;
+}
+.fc-live .live-delivery-markdown li + li {
+  margin-top: 5px;
+}
+.fc-live .live-delivery-markdown a {
+  color: #116b6a;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  overflow-wrap: anywhere;
+}
+.fc-live .live-delivery-markdown blockquote {
+  margin: 12px 0;
+  padding: 1px 10px;
+  border-left: 3px solid #b4d4cd;
+  color: #4b6964;
+}
+.fc-live .live-delivery-markdown pre {
+  max-width: 100%;
+  padding: 10px;
+  border: 1px solid #d8e7e2;
+  border-radius: 6px;
+  background: #f4f8f6;
+  overflow: auto;
+}
+.fc-live .live-delivery-markdown :is(pre, code) {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  font-size: 12px;
+}
+.fc-live .live-delivery-markdown img {
+  max-width: 100%;
+  height: auto;
+}
+.fc-live .live-delivery-markdown table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+.fc-live .live-delivery-markdown :is(th, td) {
+  padding: 6px;
+  border: 1px solid #d8e7e2;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.fc-live .live-delivery-file :is(strong, button, code) {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.fc-live .live-delivery-records {
+  margin-top: 18px;
+  padding-top: 7px;
+  border-top: 1px solid var(--line);
+}

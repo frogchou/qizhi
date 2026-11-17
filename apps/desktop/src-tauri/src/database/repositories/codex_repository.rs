@@ -530,7 +530,7 @@ impl CodexRepository {
         let request_id = normalize_required(request_id)?;
         if !matches!(
             source_kind,
-            "today" | "recent" | "ragflow_chunks" | "ragflow_document" | "ragflow_answer"
+            "today" | "recent" | "ragflow_chunks" | "ragflow_document" | "ragflow_answer" | "basket"
         ) {
             return Err(AppError::InvalidConfig);
         }

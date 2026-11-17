@@ -1,5 +1,20 @@
 import { expect, test } from "@playwright/test";
 
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(window, "__TAURI_INTERNALS__", {
+      configurable: true,
+      value: {
+        invoke: async (command: string) => {
+          if (command === "factory_get_settings")
+            return { mode: "demo", endpoint: "", hasToken: false };
+          throw new Error("演示测试未连接其他桌面服务");
+        },
+      },
+    });
+  });
+});
+
 test("总览、节点恢复、人工返工和交付", async ({ page }) => {
   await page.goto("/");
   await expect(
@@ -45,7 +60,10 @@ test("提交需求后跟随同一工单并自动交付", async ({ page }) => {
   await page.clock.runFor(48000);
   await expect(page.locator(".fc-inspector > .fc-badge")).toHaveText("已交付");
   await page.getByRole("button", { name: "设置", exact: true }).click();
-  await page.getByRole("button", { name: "智能工厂", exact: true }).click();
+  await page
+    .getByRole("navigation", { name: "主导航" })
+    .getByRole("button", { name: "智能工厂", exact: true })
+    .click();
   await expect(
     page.getByRole("button", { name: "全厂总览", exact: true }),
   ).toHaveAttribute("aria-pressed", "true");
@@ -88,6 +106,14 @@ test("园区总览按工单驱动交通、设备与悬浮详情", async ({ page 
   await expect(
     page.locator('[data-equipment="control"] .fc-face'),
   ).toBeVisible();
+});
+
+test("运行中的园区响应系统减少动态偏好", async ({ page }) => {
+  await page.goto("/");
+  const vehicle = page.locator('[data-actor="vehicle"]').first();
+  const river = page.locator(".eco-ripple").first();
+  const before = await vehicle.getAttribute("transform");
+  await expect.poll(() => vehicle.getAttribute("transform")).not.toBe(before);
   await page.emulateMedia({ reducedMotion: "reduce" });
   await expect(page.locator(".fc-traffic")).toHaveAttribute(
     "data-motion",
@@ -95,7 +121,7 @@ test("园区总览按工单驱动交通、设备与悬浮详情", async ({ page 
   );
   await expect(river).toHaveCSS("animation-name", "none");
   const still = await vehicle.getAttribute("transform");
-  await page.clock.runFor(1500);
+  await page.waitForTimeout(1200);
   expect(await vehicle.getAttribute("transform")).toBe(still);
 });
 

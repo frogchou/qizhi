@@ -1,0 +1,36 @@
+{
+  "type": "object",
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "requirement": {
+            "type": "string"
+          },
+          "basis": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "string",
+            "enum": [
+              "required",
+              "optional"
+            ]
+          }
+        },
+        "required": [
+          "requirement",
+          "basis",
+          "priority"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "items"
+  ],
+  "additionalProperties": false
+}

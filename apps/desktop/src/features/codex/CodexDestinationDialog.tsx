@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { ControlIcon } from "../../components/ControlIcon";
 
 import type {
   CodexConversation,
@@ -221,12 +222,12 @@ export function CodexDestinationDialog({
           </div>
           <button
             type="button"
-            className="codex-dialog-close"
+            className="ui-icon-button ui-close"
             aria-label="关闭"
             onClick={onClose}
             disabled={submitting}
           >
-            ×
+            <ControlIcon name="x" size={16} />
           </button>
         </header>
 

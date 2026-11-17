@@ -572,7 +572,7 @@ fn map_project_file_error(error: ProjectFileError) -> CodexHandoffServiceError {
     }
 }
 
-fn mime_type_for(path: &Path) -> &'static str {
+pub(crate) fn mime_type_for(path: &Path) -> &'static str {
     match path
         .extension()
         .and_then(|value| value.to_str())

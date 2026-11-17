@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["requirements", "referenceMaterials"],
+  "properties": {
+    "requirements": { "type": "string", "minLength": 1, "maxLength": 20000, "pattern": "\\S", "description": "用户需要的内容总结、用途说明及分析要求" },
+    "referenceMaterials": { "type": "array", "minItems": 1, "maxItems": 30, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 2000 }, "description": "逐项授权的任务目录相对文件路径；支持 taskInputBindings 和上游 artifact_paths/evidence_markdown 绑定。单文件不超过 20 MiB，总提取文字不超过 600000 字符，不会静默截断。" }
+  },
+  "additionalProperties": false
+}

@@ -1,7 +1,11 @@
 import { useState } from "react";
 
 import "./App.css";
-import { FactoryPage } from "./features/factory/FactoryPage";
+import {
+  MaterialBasketDialog,
+  MaterialBasketProvider,
+} from "./features/materials/MaterialBasket";
+import { FactoryWorkspace } from "./features/factory/FactoryWorkspace";
 import { AppSidebar, type AppRoute } from "./components/AppSidebar";
 import { SettingsPage } from "./features/settings/SettingsPage";
 import { KnowledgePage } from "./features/knowledge/KnowledgePage";
@@ -21,13 +25,20 @@ export type CodexNavigationTarget = {
 };
 
 function App({ commands = unavailableCommands }: { commands?: QizhiCommands }) {
+  const [basketOpen, setBasketOpen] = useState(false);
   const [route, setRoute] = useState<AppRoute>("factory");
+  const [settingsMounted, setSettingsMounted] = useState(false);
+  const [settingsInitialCategory, setSettingsInitialCategory] = useState<
+    "factory" | undefined
+  >();
   const [knowledgeMounted, setKnowledgeMounted] = useState(false);
   const [codexMounted, setCodexMounted] = useState(false);
   const [codexNavigationTarget, setCodexNavigationTarget] =
     useState<CodexNavigationTarget | null>(null);
 
   function navigate(nextRoute: AppRoute) {
+    setSettingsInitialCategory(undefined);
+    if (nextRoute === "settings") setSettingsMounted(true);
     if (nextRoute === "knowledge") setKnowledgeMounted(true);
     if (nextRoute === "codex") setCodexMounted(true);
     setRoute(nextRoute);
@@ -44,54 +55,74 @@ function App({ commands = unavailableCommands }: { commands?: QizhiCommands }) {
     setRoute("codex");
   }
 
-  let content =
-    route === "knowledge" ? null : (
-      <TodayPage commands={commands} onOpenCodex={openCommittedCodexHandoff} />
-    );
-  if (route === "settings")
-    content = (
-      <section className="page settings-page">
-        <SettingsPage commands={commands} />
-      </section>
-    );
-  if (route === "codex" || route === "factory") content = null;
   return (
-    <main className="app-shell">
-      <AppSidebar active={route} onNavigate={navigate} />
-      <div
-        className={
-          route === "today"
-            ? "workspace today-workspace"
-            : route === "knowledge"
-              ? "workspace knowledge-workspace-shell"
-              : route === "codex"
-                ? "workspace codex-workspace-shell"
-                : route === "factory"
-                  ? "workspace factory-workspace"
-                  : "workspace"
-        }
-      >
-        {content}
-        <FactoryPage
-          active={route === "factory"}
-          onOpenKnowledge={() => navigate("knowledge")}
+    <MaterialBasketProvider commands={commands}>
+      <main className="app-shell">
+        <AppSidebar
+          active={route}
+          onNavigate={navigate}
+          onOpenBasket={() => setBasketOpen(true)}
         />
-        {knowledgeMounted ? (
-          <KnowledgePage
-            commands={commands}
-            hidden={route !== "knowledge"}
-            onOpenCodex={openCommittedCodexHandoff}
+        <div
+          className={
+            route === "today"
+              ? "workspace today-workspace"
+              : route === "knowledge"
+                ? "workspace knowledge-workspace-shell"
+                : route === "codex"
+                  ? "workspace codex-workspace-shell"
+                  : route === "factory"
+                    ? "workspace factory-workspace"
+                    : "workspace"
+          }
+        >
+          {route === "today" && (
+            <TodayPage
+              commands={commands}
+              onOpenCodex={openCommittedCodexHandoff}
+            />
+          )}
+          {settingsMounted && (
+            <section
+              className="page settings-page"
+              style={route === "settings" ? undefined : { display: "none" }}
+              hidden={route !== "settings"}
+            >
+              <SettingsPage
+                commands={commands}
+                initialCategory={settingsInitialCategory}
+              />
+            </section>
+          )}
+          <FactoryWorkspace
+            active={route === "factory"}
+            onOpenKnowledge={() => navigate("knowledge")}
+            onOpenSettings={() => {
+              setSettingsMounted(true);
+              setSettingsInitialCategory("factory");
+              setRoute("settings");
+            }}
           />
-        ) : null}
-        {codexMounted ? (
-          <CodexPage
-            commands={commands}
-            hidden={route !== "codex"}
-            navigationTarget={codexNavigationTarget}
-          />
-        ) : null}
-      </div>
-    </main>
+          {knowledgeMounted ? (
+            <KnowledgePage
+              commands={commands}
+              hidden={route !== "knowledge"}
+              onOpenCodex={openCommittedCodexHandoff}
+            />
+          ) : null}
+          {codexMounted ? (
+            <CodexPage
+              commands={commands}
+              hidden={route !== "codex"}
+              navigationTarget={codexNavigationTarget}
+            />
+          ) : null}
+        </div>
+        {basketOpen && (
+          <MaterialBasketDialog close={() => setBasketOpen(false)} />
+        )}
+      </main>
+    </MaterialBasketProvider>
   );
 }
 

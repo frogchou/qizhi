@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 
+import { AutoGrowTextarea } from "../../components/AutoGrowTextarea";
 import type {
   CodexApprovalDecision,
   CodexConversationHistory,
@@ -11,6 +12,7 @@ import { CodexPendingMaterials } from "./CodexPendingMaterials";
 
 export function CodexConversation({
   history,
+  liveTurnId,
   livePrompt,
   liveAnswer,
   events,
@@ -21,8 +23,11 @@ export function CodexConversation({
   onResolveApproval,
   pendingHandoffs,
   onDismissPending,
+  basketAttachment,
+  attachingBasket = false,
 }: {
   history: CodexConversationHistory | null;
+  liveTurnId?: string | null;
   livePrompt: string;
   liveAnswer: string;
   events: CodexTurnEvent[];
@@ -35,11 +40,16 @@ export function CodexConversation({
     decision: CodexApprovalDecision,
   ) => Promise<void>;
   pendingHandoffs?: CodexHandoffDetails[];
+  basketAttachment?: ReactNode;
+  attachingBasket?: boolean;
   onDismissPending?: (handoffId: string, materialId: string) => Promise<void>;
 }) {
   const [draft, setDraft] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [resolvingApprovalId, setResolvingApprovalId] = useState<string | null>(
+    null,
+  );
   const bottom = useRef<HTMLDivElement>(null);
   const scrollArea = useRef<HTMLDivElement>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
@@ -62,7 +72,8 @@ export function CodexConversation({
   }
   async function submit() {
     const value = draft.trim();
-    if (!value || running || submitting || disabledReason) return;
+    if (!value || running || submitting || attachingBasket || disabledReason)
+      return;
     setSubmitting(true);
     shouldFollow.current = true;
     setDraft("");
@@ -72,6 +83,20 @@ export function CodexConversation({
       setSubmitting(false);
     }
   }
+  async function resolveApproval(
+    requestId: string,
+    decision: CodexApprovalDecision,
+  ) {
+    if (resolvingApprovalId) return;
+    setResolvingApprovalId(requestId);
+    try {
+      await onResolveApproval(requestId, decision);
+    } finally {
+      setResolvingApprovalId(null);
+    }
+  }
+  const visibleHistoryTurns =
+    history?.turns.filter((turn) => turn.id !== liveTurnId) ?? [];
   const processEvents = events.filter((event) => event.type === "processItem");
   const approvals = events.filter(
     (event): event is Extract<CodexTurnEvent, { type: "approvalRequested" }> =>
@@ -98,7 +123,7 @@ export function CodexConversation({
             </p>
           </div>
         ) : null}
-        {history?.turns.map((turn) => (
+        {visibleHistoryTurns.map((turn) => (
           <article className="codex-turn" key={turn.id}>
             {turn.messages.map((message) =>
               message.role === "user" ? (
@@ -194,8 +219,9 @@ export function CodexConversation({
                   <div>
                     <button
                       type="button"
+                      disabled={resolvingApprovalId === approval.requestId}
                       onClick={() =>
-                        void onResolveApproval(approval.requestId, "decline")
+                        void resolveApproval(approval.requestId, "decline")
                       }
                     >
                       拒绝
@@ -203,11 +229,14 @@ export function CodexConversation({
                     <button
                       className="primary"
                       type="button"
+                      disabled={resolvingApprovalId === approval.requestId}
                       onClick={() =>
-                        void onResolveApproval(approval.requestId, "accept")
+                        void resolveApproval(approval.requestId, "accept")
                       }
                     >
-                      允许一次
+                      {resolvingApprovalId === approval.requestId
+                        ? "处理中…"
+                        : "允许一次"}
                     </button>
                   </div>
                 </div>
@@ -224,7 +253,7 @@ export function CodexConversation({
           onDismiss={onDismissPending ?? (async () => undefined)}
         />
         <div className="codex-composer">
-          <textarea
+          <AutoGrowTextarea
             ref={composer}
             value={draft}
             disabled={Boolean(disabledReason)}
@@ -244,27 +273,62 @@ export function CodexConversation({
               }
             }}
           />
-          {running ? (
-            <button
-              type="button"
-              className="codex-stop"
-              onClick={() => void onStop()}
-              aria-label="停止任务"
-            >
-              ■
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="codex-send"
-              onClick={() => void submit()}
-              disabled={!draft.trim() || submitting || Boolean(disabledReason)}
-              aria-label="发送任务"
-            >
-              ➤
-            </button>
-          )}
-          <small>Codex 只在这个项目的工作目录中生成文件</small>
+          <div className="codex-composer-toolbar">
+            {basketAttachment}
+            <div className="codex-composer-submit">
+              {running ? (
+                <button
+                  type="button"
+                  className="codex-stop"
+                  onClick={() => void onStop()}
+                  aria-label="停止任务"
+                >
+                  <svg
+                    width="15"
+                    height="15"
+                    viewBox="0 0 20 20"
+                    aria-hidden="true"
+                  >
+                    <rect
+                      x="5"
+                      y="5"
+                      width="10"
+                      height="10"
+                      rx="2"
+                      fill="currentColor"
+                    />
+                  </svg>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="codex-send"
+                  onClick={() => void submit()}
+                  disabled={
+                    !draft.trim() ||
+                    submitting ||
+                    attachingBasket ||
+                    Boolean(disabledReason)
+                  }
+                  aria-label="发送任务"
+                >
+                  <svg
+                    width="17"
+                    height="17"
+                    viewBox="0 0 20 20"
+                    aria-hidden="true"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M10 15.5v-11M5.2 9.3 10 4.5l4.8 4.8" />
+                  </svg>
+                </button>
+              )}
+            </div>
+          </div>
         </div>
       </div>
     </section>
