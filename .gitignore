@@ -1,6 +1,7 @@
 /.worktrees/
 /.superpowers/
 node_modules/
+server/
 .pnpm-store/
 dist/
 target/

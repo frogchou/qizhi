@@ -1,9 +1,0 @@
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
-  "required": ["evidence", "risks"],
-  "properties": {
-    "evidence": { "type": "array", "description": "带来源字段的 RAGFlow 证据" },
-    "risks": { "type": "array", "items": { "type": "string" } }
-  }
-}
