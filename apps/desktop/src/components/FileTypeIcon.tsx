@@ -7,6 +7,7 @@ export type FileVisualType =
   | "text"
   | "code"
   | "data"
+  | "image"
   | "generic";
 
 const FILE_TYPES: Record<Exclude<FileVisualType, "generic">, Set<string>> = {
@@ -51,6 +52,7 @@ const FILE_TYPES: Record<Exclude<FileVisualType, "generic">, Set<string>> = {
     "vue",
   ]),
   data: new Set(["ini", "json", "toml", "xml", "yaml", "yml"]),
+  image: new Set(["jpg", "jpeg", "png", "webp", "tif", "tiff", "gif"]),
 };
 
 const VISUALS: Record<FileVisualType, { label: string; marker: string }> = {
@@ -62,6 +64,7 @@ const VISUALS: Record<FileVisualType, { label: string; marker: string }> = {
   text: { label: "文本文件", marker: "TXT" },
   code: { label: "代码文件", marker: "</>" },
   data: { label: "数据文件", marker: "{}" },
+  image: { label: "图片文件", marker: "IMG" },
   generic: { label: "文件", marker: "" },
 };
 

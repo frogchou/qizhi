@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import type {
+  ModelProviderConfig,
   QizhiCommands,
   SummaryPromptTemplateInput,
 } from "../../lib/tauri";
@@ -18,6 +19,8 @@ function editableTemplate(
 export function SummarySettingsSection({ commands }: Props) {
   const nextTemplateNumber = useRef(1);
   const [model, setModel] = useState("gpt-5.6-sol");
+  const [activeProvider, setActiveProvider] =
+    useState<ModelProviderConfig | null>(null);
   const [templates, setTemplates] = useState<EditableTemplate[]>([]);
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -44,6 +47,14 @@ export function SummarySettingsSection({ commands }: Props) {
       .finally(() => {
         if (active) setLoading(false);
       });
+    commands
+      .getActiveModelProvider?.()
+      .then((provider) => {
+        if (!active || !provider) return;
+        setActiveProvider(provider);
+        setModel(provider.model);
+      })
+      .catch(() => undefined);
     return () => {
       active = false;
     };
@@ -186,7 +197,9 @@ export function SummarySettingsSection({ commands }: Props) {
         <div>
           <p className="settings-section-kicker">AI 工作流</p>
           <h2 id="summary-settings-title">今日总结</h2>
-          <p>管理总结模型和快捷提示词；提示词可供未来接入的其他模型共用。</p>
+          <p>
+            管理可复用的总结提示词；模型由“连接服务”中的当前启用项统一提供。
+          </p>
         </div>
         <button
           aria-label="新增提示词"
@@ -199,18 +212,11 @@ export function SummarySettingsSection({ commands }: Props) {
         </button>
       </header>
 
-      <label className="summary-model-field">
-        默认总结模型
-        <input
-          aria-label="总结模型"
-          disabled={loading || saving}
-          maxLength={120}
-          onChange={(event) => setModel(event.currentTarget.value)}
-          placeholder="gpt-5.6-sol"
-          value={model}
-        />
-        <span>当前使用 OpenAI 兼容服务；后续可在这里选择其他模型来源。</span>
-      </label>
+      <div className="summary-provider-summary" aria-label="当前总结模型">
+        <span>当前模型</span>
+        <strong>{activeProvider?.displayName ?? "尚未启用模型服务"}</strong>
+        <code>{activeProvider?.model ?? "请前往连接服务设置"}</code>
+      </div>
 
       {loading ? (
         <p className="summary-settings-empty">正在读取提示词…</p>

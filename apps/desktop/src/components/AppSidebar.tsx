@@ -1,6 +1,8 @@
 import { useMaterialBasket } from "../features/materials/MaterialBasket";
 import { ControlIcon } from "./ControlIcon";
 import { BrandLogo } from "./BrandLogo";
+import { getVersion } from "@tauri-apps/api/app";
+import { useEffect, useState } from "react";
 
 export type AppRoute = "today" | "knowledge" | "codex" | "factory" | "settings";
 type IconName = AppRoute;
@@ -58,6 +60,14 @@ export function AppSidebar({
   onOpenBasket?: () => void;
 }) {
   const basket = useMaterialBasket();
+  const [version, setVersion] = useState("0.1.1");
+  useEffect(() => {
+    void getVersion()
+      .then((runtimeVersion) => {
+        if (runtimeVersion) setVersion(runtimeVersion);
+      })
+      .catch(() => undefined);
+  }, []);
   return (
     <aside className="sidebar">
       <div className="brand">
@@ -99,11 +109,7 @@ export function AppSidebar({
             )}
           </button>
         )}
-        <p className="sidebar-note">
-          本地优先
-          <br />
-          知识工作空间
-        </p>
+        <p className="sidebar-note">v{version}</p>
       </div>
     </aside>
   );

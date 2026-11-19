@@ -182,7 +182,7 @@ export function SummaryResultDialog({
         </header>
         {result.truncated ? (
           <p className="summary-warning">
-            OpenAI 标记本次输出不完整，以下内容可能缺失。
+            模型服务标记本次输出不完整，以下内容可能缺失。
           </p>
         ) : null}
         <div

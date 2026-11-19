@@ -1,8 +1,8 @@
 use qizhi_desktop_lib::openai::content::{extract_summary_text, extract_summary_text_from_bytes};
 use qizhi_desktop_lib::openai::{
-    SummaryFileInput, build_chat_fallback_request, build_direct_request, openai_api_url,
-    parse_chat_summary_response, parse_summary_response, parse_summary_response_with_deltas,
-    should_fallback_to_local,
+    OpenAiClient, SummaryFileInput, build_chat_fallback_request, build_direct_request,
+    openai_api_url, parse_chat_summary_response, parse_chat_summary_response_with_deltas,
+    parse_summary_response, parse_summary_response_with_deltas, should_fallback_to_local,
 };
 
 #[test]
@@ -78,6 +78,7 @@ fn local_text_fallback_uses_chat_completions_shape() {
             .contains("仅依据用户选择的文件")
     );
     assert!(json.get("input").is_none());
+    assert_eq!(json["stream"], true);
 
     let parsed = parse_chat_summary_response(
         r##"{"choices":[{"finish_reason":"length","message":{"content":"# 总结"}}]}"##,
@@ -85,6 +86,39 @@ fn local_text_fallback_uses_chat_completions_shape() {
     .expect("chat response parses");
     assert_eq!(parsed.markdown, "# 总结");
     assert!(parsed.truncated);
+}
+
+#[test]
+fn chat_only_providers_skip_direct_file_input() {
+    let client = OpenAiClient::new_provider(
+        "http://localhost:11434/v1",
+        None,
+        "qwen3:8b".to_owned(),
+        "Ollama".to_owned(),
+        false,
+    )
+    .expect("keyless local provider is valid");
+
+    assert!(!client.supports_direct_file_input());
+}
+
+#[test]
+fn parses_streamed_chat_completion_deltas() {
+    let body = concat!(
+        "data: {\"choices\":[{\"delta\":{\"content\":\"# 总\"}}]}\n\n",
+        "data: {\"choices\":[{\"delta\":{\"content\":\"结\\n完成索引。\"}}]}\n\n",
+        "data: [DONE]\n\n"
+    );
+    let mut deltas = Vec::new();
+
+    let parsed = parse_chat_summary_response_with_deltas(body, |delta| {
+        deltas.push(delta.to_owned());
+        Ok(())
+    })
+    .expect("chat stream parses");
+
+    assert_eq!(deltas, ["# 总", "结\n完成索引。"]);
+    assert_eq!(parsed.markdown, "# 总结\n完成索引。");
 }
 
 #[test]

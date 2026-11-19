@@ -4,7 +4,7 @@
 
 栖知是一款面向 Windows 知识工作者的本地优先工作助手。它使用内置的 NTFS/USN 索引快速发现近期文件变动，把分散的文档整理成可检索、可总结、可继续处理的工作上下文，并连接 RAGFlow、OpenAI 兼容服务、TypeSafe AI JEV 与本机 Codex CLI。
 
-> 当前处于早期开发阶段（`0.1.0`）。接口、数据结构和安装方式仍可能变化，请先在测试环境中使用。
+> 当前处于早期开发阶段（`0.1.1`）。接口、数据结构和安装方式仍可能变化，请先在测试环境中使用。
 
 ## 智能工厂
 
@@ -140,7 +140,7 @@ pnpm --filter @qizhi/desktop tauri build
 该命令会先执行 TypeScript 检查和 Vite 生产构建，再编译 Rust release 程序并生成 NSIS x64 安装器。输出位于：
 
 ```text
-apps/desktop/src-tauri/target/release/bundle/nsis/栖知_0.1.0_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/栖知_0.1.1_x64-setup.exe
 ```
 
 安装器采用按计算机安装模式，安装内置 NTFS 索引服务时会出现 Windows UAC 确认。

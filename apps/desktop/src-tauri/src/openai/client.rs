@@ -4,8 +4,8 @@ use serde_json::Value;
 use url::Url;
 
 use crate::{
-    config::{SecretStore, secret_store::WindowsCredentialStore},
-    database::repositories::ConfigRepository,
+    config::{ModelProviderService, SecretStore, secret_store::WindowsCredentialStore},
+    database::repositories::{ConfigRepository, ModelProviderRepository},
     network::http::HttpClient,
 };
 
@@ -32,6 +32,8 @@ pub struct OpenAiClient {
     chat_completions_url: Url,
     api_key: String,
     model: String,
+    provider_name: String,
+    supports_responses: bool,
 }
 
 impl OpenAiClient {
@@ -51,7 +53,42 @@ impl OpenAiClient {
     }
 
     pub fn new(endpoint: &str, api_key: String, model: String) -> Result<Self, String> {
-        if api_key.trim().is_empty() || api_key.contains(['\r', '\n']) || model.trim().is_empty() {
+        Self::new_provider(endpoint, Some(api_key), model, "OpenAI".to_owned(), true)
+    }
+
+    pub fn from_active_provider(
+        repository: ModelProviderRepository,
+        secrets: WindowsCredentialStore,
+    ) -> Result<Self, String> {
+        let service = ModelProviderService::new(repository, secrets);
+        let config = service
+            .active()
+            .map_err(|_| "无法读取当前模型服务商。".to_owned())?
+            .ok_or_else(|| "请先在设置中保存并启用一个模型服务商。".to_owned())?;
+        let api_key = service
+            .resolve_api_key(&config)
+            .map_err(|_| "无法读取模型服务商的 API Key，请在设置中重新保存。".to_owned())?;
+        Self::new_provider(
+            &config.endpoint,
+            api_key,
+            config.model,
+            config.display_name,
+            config.supports_responses,
+        )
+    }
+
+    pub fn new_provider(
+        endpoint: &str,
+        api_key: Option<String>,
+        model: String,
+        provider_name: String,
+        supports_responses: bool,
+    ) -> Result<Self, String> {
+        if api_key
+            .as_deref()
+            .is_some_and(|value| value.contains(['\r', '\n']))
+            || model.trim().is_empty()
+        {
             return Err("OpenAI 设置无效。".to_owned());
         }
         let base_url =
@@ -59,16 +96,22 @@ impl OpenAiClient {
         if !matches!(base_url.scheme(), "http" | "https") {
             return Err("OpenAI Base URL 仅支持 HTTP 或 HTTPS。".to_owned());
         }
-        let responses_url = Url::parse(&openai_api_url(endpoint, "responses")?)
+        let responses_url = Url::parse(&provider_api_url(endpoint, "responses")?)
             .map_err(|_| "OpenAI Responses URL 格式不正确。".to_owned())?;
-        let chat_completions_url = Url::parse(&openai_api_url(endpoint, "chat/completions")?)
+        let chat_completions_url = Url::parse(&provider_api_url(endpoint, "chat/completions")?)
             .map_err(|_| "OpenAI Chat Completions URL 格式不正确。".to_owned())?;
         Ok(Self {
             responses_url,
             chat_completions_url,
-            api_key,
+            api_key: api_key.unwrap_or_default(),
             model,
+            provider_name,
+            supports_responses,
         })
+    }
+
+    pub fn supports_direct_file_input(&self) -> bool {
+        self.supports_responses
     }
 
     pub fn generate<F>(
@@ -94,12 +137,15 @@ impl OpenAiClient {
         F: FnOnce() -> Result<Vec<(String, String)>, String>,
         D: FnMut(&str) -> Result<(), String>,
     {
+        if !self.supports_responses {
+            return self.generate_from_local_text(prompt, files, load_local_text()?, on_delta);
+        }
         let direct_body = build_direct_request(&self.model, prompt, files)?;
         let mut accumulator = SummaryStreamAccumulator::default();
-        let direct = HttpClient::with_timeout(Duration::from_secs(180))?.request_bearer_lines(
+        let direct = HttpClient::with_timeout(Duration::from_secs(180))?.request_json_lines(
             reqwest::Method::POST,
             self.responses_url.as_str(),
-            &self.api_key,
+            non_empty(&self.api_key),
             Some(direct_body),
             |line| accumulator.push_line(line, &mut on_delta),
         )?;
@@ -107,30 +153,53 @@ impl OpenAiClient {
             return accumulator.finish(&direct.body, &mut on_delta);
         }
         if !should_fallback_to_local(direct.status, &direct.body) {
-            return Err(format!("OpenAI 总结失败（HTTP {}）。", direct.status));
+            return Err(format!(
+                "{} 总结失败（HTTP {}）。",
+                self.provider_name, direct.status
+            ));
         }
-        let local_text = load_local_text()?;
+        self.generate_from_local_text(prompt, files, load_local_text()?, on_delta)
+    }
+
+    fn generate_from_local_text<D>(
+        &self,
+        prompt: &str,
+        files: &[SummaryFileInput],
+        local_text: Vec<(String, String)>,
+        mut on_delta: D,
+    ) -> Result<SummaryGeneration, String>
+    where
+        D: FnMut(&str) -> Result<(), String>,
+    {
         if local_text.len() != files.len() {
             return Err("代理不支持直接文件输入，且部分所选文件无法安全提取文本；请改用 PDF、新版 Office 或 UTF-8 文本文件。".to_owned());
         }
         let fallback_body = build_chat_fallback_request(&self.model, prompt, &local_text)?;
-        let fallback = HttpClient::with_timeout(Duration::from_secs(180))?.request_bearer(
+        let mut accumulator = ChatSummaryStreamAccumulator::default();
+        let fallback = HttpClient::with_timeout(Duration::from_secs(180))?.request_json_lines(
             reqwest::Method::POST,
             self.chat_completions_url.as_str(),
-            &self.api_key,
+            non_empty(&self.api_key),
             Some(fallback_body),
+            |line| accumulator.push_line(line, &mut on_delta),
         )?;
         if !(200..300).contains(&fallback.status) {
-            return Err(format!("OpenAI 文本总结失败（HTTP {}）。", fallback.status));
+            return Err(format!(
+                "{} 文本总结失败（HTTP {}）。",
+                self.provider_name, fallback.status
+            ));
         }
-        let mut generated = parse_chat_summary_response(&fallback.body)?;
-        on_delta(&generated.markdown)?;
+        let mut generated = accumulator.finish(&fallback.body, &mut on_delta)?;
         generated.used_local_fallback = true;
         generated.input_truncated = local_text
             .iter()
             .any(|(_, text)| text.contains("[内容已截断："));
         Ok(generated)
     }
+}
+
+fn non_empty(value: &str) -> Option<&str> {
+    (!value.trim().is_empty()).then_some(value)
 }
 
 pub fn build_direct_request(
@@ -206,6 +275,7 @@ pub fn build_chat_fallback_request(
             {"role":"user", "content": format!("{}{}", prompt.trim(), joined)}
         ],
         "max_tokens": 8000,
+        "stream": true,
     }))
     .map_err(|_| "无法构造 OpenAI 文本总结请求。".to_owned())
 }
@@ -232,6 +302,89 @@ pub fn parse_chat_summary_response(body: &str) -> Result<SummaryGeneration, Stri
         used_local_fallback: false,
         input_truncated: false,
     })
+}
+
+pub fn parse_chat_summary_response_with_deltas<F>(
+    body: &str,
+    mut on_delta: F,
+) -> Result<SummaryGeneration, String>
+where
+    F: FnMut(&str) -> Result<(), String>,
+{
+    let mut accumulator = ChatSummaryStreamAccumulator::default();
+    for line in body.lines() {
+        accumulator.push_line(line, &mut on_delta)?;
+    }
+    accumulator.finish(body, &mut on_delta)
+}
+
+#[derive(Default)]
+struct ChatSummaryStreamAccumulator {
+    markdown: String,
+    saw_event: bool,
+    truncated: bool,
+}
+
+impl ChatSummaryStreamAccumulator {
+    fn push_line<F>(&mut self, line: &str, on_delta: &mut F) -> Result<(), String>
+    where
+        F: FnMut(&str) -> Result<(), String>,
+    {
+        let Some(data) = line.strip_prefix("data:").map(str::trim) else {
+            return Ok(());
+        };
+        if data.is_empty() || data == "[DONE]" {
+            return Ok(());
+        }
+        let event: Value = serde_json::from_str(data)
+            .map_err(|_| "OpenAI 兼容服务的流式响应无法识别。".to_owned())?;
+        self.saw_event = true;
+        if event
+            .pointer("/choices/0/finish_reason")
+            .and_then(Value::as_str)
+            == Some("length")
+        {
+            self.truncated = true;
+        }
+        if let Some(delta) = event
+            .pointer("/choices/0/delta/content")
+            .and_then(Value::as_str)
+        {
+            self.markdown.push_str(delta);
+            on_delta(delta)?;
+        }
+        Ok(())
+    }
+
+    fn finish<F>(mut self, body: &str, on_delta: &mut F) -> Result<SummaryGeneration, String>
+    where
+        F: FnMut(&str) -> Result<(), String>,
+    {
+        if !self.saw_event {
+            let generated = parse_chat_summary_response(body)?;
+            on_delta(&generated.markdown)?;
+            return Ok(generated);
+        }
+        self.markdown = self.markdown.trim().to_owned();
+        if self.markdown.is_empty() {
+            return Err("OpenAI 兼容服务未返回可用的总结内容。".to_owned());
+        }
+        Ok(SummaryGeneration {
+            markdown: self.markdown,
+            truncated: self.truncated,
+            used_local_fallback: false,
+            input_truncated: false,
+        })
+    }
+}
+
+fn provider_api_url(endpoint: &str, suffix: &str) -> Result<String, String> {
+    let mut url =
+        Url::parse(endpoint.trim()).map_err(|_| "模型服务商 Base URL 格式不正确。".to_owned())?;
+    let saved_path = url.path().trim_end_matches('/');
+    url.set_path(&format!("{saved_path}/{}", suffix.trim_start_matches('/')));
+    url.set_query(None);
+    Ok(url.to_string())
 }
 
 pub fn openai_api_url(endpoint: &str, suffix: &str) -> Result<String, String> {

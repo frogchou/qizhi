@@ -36,6 +36,40 @@ test.beforeEach(async ({ page }) => {
           });
         if (command === "basket_list") return Promise.resolve([]);
         if (command === "get_settings") return Promise.resolve([]);
+        if (command === "list_model_providers")
+          return Promise.resolve([
+            {
+              providerId: "openai",
+              displayName: "OpenAI / OpenAI 兼容",
+              endpoint: "https://api.openai.com/v1",
+              model: "gpt-5.6-sol",
+              apiKeyMask: "••••••••",
+              supportsResponses: true,
+              isActive: true,
+              updatedAtUtcMs: 1,
+            },
+            {
+              providerId: "qwen",
+              displayName: "阿里云百炼 / 千问",
+              endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+              model: "qwen-plus",
+              apiKeyMask: "",
+              supportsResponses: false,
+              isActive: false,
+              updatedAtUtcMs: 0,
+            },
+          ]);
+        if (command === "get_active_model_provider")
+          return Promise.resolve({
+            providerId: "openai",
+            displayName: "OpenAI / OpenAI 兼容",
+            endpoint: "https://api.openai.com/v1",
+            model: "gpt-5.6-sol",
+            apiKeyMask: "••••••••",
+            supportsResponses: true,
+            isActive: true,
+            updatedAtUtcMs: 1,
+          });
         if (command === "list_scan_rules")
           return Promise.resolve({
             allowedRoots: ["C:\\Users\\fcc\\Documents", "D:\\"],
@@ -104,6 +138,26 @@ test("uses a fixed category rail and switches one settings panel at a time", asy
   await page.getByRole("button", { name: "连接服务" }).click();
   await expect(page.locator("#settings-panel-services")).toBeVisible();
   await expect(page.locator("#settings-panel-privacy")).toBeHidden();
+});
+
+test("switches model providers without changing the active provider", async ({
+  page,
+}) => {
+  await page.getByRole("button", { name: "连接服务" }).click();
+  const panel = page.locator("#settings-panel-services");
+  await expect(
+    panel.getByText("当前启用：OpenAI / OpenAI 兼容 · gpt-5.6-sol"),
+  ).toBeVisible();
+
+  await panel.getByLabel("模型服务商").selectOption("qwen");
+  await expect(panel.getByLabel("模型 Base URL")).toHaveValue(
+    "https://dashscope.aliyuncs.com/compatible-mode/v1",
+  );
+  await expect(panel.getByLabel("模型名称")).toHaveValue("qwen-plus");
+  await expect(panel.getByRole("button", { name: "启用此服务" })).toBeEnabled();
+
+  const screenshot = process.env.QIZHI_QA_SCREENSHOT;
+  if (screenshot) await page.screenshot({ path: screenshot, fullPage: false });
 });
 
 test("moves categories above content without horizontal page overflow", async ({

@@ -4,7 +4,7 @@
 
 Qizhi is a local-first work assistant for Windows knowledge workers. It uses a built-in NTFS/USN index to discover recent file activity, turns scattered documents into searchable and reusable work context, and integrates with RAGFlow, OpenAI-compatible services, TypeSafe AI JEV, and the local Codex CLI.
 
-> Qizhi is currently an early-stage project (`0.1.0`). APIs, data formats, and installation behavior may change. Use it in a test environment first.
+> Qizhi is currently an early-stage project (`0.1.1`). APIs, data formats, and installation behavior may change. Use it in a test environment first.
 
 ## Smart Factory
 
@@ -140,7 +140,7 @@ pnpm --filter @qizhi/desktop tauri build
 The command runs TypeScript checks and a Vite production build, compiles the Rust release binary, and creates an x64 NSIS installer at:
 
 ```text
-apps/desktop/src-tauri/target/release/bundle/nsis/栖知_0.1.0_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/栖知_0.1.1_x64-setup.exe
 ```
 
 The installer uses per-machine mode. Windows displays a UAC prompt while the built-in NTFS indexing service is installed.

@@ -1,6 +1,10 @@
+pub mod model_provider;
 pub mod secret_store;
 pub mod validation;
 
+pub use model_provider::{
+    ModelProviderPreset, ModelProviderSaveInput, ModelProviderService, model_provider_presets,
+};
 pub use secret_store::{FakeSecretStore, SecretStore};
 
 use crate::{

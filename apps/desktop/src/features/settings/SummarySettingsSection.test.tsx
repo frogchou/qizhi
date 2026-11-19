@@ -31,6 +31,16 @@ describe("SummarySettingsSection", () => {
       }),
     );
     const commands = {
+      getActiveModelProvider: vi.fn().mockResolvedValue({
+        providerId: "qwen",
+        displayName: "阿里云百炼 / 千问",
+        endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        model: "qwen-plus",
+        apiKeyMask: "••••••••",
+        supportsResponses: false,
+        isActive: true,
+        updatedAtUtcMs: 1,
+      }),
       getSummarySettings: vi.fn().mockResolvedValue({
         model: "gpt-5.6",
         templates: savedTemplates,
@@ -41,6 +51,9 @@ describe("SummarySettingsSection", () => {
     render(<SummarySettingsSection commands={commands as QizhiCommands} />);
 
     expect(await screen.findByText("提示词 20")).toBeInTheDocument();
+    expect(screen.getByText("阿里云百炼 / 千问")).toBeInTheDocument();
+    expect(screen.getByText("qwen-plus")).toBeInTheDocument();
+    expect(screen.queryByLabelText("总结模型")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("总结提示词 1")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "编辑 提示词 1" }));

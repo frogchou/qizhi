@@ -104,6 +104,13 @@ export interface QizhiCommands {
   testServiceConnection(
     input: ServiceConfigurationInput,
   ): Promise<ConnectionStatus>;
+  listModelProviders?(): Promise<ModelProviderConfig[]>;
+  saveModelProvider?(
+    input: ModelProviderSaveInput,
+  ): Promise<ModelProviderConfig>;
+  testModelProvider?(input: ModelProviderTestInput): Promise<ConnectionStatus>;
+  activateModelProvider?(providerId: string): Promise<ModelProviderConfig>;
+  getActiveModelProvider?(): Promise<ModelProviderConfig | null>;
   pickFolder(): Promise<string | null>;
   getNtfsIndexerStatus?(): Promise<ConnectionStatus>;
   getTodaySnapshot(): Promise<TodaySnapshot>;
@@ -203,6 +210,29 @@ export interface QizhiCommands {
 }
 
 export type ConnectionStatus = { available: boolean; message: string };
+
+export type ModelProviderConfig = {
+  providerId: string;
+  displayName: string;
+  endpoint: string;
+  model: string;
+  credentialReference?: string;
+  apiKeyMask: string;
+  supportsResponses: boolean;
+  isActive: boolean;
+  updatedAtUtcMs: number;
+};
+export type ModelProviderSaveInput = {
+  providerId: string;
+  endpoint: string;
+  model: string;
+  apiKey: string;
+  supportsResponses?: boolean | null;
+};
+export type ModelProviderTestInput = Pick<
+  ModelProviderSaveInput,
+  "providerId" | "endpoint" | "model" | "apiKey"
+>;
 
 export type CodexRuntimeStatus = {
   installation: string;
@@ -482,7 +512,7 @@ export type FileValueResult = {
   message: string | null;
 };
 
-export type WorkspaceCategory = "all" | "documents" | "sourceCode";
+export type WorkspaceCategory = "all" | "documents" | "sourceCode" | "images";
 export type WorkspaceSort =
   "nameAsc" | "nameDesc" | "timeAsc" | "timeDesc" | "typeAsc" | "typeDesc";
 export type WorkspaceQueryInput = {
@@ -620,7 +650,7 @@ export type ScanRules = {
   lockedExclusions: string[];
 };
 
-export type FileCategory = "documents" | "sourceCode";
+export type FileCategory = "documents" | "sourceCode" | "images";
 
 export type RagflowChat = {
   id: string;
@@ -868,6 +898,12 @@ export const tauriCommands: QizhiCommands = {
   saveSettings: (input) => invoke("save_settings", { input }),
   testServiceConnection: (input) =>
     invoke("test_service_connection", { input }),
+  listModelProviders: () => invoke("list_model_providers"),
+  saveModelProvider: (input) => invoke("save_model_provider", { input }),
+  testModelProvider: (input) => invoke("test_model_provider", { input }),
+  activateModelProvider: (providerId) =>
+    invoke("activate_model_provider", { input: { providerId } }),
+  getActiveModelProvider: () => invoke("get_active_model_provider"),
   pickFolder: async () => {
     const selected = await open({
       directory: true,

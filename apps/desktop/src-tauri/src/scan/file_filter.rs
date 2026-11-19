@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 pub enum FileCategory {
     Documents,
     SourceCode,
+    Images,
 }
 
 pub fn default_file_categories() -> Vec<FileCategory> {
@@ -40,12 +41,15 @@ impl FileTypeFilter {
             && DOCUMENT_EXTENSIONS.contains(&extension.as_str()))
             || (self.categories.contains(&FileCategory::SourceCode)
                 && SOURCE_CODE_EXTENSIONS.contains(&extension.as_str()))
+            || (self.categories.contains(&FileCategory::Images)
+                && IMAGE_EXTENSIONS.contains(&extension.as_str()))
     }
 }
 
-/// Formats intentionally limited to text, office, and source artifacts that
-/// have a defined downstream extraction path. Media, executables, archives,
-/// and unknown binaries remain outside the work discovery surface.
+/// Formats intentionally limited to artifacts with a defined downstream
+/// action. Images are opt-in and upload to RAGFlow without entering text-only
+/// JEV or summary extraction. Other media, executables, archives, and unknown
+/// binaries remain outside the work discovery surface.
 const DOCUMENT_EXTENSIONS: &[&str] = &[
     "txt", "md", "markdown", "csv", "tsv", "pdf", "doc", "docx", "odt", "rtf", "xls", "xlsx",
     "ods", "ppt", "pptx", "odp",
@@ -95,6 +99,8 @@ const SOURCE_CODE_EXTENSIONS: &[&str] = &[
     "groovy",
 ];
 
+const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "webp", "tif", "tiff", "gif"];
+
 #[cfg(test)]
 mod tests {
     use super::{FileCategory, FileTypeFilter};
@@ -132,5 +138,40 @@ mod tests {
             );
         }
         assert!(!filter.allows(Path::new("report.docx")));
+    }
+
+    #[test]
+    fn images_include_only_ragflow_compatible_common_formats() {
+        let filter = FileTypeFilter::new(vec![FileCategory::Images]);
+
+        for path in [
+            "photo.jpg",
+            "scan.JPEG",
+            "diagram.png",
+            "board.webp",
+            "page.tif",
+            "page.tiff",
+            "animation.gif",
+        ] {
+            assert!(filter.allows(Path::new(path)), "{path} should be an image");
+        }
+        for path in [
+            "report.docx",
+            "main.rs",
+            "photo.bmp",
+            "vector.svg",
+            "raw.cr2",
+        ] {
+            assert!(!filter.allows(Path::new(path)), "{path} is not supported");
+        }
+    }
+
+    #[test]
+    fn default_filter_keeps_image_discovery_disabled() {
+        let filter = FileTypeFilter::default();
+
+        assert!(!filter.allows(Path::new("photo.png")));
+        assert!(filter.allows(Path::new("report.docx")));
+        assert!(filter.allows(Path::new("main.rs")));
     }
 }

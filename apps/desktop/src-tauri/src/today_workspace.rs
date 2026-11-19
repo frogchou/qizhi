@@ -24,6 +24,7 @@ pub enum WorkspaceCategory {
     All,
     Documents,
     SourceCode,
+    Images,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -173,11 +174,14 @@ impl WorkspaceTree {
         }
 
         let filter = match input.category {
-            WorkspaceCategory::All => {
-                FileTypeFilter::new(vec![FileCategory::Documents, FileCategory::SourceCode])
-            }
+            WorkspaceCategory::All => FileTypeFilter::new(vec![
+                FileCategory::Documents,
+                FileCategory::SourceCode,
+                FileCategory::Images,
+            ]),
             WorkspaceCategory::Documents => FileTypeFilter::new(vec![FileCategory::Documents]),
             WorkspaceCategory::SourceCode => FileTypeFilter::new(vec![FileCategory::SourceCode]),
+            WorkspaceCategory::Images => FileTypeFilter::new(vec![FileCategory::Images]),
         };
         let mut deduplicated = HashMap::<String, FileRecord>::new();
         for mut record in input.files {
@@ -815,4 +819,55 @@ fn wildcard_matches(value: &str, pattern: &str) -> bool {
         previous = current;
     }
     previous[value.len()]
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use super::{WorkspaceBuildInput, WorkspaceCategory, WorkspaceSort, WorkspaceTree};
+    use crate::contracts::FileRecord;
+
+    fn record(id: i64, name: &str) -> FileRecord {
+        FileRecord {
+            id,
+            canonical_path: format!(r"D:\Work\{name}"),
+            file_identity: format!("file-{id}"),
+            modified_at_utc_ms: id,
+            size_bytes: 10,
+            source: "本机 NTFS 索引".to_owned(),
+        }
+    }
+
+    fn names(category: WorkspaceCategory) -> Vec<String> {
+        let tree = WorkspaceTree::build(WorkspaceBuildInput {
+            files: vec![
+                record(1, "report.docx"),
+                record(2, "main.rs"),
+                record(3, "diagram.png"),
+                record(4, "legacy.bmp"),
+            ],
+            allowed_roots: vec![r"D:\Work".to_owned()],
+            threshold: 5,
+            category,
+            search: String::new(),
+            value_statuses: HashMap::new(),
+        })
+        .expect("workspace tree");
+
+        tree.page(None, 0, 200, WorkspaceSort::NameAsc)
+            .entries
+            .into_iter()
+            .map(|entry| entry.name)
+            .collect()
+    }
+
+    #[test]
+    fn image_category_and_all_include_only_supported_images() {
+        assert_eq!(names(WorkspaceCategory::Images), vec!["diagram.png"]);
+        assert_eq!(
+            names(WorkspaceCategory::All),
+            vec!["diagram.png", "main.rs", "report.docx"]
+        );
+    }
 }

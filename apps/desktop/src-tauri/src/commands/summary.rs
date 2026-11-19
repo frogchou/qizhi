@@ -1,4 +1,9 @@
-use std::{collections::BTreeSet, fs::OpenOptions, io::Write, path::PathBuf};
+use std::{
+    collections::BTreeSet,
+    fs::OpenOptions,
+    io::Write,
+    path::{Path, PathBuf},
+};
 
 use serde::{Deserialize, Serialize};
 use tauri::{State, ipc::Channel};
@@ -13,7 +18,7 @@ use crate::{
     },
     ragflow::client::{RagflowClient, RagflowUpload},
     scan::{
-        file_filter::FileTypeFilter,
+        file_filter::{FileCategory, FileTypeFilter},
         policy::{ScanPolicy, active_roots},
     },
 };
@@ -165,7 +170,7 @@ pub fn compose_summary_artifact_with_input_state(
         parts.push("> ⚠️ 部分文件内容因本地回退长度限制已截断。");
     }
     if truncated {
-        parts.push("> ⚠️ OpenAI 标记本次输出不完整，以下内容可能缺失。");
+        parts.push("> ⚠️ 模型服务标记本次输出不完整，以下内容可能缺失。");
     }
     parts.push(markdown.trim());
     parts.join("\n\n")
@@ -261,8 +266,8 @@ fn resolve_summary_selection(
     state: &AppState,
     input: &WorkSummarySelectionInput,
 ) -> Result<Vec<i64>, String> {
-    if let Some(query_id) = input.query_id.as_deref() {
-        return super::today::resolve_workspace_selection(
+    let candidate_ids = if let Some(query_id) = input.query_id.as_deref() {
+        super::today::resolve_workspace_selection(
             state,
             super::today::WorkspaceSelectionInput {
                 query_id: query_id.to_owned(),
@@ -270,8 +275,10 @@ fn resolve_summary_selection(
                 directory_ids: input.directory_ids.clone(),
             },
         )
-        .map(|output| output.file_ids);
-    }
+        .map(|output| output.file_ids)?
+    } else {
+        input.file_ids.clone()
+    };
     let rules = state
         .scan_rules
         .get()
@@ -284,22 +291,35 @@ fn resolve_summary_selection(
     let roots = active_roots(&rules.allowed_roots, &exclusions)
         .map_err(|_| "扫描目录无效，请在设置中重新保存。".to_owned())?;
     let policy = ScanPolicy::for_roots(exclusions, roots);
-    let filter = FileTypeFilter::new(rules.file_categories);
+    let configured_filter = FileTypeFilter::new(rules.file_categories);
     let repository = state.database.files();
     let mut safe = BTreeSet::new();
-    for id in &input.file_ids {
+    let mut found_non_summary_candidate = false;
+    for id in candidate_ids {
         let Some(file) = repository
-            .get_by_id(*id)
+            .get_by_id(id)
             .map_err(|_| "无法读取所选文件。".to_owned())?
         else {
             continue;
         };
         let path = PathBuf::from(file.canonical_path);
-        if filter.allows(&path) && policy.is_allowed(&path) {
+        if !configured_filter.allows(&path) || !policy.is_allowed(&path) {
+            continue;
+        }
+        if is_summary_candidate(&path) {
             safe.insert(file.id);
+        } else {
+            found_non_summary_candidate = true;
         }
     }
+    if safe.is_empty() && found_non_summary_candidate {
+        return Err("今日总结暂不支持图片，请选择文档、文本或源代码。".to_owned());
+    }
     Ok(safe.into_iter().collect())
+}
+
+fn is_summary_candidate(path: &Path) -> bool {
+    FileTypeFilter::new(vec![FileCategory::Documents, FileCategory::SourceCode]).allows(path)
 }
 
 #[tauri::command]
@@ -374,10 +394,9 @@ where
         template_title: template.title.clone(),
         file_count: selected.len(),
     });
-    let client = OpenAiClient::from_saved_config(
-        state.database.configs(),
+    let client = OpenAiClient::from_active_provider(
+        state.database.model_providers(),
         WindowsCredentialStore,
-        settings.model,
     )?;
     let generated = if batches.len() == 1 {
         let files = load_summary_files(state, &batches[0])?;
@@ -475,7 +494,7 @@ fn load_summary_files(state: &AppState, file_ids: &[i64]) -> Result<Vec<SummaryF
     let roots = active_roots(&rules.allowed_roots, &exclusions)
         .map_err(|_| "扫描目录无效，请在设置中重新保存。".to_owned())?;
     let policy = ScanPolicy::for_roots(exclusions, roots);
-    let filter = FileTypeFilter::new(rules.file_categories);
+    let configured_filter = FileTypeFilter::new(rules.file_categories);
     let mut total_bytes = 0_u64;
     let mut files = Vec::with_capacity(file_ids.len());
     for id in file_ids {
@@ -486,8 +505,11 @@ fn load_summary_files(state: &AppState, file_ids: &[i64]) -> Result<Vec<SummaryF
             .map_err(|_| "无法读取所选文件。".to_owned())?
             .ok_or_else(|| "所选文件已不在列表中，请刷新后重试。".to_owned())?;
         let path = PathBuf::from(&file.canonical_path);
-        if !policy.is_allowed(&path) || !filter.allows(&path) {
+        if !policy.is_allowed(&path) || !configured_filter.allows(&path) {
             return Err("所选文件已不在允许扫描范围内。".to_owned());
+        }
+        if !is_summary_candidate(&path) {
+            return Err("今日总结暂不支持图片，请选择文档、文本或源代码。".to_owned());
         }
         let metadata =
             std::fs::metadata(&path).map_err(|_| "所选文件可能已移动或无法访问。".to_owned())?;
@@ -602,4 +624,19 @@ pub async fn upload_summary_markdown(
     })
     .await
     .map_err(|_| "上传总结时发生意外错误。".to_owned())?
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::is_summary_candidate;
+
+    #[test]
+    fn summary_candidates_exclude_images_but_keep_source_code() {
+        assert!(is_summary_candidate(Path::new("report.docx")));
+        assert!(is_summary_candidate(Path::new("notes.md")));
+        assert!(is_summary_candidate(Path::new("main.rs")));
+        assert!(!is_summary_candidate(Path::new("photo.png")));
+    }
 }

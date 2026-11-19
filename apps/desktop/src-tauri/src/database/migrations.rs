@@ -42,6 +42,10 @@ pub fn apply(connection: &Connection) -> Result<()> {
             14,
             include_str!("../../migrations/0014_material_basket.sql"),
         ),
+        (
+            15,
+            include_str!("../../migrations/0015_model_providers.sql"),
+        ),
     ] {
         let applied = connection.query_row(
             "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version = ?1)",

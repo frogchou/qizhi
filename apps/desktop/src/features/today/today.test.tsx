@@ -816,6 +816,134 @@ describe("TodayPage", () => {
     expect(screen.getAllByText("不评估")).toHaveLength(3);
   });
 
+  it("filters supported images without sending them to JEV", async () => {
+    const snapshot: TodaySnapshot = {
+      state: "ready",
+      files: [
+        {
+          ...readySnapshot.files[0],
+          id: 1,
+          canonicalPath: "D:\\工作\\方案.docx",
+        },
+        {
+          ...readySnapshot.files[0],
+          id: 2,
+          canonicalPath: "D:\\工作\\main.rs",
+        },
+        {
+          ...readySnapshot.files[0],
+          id: 3,
+          canonicalPath: "D:\\工作\\现场.png",
+        },
+        {
+          ...readySnapshot.files[0],
+          id: 4,
+          canonicalPath: "D:\\工作\\流程.webp",
+        },
+        {
+          ...readySnapshot.files[0],
+          id: 5,
+          canonicalPath: "D:\\工作\\旧图.bmp",
+        },
+      ],
+      clusters: [{ label: "本机文件", fileIds: [1, 2, 3, 4, 5] }],
+    };
+    const client = commands(snapshot) as QizhiCommands & {
+      evaluateTodayFiles: ReturnType<typeof vi.fn>;
+    };
+    client.evaluateTodayFiles = vi
+      .fn()
+      .mockResolvedValue([{ fileId: 1, status: "有价值", score: 3.5 }]);
+
+    render(<TodayPage commands={client} />);
+    await waitFor(() =>
+      expect(client.evaluateTodayFiles).toHaveBeenCalledWith([1]),
+    );
+
+    fireEvent.change(screen.getByLabelText("文件类型筛选"), {
+      target: { value: "images" },
+    });
+
+    expect(screen.getByText("现场.png")).toBeInTheDocument();
+    expect(screen.getByText("流程.webp")).toBeInTheDocument();
+    expect(screen.queryByText("旧图.bmp")).not.toBeInTheDocument();
+    expect(screen.queryByText("方案.docx")).not.toBeInTheDocument();
+    expect(screen.queryByText("main.rs")).not.toBeInTheDocument();
+    expect(screen.getAllByText("图片 · 不评估")).toHaveLength(2);
+    expect(client.evaluateTodayFiles).toHaveBeenCalledTimes(1);
+  });
+
+  it("queries the image workspace and opens upload from the image row", async () => {
+    const imageSnapshot: TodaySnapshot = {
+      state: "ready",
+      files: [
+        {
+          ...readySnapshot.files[0],
+          id: 31,
+          canonicalPath: "D:\\工作\\现场.png",
+        },
+      ],
+      clusters: [{ label: "本机 NTFS 索引", fileIds: [31] }],
+    };
+    const client = commands(imageSnapshot);
+    client.queryTodayWorkspace = vi.fn().mockImplementation(async (input) => ({
+      queryId: "query-images",
+      totalFileCount: 1,
+      nextCursor: null,
+      entries:
+        input.category === "images"
+          ? [
+              {
+                id: "file-31",
+                kind: "file" as const,
+                name: "现场.png",
+                canonicalPath: "D:\\工作\\现场.png",
+                fileId: 31,
+                modifiedAtUtcMs: 1_793_189_400_000,
+                sizeBytes: 1024,
+                source: "本机 NTFS 索引",
+                fileCount: 1,
+                childDirectoryCount: 0,
+                hasChildren: false,
+                valueSummary: {
+                  valuable: 0,
+                  notValuable: 0,
+                  pending: 0,
+                  failed: 0,
+                  unsupported: 1,
+                },
+              },
+            ]
+          : [],
+    }));
+    client.listRagflowDatasets = vi
+      .fn()
+      .mockResolvedValue([
+        { id: "kb-images", name: "图片资料", description: "" },
+      ]);
+
+    render(<TodayPage commands={client} />);
+    fireEvent.change(await screen.findByLabelText("文件类型筛选"), {
+      target: { value: "images" },
+    });
+
+    const imageName = await screen.findByText("现场.png");
+    expect(client.queryTodayWorkspace).toHaveBeenLastCalledWith(
+      expect.objectContaining({ category: "images" }),
+    );
+    const row = imageName.closest("tr");
+    expect(row).not.toBeNull();
+    expect(
+      within(row as HTMLElement).getByText("图片 · 不评估"),
+    ).toBeInTheDocument();
+    fireEvent.click(
+      within(row as HTMLElement).getByRole("button", { name: "上传" }),
+    );
+    expect(
+      await screen.findByRole("dialog", { name: "上传到知识库" }),
+    ).toBeInTheDocument();
+  });
+
   it("maps every value assessment state to a stable visual class", async () => {
     const states: TodaySnapshot extends { files: infer T } ? T : never = [
       { ...readySnapshot.files[0], id: 1, status: "待分析" },

@@ -14,6 +14,7 @@ import type {
   TodayFile,
   TodayScanStatus,
   TodaySnapshot,
+  WorkspaceCategory,
   WorkspaceQueryInput,
   WorkspacePage,
   WorkSummaryPreparation,
@@ -48,9 +49,10 @@ function extension(path: string) {
   const dot = name.lastIndexOf(".");
   return dot > 0 ? name.slice(dot + 1).toLowerCase() : "";
 }
-function fileCategory(path: string): "documents" | "sourceCode" | null {
+function fileCategory(path: string): Exclude<WorkspaceCategory, "all"> | null {
   const value = extension(path);
   if (SOURCE_EXTENSIONS.has(value)) return "sourceCode";
+  if (IMAGE_EXTENSIONS.has(value)) return "images";
   return DOCUMENT_EXTENSIONS.has(value) ? "documents" : null;
 }
 function valueStatusClass(status: TodayFile["status"]) {
@@ -98,7 +100,7 @@ function isExistingScan(message: string) {
 
 function workspaceQueryInput(
   scope: WorkspaceView,
-  category: "all" | "documents" | "sourceCode",
+  category: WorkspaceCategory,
   search: string,
   sort: string,
 ): WorkspaceQueryInput {
@@ -175,6 +177,27 @@ const DOCUMENT_EXTENSIONS = new Set([
   "pptx",
   "odp",
 ]);
+const IMAGE_EXTENSIONS = new Set([
+  "jpg",
+  "jpeg",
+  "png",
+  "webp",
+  "tif",
+  "tiff",
+  "gif",
+]);
+
+function emptyWorkspaceMessage(
+  view: WorkspaceView,
+  category: WorkspaceCategory,
+) {
+  if (category === "images") {
+    return "没有发现支持的图片。请先在设置中开启图片搜索，或确认所选时间范围内有 JPG、PNG、WebP、TIFF 或 GIF 图片。";
+  }
+  return view === "today"
+    ? "今天的扫描范围内还没有发现新建或修改的文件。"
+    : "过去五天内没有发现符合规则的工作文件。";
+}
 
 export function TodayPage({
   commands,
@@ -214,9 +237,7 @@ export function TodayPage({
   const [notice, setNotice] = useState<string | null>(null);
   const [scanStatus, setScanStatus] = useState<TodayScanStatus | null>(null);
   const [query, setQuery] = useState("");
-  const [category, setCategory] = useState<"all" | "documents" | "sourceCode">(
-    "documents",
-  );
+  const [category, setCategory] = useState<WorkspaceCategory>("documents");
   const [sort, setSort] = useState("time-desc");
   const [fileMenu, setFileMenu] = useState<FileMenu | null>(null);
   const [uploadDialog, setUploadDialog] = useState<UploadDialogState | null>(
@@ -824,7 +845,7 @@ export function TodayPage({
     } catch (error) {
       const message = readableError(
         error,
-        "生成总结失败，请检查 OpenAI 设置和所选文件。",
+        "生成总结失败，请检查当前模型服务和所选文件。",
       );
       setSummaryResult((current) =>
         current ? { ...current, status: "failed", error: message } : current,
@@ -1121,15 +1142,13 @@ export function TodayPage({
               value={category}
               onChange={(event) => {
                 clearWorkspaceSelections();
-                setCategory(
-                  event.currentTarget.value as
-                    "all" | "documents" | "sourceCode",
-                );
+                setCategory(event.currentTarget.value as WorkspaceCategory);
               }}
             >
               <option value="all">所有支持类型</option>
               <option value="documents">文档与文本</option>
               <option value="sourceCode">源代码</option>
+              <option value="images">图片</option>
             </select>
             <select
               aria-label="排序方式"
@@ -1192,24 +1211,17 @@ export function TodayPage({
                 }
                 onNotice={setNotice}
                 onOpenFile={(id) => void fileAction("open", id)}
+                onUploadFile={(id) => void openUploadDialog(id)}
                 page={workspacePage}
                 selectedDirectoryIds={selectedDirectoryIds}
                 selectedFileIds={selectedFileIds}
                 valueMode={view === "today" ? "automatic" : "manual"}
               />
             ) : (
-              <p className="empty">
-                {view === "today"
-                  ? "今天的扫描范围内还没有发现新建或修改的文件。"
-                  : "过去五天内没有发现符合规则的工作文件。"}
-              </p>
+              <p className="empty">{emptyWorkspaceMessage(view, category)}</p>
             )
           ) : visibleFiles.length === 0 ? (
-            <p className="empty">
-              {view === "today"
-                ? "今天的扫描范围内还没有发现新建或修改的文件。"
-                : "过去五天内没有发现符合规则的工作文件。"}
-            </p>
+            <p className="empty">{emptyWorkspaceMessage(view, category)}</p>
           ) : (
             <div className="file-table-wrap">
               <table className="file-table">
@@ -1326,7 +1338,9 @@ export function TodayPage({
                           }
                         >
                           {fileCategory(file.canonicalPath) !== "documents"
-                            ? "不评估"
+                            ? fileCategory(file.canonicalPath) === "images"
+                              ? "图片 · 不评估"
+                              : "不评估"
                             : file.status === "待分析"
                               ? view === "today"
                                 ? "评估中"
@@ -1335,16 +1349,27 @@ export function TodayPage({
                         </button>
                       </td>
                       <td>
-                        <button
-                          className="row-open"
-                          type="button"
-                          onClick={() => void fileAction("open", file.id)}
-                        >
-                          <span>打开</span>
-                          <svg viewBox="0 0 12 12" aria-hidden="true">
-                            <path d="m4.5 2.5 3.5 3.5-3.5 3.5" />
-                          </svg>
-                        </button>
+                        <div className="row-actions">
+                          <button
+                            className="row-open"
+                            type="button"
+                            onClick={() => void fileAction("open", file.id)}
+                          >
+                            <span>打开</span>
+                            <svg viewBox="0 0 12 12" aria-hidden="true">
+                              <path d="m4.5 2.5 3.5 3.5-3.5 3.5" />
+                            </svg>
+                          </button>
+                          {fileCategory(file.canonicalPath) === "images" ? (
+                            <button
+                              className="row-upload"
+                              onClick={() => void openUploadDialog(file.id)}
+                              type="button"
+                            >
+                              上传
+                            </button>
+                          ) : null}
+                        </div>
                       </td>
                     </tr>
                   ))}

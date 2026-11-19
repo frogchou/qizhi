@@ -64,6 +64,9 @@ impl Database {
     pub fn configs(&self) -> repositories::ConfigRepository {
         repositories::ConfigRepository::new(self.clone())
     }
+    pub fn model_providers(&self) -> repositories::ModelProviderRepository {
+        repositories::ModelProviderRepository::new(self.clone())
+    }
     pub fn value_assessments(&self) -> repositories::ValueAssessmentRepository {
         repositories::ValueAssessmentRepository::new(self.clone())
     }

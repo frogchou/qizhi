@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import type { QizhiCommands } from "../../lib/tauri";
+import type { ModelProviderConfig, QizhiCommands } from "../../lib/tauri";
 import { SettingsPage } from "./SettingsPage";
 
 function deferred<T>() {
@@ -13,10 +13,29 @@ function deferred<T>() {
 }
 
 function commandsForSummarySettings(): QizhiCommands {
+  const provider: ModelProviderConfig = {
+    providerId: "openai",
+    displayName: "OpenAI / OpenAI 兼容",
+    endpoint: "https://api.openai.com/v1",
+    model: "gpt-5.6-sol",
+    apiKeyMask: "••••••••",
+    supportsResponses: true,
+    isActive: true,
+    updatedAtUtcMs: 1,
+  };
   return {
     getSettings: vi.fn().mockResolvedValue([]),
     saveSettings: vi.fn(),
     testServiceConnection: vi.fn(),
+    listModelProviders: vi.fn().mockResolvedValue([provider]),
+    getActiveModelProvider: vi.fn().mockResolvedValue(provider),
+    saveModelProvider: vi
+      .fn()
+      .mockImplementation((input) =>
+        Promise.resolve({ ...provider, ...input, apiKeyMask: "••••••••" }),
+      ),
+    testModelProvider: vi.fn(),
+    activateModelProvider: vi.fn().mockResolvedValue(provider),
     pickFolder: vi.fn(),
     getTodaySnapshot: vi.fn(),
     refreshToday: vi.fn(),
@@ -78,7 +97,7 @@ describe("SettingsPage", () => {
     render(<SettingsPage commands={commandsForSummarySettings()} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "连接服务" }));
-    const baseUrl = screen.getByLabelText("OpenAI Base URL");
+    const baseUrl = await screen.findByLabelText("模型 Base URL");
     fireEvent.change(baseUrl, {
       target: { value: "https://draft.example.test/v1" },
     });
@@ -86,32 +105,35 @@ describe("SettingsPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "扫描与隐私" }));
     fireEvent.click(screen.getByRole("button", { name: "连接服务" }));
 
-    expect(screen.getByLabelText("OpenAI Base URL")).toHaveValue(
+    expect(screen.getByLabelText("模型 Base URL")).toHaveValue(
       "https://draft.example.test/v1",
     );
   });
 
   it("does not change category when asynchronous settings finish loading", async () => {
-    const settings =
-      deferred<Awaited<ReturnType<QizhiCommands["getSettings"]>>>();
+    const providers = deferred<ModelProviderConfig[]>();
     const commands = {
       ...commandsForSummarySettings(),
-      getSettings: vi.fn().mockReturnValue(settings.promise),
+      listModelProviders: vi.fn().mockReturnValue(providers.promise),
     } satisfies QizhiCommands;
     render(<SettingsPage commands={commands} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "今日总结" }));
-    settings.resolve([
+    providers.resolve([
       {
-        service: "openai",
+        providerId: "openai",
+        displayName: "OpenAI / OpenAI 兼容",
         endpoint: "https://loaded.example.test/v1",
+        model: "gpt-5.6-sol",
         apiKeyMask: "••••••••",
-        credentialReference: "qizhi/openai/default",
+        supportsResponses: true,
+        isActive: true,
+        updatedAtUtcMs: 1,
       },
     ]);
 
     await waitFor(() =>
-      expect(screen.getByLabelText("OpenAI Base URL")).toHaveValue(
+      expect(screen.getByLabelText("模型 Base URL")).toHaveValue(
         "https://loaded.example.test/v1",
       ),
     );
@@ -208,6 +230,16 @@ describe("SettingsPage", () => {
           },
         ],
       }),
+      getActiveModelProvider: vi.fn().mockResolvedValue({
+        providerId: "openai",
+        displayName: "OpenAI / OpenAI 兼容",
+        endpoint: "https://api.openai.com/v1",
+        model: "gpt-5.6-pro",
+        apiKeyMask: "••••••••",
+        supportsResponses: true,
+        isActive: true,
+        updatedAtUtcMs: 1,
+      }),
       saveSummarySettings: vi
         .fn()
         .mockImplementation(
@@ -233,9 +265,7 @@ describe("SettingsPage", () => {
     });
     expect(summaryHeading.closest(".summary-settings-section")).not.toBeNull();
     expect(summaryHeading.closest(".openai-card")).toBeNull();
-    fireEvent.change(await screen.findByLabelText("总结模型"), {
-      target: { value: "gpt-5.6-pro" },
-    });
+    expect(await screen.findByText("gpt-5.6-pro")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "新增提示词" }));
     fireEvent.change(screen.getByLabelText("总结模板标题 2"), {
       target: { value: "管理层摘要" },
@@ -321,6 +351,16 @@ describe("SettingsPage", () => {
   });
 
   it("sends a new key once and only displays its masked returned value", async () => {
+    const provider: ModelProviderConfig = {
+      providerId: "openai",
+      displayName: "OpenAI / OpenAI 兼容",
+      endpoint: "https://api.openai.com/v1",
+      model: "gpt-5.6-sol",
+      apiKeyMask: "",
+      supportsResponses: true,
+      isActive: false,
+      updatedAtUtcMs: 0,
+    };
     const commands: QizhiCommands = {
       getSettings: vi.fn().mockResolvedValue([]),
       saveSettings: vi.fn().mockResolvedValue({
@@ -330,6 +370,15 @@ describe("SettingsPage", () => {
         credentialReference: "qizhi/openai/default",
       }),
       testServiceConnection: vi.fn(),
+      listModelProviders: vi.fn().mockResolvedValue([provider]),
+      saveModelProvider: vi.fn().mockImplementation((input) =>
+        Promise.resolve({
+          ...provider,
+          ...input,
+          apiKeyMask: "••••••••",
+          updatedAtUtcMs: 2,
+        }),
+      ),
       pickFolder: vi.fn(),
       getTodaySnapshot: vi.fn(),
       refreshToday: vi.fn(),
@@ -349,15 +398,17 @@ describe("SettingsPage", () => {
 
     render(<SettingsPage commands={commands} />);
     fireEvent.click(await screen.findByRole("button", { name: "连接服务" }));
-    fireEvent.change(screen.getByLabelText("OpenAI Base URL"), {
+    fireEvent.change(await screen.findByLabelText("模型 Base URL"), {
       target: { value: "https://example.test/v1" },
     });
-    fireEvent.change(screen.getByLabelText("OpenAI API Key"), {
+    fireEvent.change(screen.getByLabelText("模型 API Key"), {
       target: { value: "test-secret-never-rendered" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存配置" }));
 
-    await waitFor(() => expect(commands.saveSettings).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(commands.saveModelProvider).toHaveBeenCalledTimes(1),
+    );
     expect(screen.getByPlaceholderText("••••••••")).toBeInTheDocument();
     expect(
       screen.queryByDisplayValue("test-secret-never-rendered"),
@@ -471,6 +522,53 @@ describe("SettingsPage", () => {
     expect(
       await screen.findByText("扫描规则已保存：1 个扫描范围，0 个排除目录。"),
     ).toBeInTheDocument();
+  });
+
+  it("keeps legacy image discovery disabled and persists the image search switch", async () => {
+    const commands = {
+      ...commandsForSummarySettings(),
+      listScanRules: vi.fn().mockResolvedValue({
+        allowedRoots: ["D:\\Work"],
+        customExclusions: [],
+        fileCategories: ["documents", "sourceCode"],
+        directoryGroupThreshold: 5,
+        lockedExclusions: [],
+      }),
+      saveScanRules: vi.fn().mockImplementation((input) =>
+        Promise.resolve({
+          ...input,
+          lockedExclusions: [],
+        }),
+      ),
+    } satisfies QizhiCommands;
+
+    render(<SettingsPage commands={commands} />);
+
+    const imageSearch = await screen.findByLabelText("在今日和过去中发现图片");
+    expect(imageSearch).not.toBeChecked();
+
+    fireEvent.click(imageSearch);
+    fireEvent.click(screen.getByRole("button", { name: "保存扫描范围" }));
+    await waitFor(() =>
+      expect(commands.saveScanRules).toHaveBeenLastCalledWith({
+        allowedRoots: ["D:\\Work"],
+        customExclusions: [],
+        fileCategories: ["documents", "sourceCode", "images"],
+        directoryGroupThreshold: 5,
+      }),
+    );
+    expect(await screen.findByText(/图片搜索已开启/)).toBeInTheDocument();
+
+    fireEvent.click(imageSearch);
+    fireEvent.click(screen.getByRole("button", { name: "保存扫描范围" }));
+    await waitFor(() =>
+      expect(commands.saveScanRules).toHaveBeenLastCalledWith({
+        allowedRoots: ["D:\\Work"],
+        customExclusions: [],
+        fileCategories: ["documents", "sourceCode"],
+        directoryGroupThreshold: 5,
+      }),
+    );
   });
 
   it("saves RAGFlow as a separately masked connection", async () => {

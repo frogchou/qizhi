@@ -12,6 +12,13 @@ describe("fileVisualType", () => {
     ["notes.txt", "text"],
     ["component.TSX", "code"],
     ["settings.json", "data"],
+    ["photo.PNG", "image"],
+    ["photo.jpg", "image"],
+    ["photo.JPEG", "image"],
+    ["photo.webp", "image"],
+    ["scan.tif", "image"],
+    ["scan.TIFF", "image"],
+    ["animation.gif", "image"],
     ["archive.unknown", "generic"],
     ["LICENSE", "generic"],
   ])("maps %s to %s", (path, expected) => {
@@ -25,6 +32,7 @@ describe("FileTypeIcon", () => {
     ["proposal.docx", "word", "Word 文档"],
     ["README.md", "markdown", "Markdown 文档"],
     ["component.tsx", "code", "代码文件"],
+    ["photo.png", "image", "图片文件"],
   ])("renders a readable %s icon", (path, kind, title) => {
     const { container } = render(<FileTypeIcon path={path} />);
 

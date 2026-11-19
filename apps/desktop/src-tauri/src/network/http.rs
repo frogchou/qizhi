@@ -35,11 +35,23 @@ impl HttpClient {
         api_key: &str,
         body: Option<String>,
     ) -> Result<HttpResponse, String> {
+        self.request_json(method, url, Some(api_key), body)
+    }
+
+    pub fn request_json(
+        &self,
+        method: reqwest::Method,
+        url: &str,
+        api_key: Option<&str>,
+        body: Option<String>,
+    ) -> Result<HttpResponse, String> {
         let mut request = self
             .client
             .request(method, url)
-            .bearer_auth(api_key)
             .header(reqwest::header::ACCEPT, "application/json");
+        if let Some(api_key) = api_key.filter(|value| !value.trim().is_empty()) {
+            request = request.bearer_auth(api_key);
+        }
         if let Some(body) = body {
             request = request
                 .header(reqwest::header::CONTENT_TYPE, "application/json")
@@ -59,19 +71,32 @@ impl HttpClient {
         url: &str,
         api_key: &str,
         body: Option<String>,
+        on_line: F,
+    ) -> Result<HttpResponse, String>
+    where
+        F: FnMut(&str) -> Result<(), String>,
+    {
+        self.request_json_lines(method, url, Some(api_key), body, on_line)
+    }
+
+    pub fn request_json_lines<F>(
+        &self,
+        method: reqwest::Method,
+        url: &str,
+        api_key: Option<&str>,
+        body: Option<String>,
         mut on_line: F,
     ) -> Result<HttpResponse, String>
     where
         F: FnMut(&str) -> Result<(), String>,
     {
-        let mut request = self
-            .client
-            .request(method, url)
-            .bearer_auth(api_key)
-            .header(
-                reqwest::header::ACCEPT,
-                "text/event-stream, application/json",
-            );
+        let mut request = self.client.request(method, url).header(
+            reqwest::header::ACCEPT,
+            "text/event-stream, application/json",
+        );
+        if let Some(api_key) = api_key.filter(|value| !value.trim().is_empty()) {
+            request = request.bearer_auth(api_key);
+        }
         if let Some(body) = body {
             request = request
                 .header(reqwest::header::CONTENT_TYPE, "application/json")
@@ -168,7 +193,7 @@ impl HttpClient {
 
 fn transport_error(error: reqwest::Error) -> String {
     if error.is_timeout() {
-        "RAGFlow 请求超时，请稍后重试。".to_owned()
+        "服务请求超时，请稍后重试。".to_owned()
     } else {
         "无法连接 Base URL，请检查网络、地址和代理设置。".to_owned()
     }

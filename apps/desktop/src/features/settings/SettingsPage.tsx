@@ -10,6 +10,7 @@ import type {
 import { SummarySettingsSection } from "./SummarySettingsSection";
 import { CodexSettingsSection } from "./CodexSettingsSection";
 import { FactorySettingsSection } from "./FactorySettingsSection";
+import { ModelProviderSettingsSection } from "./ModelProviderSettingsSection";
 
 type SettingsPageProps = {
   commands: QizhiCommands;
@@ -81,9 +82,6 @@ export function SettingsPage({ commands, initialCategory }: SettingsPageProps) {
   const [activeCategory, setActiveCategory] = useState<SettingsCategory>(
     initialCategory ?? "privacy",
   );
-  const [baseUrl, setBaseUrl] = useState("");
-  const [apiKey, setApiKey] = useState("");
-  const [saved, setSaved] = useState<MaskedServiceConfig | null>(null);
   const [ragflowBaseUrl, setRagflowBaseUrl] = useState("");
   const [ragflowApiKey, setRagflowApiKey] = useState("");
   const [ragflowSaved, setRagflowSaved] = useState<MaskedServiceConfig | null>(
@@ -93,7 +91,6 @@ export function SettingsPage({ commands, initialCategory }: SettingsPageProps) {
   const [jevApiKey, setJevApiKey] = useState("");
   const [jevSaved, setJevSaved] = useState<MaskedServiceConfig | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [connection, setConnection] = useState<ConnectionState>(null);
   const [ragflowConnection, setRagflowConnection] =
     useState<ConnectionState>(null);
   const [jevConnection, setJevConnection] = useState<ConnectionState>(null);
@@ -109,6 +106,9 @@ export function SettingsPage({ commands, initialCategory }: SettingsPageProps) {
   const [roots, setRoots] = useState<string[]>([]);
   const [exclusions, setExclusions] = useState<string[]>([]);
   const [scanRulesNotice, setScanRulesNotice] = useState<string | null>(null);
+  const [imageSearchNotice, setImageSearchNotice] = useState<string | null>(
+    null,
+  );
   const [fileCategories, setFileCategories] = useState<FileCategory[]>([
     "documents",
     "sourceCode",
@@ -127,11 +127,6 @@ export function SettingsPage({ commands, initialCategory }: SettingsPageProps) {
     commands
       .getSettings()
       .then((configs) => {
-        const openai = configs.find((config) => config.service === "openai");
-        if (openai) {
-          setBaseUrl(openai.endpoint);
-          setSaved(openai);
-        }
         const ragflow = configs.find((config) => config.service === "ragflow");
         if (ragflow) {
           setRagflowBaseUrl(ragflow.endpoint);
@@ -230,6 +225,7 @@ export function SettingsPage({ commands, initialCategory }: SettingsPageProps) {
   async function saveScanRules() {
     setError(null);
     setScanRulesNotice(null);
+    setImageSearchNotice(null);
     const parsedDirectoryGroupThreshold = Number(directoryGroupThreshold);
     if (
       !Number.isInteger(parsedDirectoryGroupThreshold) ||
@@ -257,6 +253,9 @@ export function SettingsPage({ commands, initialCategory }: SettingsPageProps) {
       setScanRulesNotice(
         `扫描规则已保存：${savedRules.allowedRoots.length} 个扫描范围，${savedRules.customExclusions.length} 个排除目录。`,
       );
+      setImageSearchNotice(
+        `图片搜索已${savedRules.fileCategories.includes("images") ? "开启" : "关闭"}。`,
+      );
       setNtfsIndexer((await commands.getNtfsIndexerStatus?.()) ?? null);
     } catch {
       setError("扫描范围未保存，请检查选择的文件夹。");
@@ -270,33 +269,6 @@ export function SettingsPage({ commands, initialCategory }: SettingsPageProps) {
       }
       return current.filter((item) => item !== category);
     });
-  }
-
-  async function saveOpenAi() {
-    setError(null);
-    try {
-      const config = await commands.saveSettings({
-        service: "openai",
-        endpoint: baseUrl,
-        apiKey,
-      });
-      setSaved(config);
-      setApiKey("");
-    } catch {
-      setError("设置未保存，请检查 Base URL 和本机凭据服务。");
-      setApiKey("");
-    }
-  }
-
-  async function testOpenAi() {
-    setConnection(null);
-    setConnection(
-      await commands.testServiceConnection({
-        service: "openai",
-        endpoint: baseUrl,
-        apiKey,
-      }),
-    );
   }
 
   async function saveRagflow() {
@@ -432,7 +404,7 @@ export function SettingsPage({ commands, initialCategory }: SettingsPageProps) {
               <div className="path-section file-types">
                 <h3>文件类型</h3>
                 <p>
-                  仅展示后续可安全提取和分析的办公文档、文本和源代码；图片、视频、压缩包、程序等不会进入今日列表。
+                  选择要在“今日”和“过去”中展示的办公文档、文本和源代码；视频、压缩包、程序等不会进入列表。
                 </p>
                 <label>
                   <input
@@ -460,6 +432,30 @@ export function SettingsPage({ commands, initialCategory }: SettingsPageProps) {
                   />
                   常见编程语言源码（Python、JavaScript/TypeScript、Java、C/C++、Go、Rust
                   等）
+                </label>
+              </div>
+              <div className="path-section image-search-settings">
+                <div className="image-search-setting-copy">
+                  <h3>图片搜索</h3>
+                  <p>
+                    支持 JPG、JPEG、PNG、WebP、TIF、TIFF 和 GIF。图片不会进入
+                    JEV 价值评估或今日总结；上传后是否使用 OCR
+                    或视觉模型，由目标 RAGFlow 知识库的解析设置决定。
+                  </p>
+                </div>
+                <label className="image-search-toggle">
+                  <input
+                    aria-label="在今日和过去中发现图片"
+                    type="checkbox"
+                    checked={fileCategories.includes("images")}
+                    onChange={(event) =>
+                      toggleFileCategory("images", event.currentTarget.checked)
+                    }
+                  />
+                  <span>
+                    <strong>在今日和过去中发现图片</strong>
+                    <small>默认关闭，开启后仅发现上述兼容格式</small>
+                  </span>
                 </label>
               </div>
               <div className="path-section today-display-settings">
@@ -490,9 +486,10 @@ export function SettingsPage({ commands, initialCategory }: SettingsPageProps) {
               </div>
               <div className="settings-block-actions">
                 {scanRulesNotice ? (
-                  <p className="settings-success" role="status">
-                    {scanRulesNotice}
-                  </p>
+                  <div className="settings-success" role="status">
+                    <p>{scanRulesNotice}</p>
+                    {imageSearchNotice ? <p>{imageSearchNotice}</p> : null}
+                  </div>
                 ) : (
                   <span />
                 )}
@@ -542,69 +539,7 @@ export function SettingsPage({ commands, initialCategory }: SettingsPageProps) {
                   {ntfsIndexer?.available ? "索引服务已连接" : "索引服务待安装"}
                 </p>
               </article>
-              <article className="service-card openai-card">
-                <div className="service-name">
-                  <span className="service-icon" aria-hidden="true">
-                    <ControlIcon name="connection" size={18} />
-                  </span>
-                  <div>
-                    <h3>OpenAI API</h3>
-                    <p>用于工作总结与内容分析，支持 OpenAI 兼容服务。</p>
-                  </div>
-                </div>
-                <div className="service-form">
-                  <label>
-                    Base URL
-                    <input
-                      aria-label="OpenAI Base URL"
-                      value={baseUrl}
-                      placeholder="https://api.openai.com/v1"
-                      onChange={(event) =>
-                        setBaseUrl(event.currentTarget.value)
-                      }
-                    />
-                  </label>
-                  <label>
-                    API Key
-                    <input
-                      aria-label="OpenAI API Key"
-                      type="password"
-                      value={apiKey}
-                      placeholder={saved ? saved.apiKeyMask : "填写后可测试"}
-                      onChange={(event) => setApiKey(event.currentTarget.value)}
-                    />
-                  </label>
-                  <div className="service-actions">
-                    <button
-                      type="button"
-                      className="button outline"
-                      onClick={testOpenAi}
-                      disabled={!baseUrl || !apiKey}
-                    >
-                      测试连接
-                    </button>
-                    <button
-                      type="button"
-                      className="button primary"
-                      onClick={saveOpenAi}
-                      disabled={!baseUrl || !apiKey}
-                    >
-                      保存
-                    </button>
-                  </div>
-                  {connection ? (
-                    <p
-                      className={
-                        connection.available
-                          ? "connection-result ready"
-                          : "connection-result"
-                      }
-                    >
-                      {connection.message}
-                    </p>
-                  ) : null}
-                </div>
-              </article>
+              <ModelProviderSettingsSection commands={commands} />
               <article className="service-card openai-card">
                 <div className="service-name">
                   <span className="service-icon" aria-hidden="true">

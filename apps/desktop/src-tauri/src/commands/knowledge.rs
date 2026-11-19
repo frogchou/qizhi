@@ -798,7 +798,7 @@ mod tests {
     use crate::{
         contracts::FileRecord,
         scan::{
-            file_filter::FileTypeFilter,
+            file_filter::{FileCategory, FileTypeFilter},
             policy::{AllowedRoot, ScanPolicy},
         },
     };
@@ -872,6 +872,38 @@ mod tests {
         let error = ensure_upload_candidate(&file, &policy, &FileTypeFilter::default())
             .expect_err("retired scanner records are not current Today candidates");
 
+        assert_eq!(error, "所选文件已不在当前今日列表中，无法上传。");
+    }
+
+    #[test]
+    fn uploads_an_image_only_when_image_discovery_is_enabled() {
+        let parent = std::env::current_dir().expect("current directory");
+        let directory = tempfile::tempdir_in(&parent).expect("temporary directory");
+        let path = directory.path().join("diagram.png");
+        std::fs::write(&path, b"png fixture").expect("write image fixture");
+        let file = FileRecord {
+            id: 10,
+            canonical_path: path.to_string_lossy().to_string(),
+            file_identity: "image-index-record".to_owned(),
+            modified_at_utc_ms: chrono::Local::now().timestamp_millis(),
+            size_bytes: 11,
+            source: "本机 NTFS 索引".to_owned(),
+        };
+        let allowed_root = ScanPolicy::new(vec![])
+            .validate_root(directory.path())
+            .expect("temporary directory is a valid root");
+        let policy = ScanPolicy::for_roots(vec![], vec![allowed_root]);
+
+        let candidate = ensure_upload_candidate(
+            &file,
+            &policy,
+            &FileTypeFilter::new(vec![FileCategory::Images]),
+        )
+        .expect("enabled images can use the existing upload path");
+        assert_eq!(candidate, path);
+
+        let error = ensure_upload_candidate(&file, &policy, &FileTypeFilter::default())
+            .expect_err("disabled images stay outside the upload surface");
         assert_eq!(error, "所选文件已不在当前今日列表中，无法上传。");
     }
 }

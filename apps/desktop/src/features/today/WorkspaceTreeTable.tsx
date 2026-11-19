@@ -108,14 +108,34 @@ const DOCUMENT_EXTENSIONS = new Set([
   "pptx",
   "odp",
 ]);
+const IMAGE_EXTENSIONS = new Set([
+  "jpg",
+  "jpeg",
+  "png",
+  "webp",
+  "tif",
+  "tiff",
+  "gif",
+]);
 
-function isDocument(path: string) {
+function extension(path: string) {
   const name = path.replace(/\\/g, "/").split("/").pop() ?? path;
   const dot = name.lastIndexOf(".");
-  return dot > 0 && DOCUMENT_EXTENSIONS.has(name.slice(dot + 1).toLowerCase());
+  return dot > 0 ? name.slice(dot + 1).toLowerCase() : "";
+}
+
+function isDocument(path: string) {
+  return DOCUMENT_EXTENSIONS.has(extension(path));
+}
+
+function isImage(path: string) {
+  return IMAGE_EXTENSIONS.has(extension(path));
 }
 
 function fileValue(entry: WorkspaceEntry, valueMode: "automatic" | "manual") {
+  if (isImage(entry.canonicalPath)) {
+    return { label: "图片 · 不评估", className: "status-unsupported" };
+  }
   if (!isDocument(entry.canonicalPath)) {
     return { label: "不评估", className: "status-unsupported" };
   }
@@ -177,6 +197,7 @@ export function WorkspaceTreeTable({
   onDirectorySelection,
   onFileContextMenu,
   onOpenFile,
+  onUploadFile,
   onNotice,
   valueMode,
 }: {
@@ -189,6 +210,7 @@ export function WorkspaceTreeTable({
   onDirectorySelection: (id: string, checked: boolean) => void;
   onFileContextMenu: (id: number, x: number, y: number) => void;
   onOpenFile: (id: number) => void;
+  onUploadFile: (id: number) => void;
   onNotice: (message: string) => void;
   valueMode: "automatic" | "manual";
 }) {
@@ -458,22 +480,35 @@ export function WorkspaceTreeTable({
                   )}
                 </td>
                 <td>
-                  <button
-                    className="row-open"
-                    onClick={() =>
-                      isDirectory
-                        ? void openDirectory(entry)
-                        : fileId != null
-                          ? onOpenFile(fileId)
-                          : undefined
-                    }
-                    type="button"
-                  >
-                    <span>{isDirectory ? "打开目录" : "打开"}</span>
-                    <svg viewBox="0 0 12 12" aria-hidden="true">
-                      <path d="m4.5 2.5 3.5 3.5-3.5 3.5" />
-                    </svg>
-                  </button>
+                  <div className="row-actions">
+                    <button
+                      className="row-open"
+                      onClick={() =>
+                        isDirectory
+                          ? void openDirectory(entry)
+                          : fileId != null
+                            ? onOpenFile(fileId)
+                            : undefined
+                      }
+                      type="button"
+                    >
+                      <span>{isDirectory ? "打开目录" : "打开"}</span>
+                      <svg viewBox="0 0 12 12" aria-hidden="true">
+                        <path d="m4.5 2.5 3.5 3.5-3.5 3.5" />
+                      </svg>
+                    </button>
+                    {!isDirectory &&
+                    fileId != null &&
+                    isImage(entry.canonicalPath) ? (
+                      <button
+                        className="row-upload"
+                        onClick={() => onUploadFile(fileId)}
+                        type="button"
+                      >
+                        上传
+                      </button>
+                    ) : null}
+                  </div>
                 </td>
               </tr>
             );

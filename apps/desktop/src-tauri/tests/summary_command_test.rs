@@ -8,7 +8,7 @@ use qizhi_desktop_lib::commands::summary::{
 fn prepends_a_warning_to_truncated_summary_artifacts() {
     let artifact = compose_summary_artifact("# 今日总结\n完成索引。", true);
 
-    assert!(artifact.starts_with("> ⚠️ OpenAI 标记本次输出不完整，以下内容可能缺失。"));
+    assert!(artifact.starts_with("> ⚠️ 模型服务标记本次输出不完整，以下内容可能缺失。"));
     assert!(artifact.contains("# 今日总结"));
 }
 

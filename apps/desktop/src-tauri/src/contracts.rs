@@ -58,6 +58,20 @@ pub struct MaskedServiceConfig {
     pub credential_reference: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelProviderConfig {
+    pub provider_id: String,
+    pub display_name: String,
+    pub endpoint: String,
+    pub model: String,
+    pub credential_reference: String,
+    pub api_key_mask: String,
+    pub supports_responses: bool,
+    pub is_active: bool,
+    pub updated_at_utc_ms: i64,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct FileValueAssessmentInput {
     pub canonical_path: String,
