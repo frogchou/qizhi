@@ -22,7 +22,7 @@ impl VolumeState {
         }
     }
 
-    pub fn from_str(value: &str) -> Option<Self> {
+    pub fn parse_value(value: &str) -> Option<Self> {
         match value {
             "ready" => Some(Self::Ready),
             "building" => Some(Self::Building),

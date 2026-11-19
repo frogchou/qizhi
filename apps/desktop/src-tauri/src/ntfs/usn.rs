@@ -155,7 +155,7 @@ fn parse_record(record: &[u8]) -> Result<UsnRecord, UsnParseError> {
     let name_end = name_offset
         .checked_add(name_length)
         .ok_or(UsnParseError::InvalidNameRange)?;
-    if name_length % 2 != 0
+    if !name_length.is_multiple_of(2)
         || name_offset < minimum_length
         || name_end > record.len()
         || name_end < name_offset
@@ -183,8 +183,10 @@ fn parse_record(record: &[u8]) -> Result<UsnRecord, UsnParseError> {
 
 fn decode_utf16(bytes: &[u8]) -> Result<String, UsnParseError> {
     let units = bytes
-        .chunks_exact(2)
-        .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]));
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|chunk| u16::from_le_bytes(*chunk));
     String::from_utf16(&units.collect::<Vec<_>>()).map_err(|_| UsnParseError::InvalidUtf16Name)
 }
 

@@ -157,7 +157,7 @@ fn set_file_drop_clipboard(path: &Path) -> Result<(), AppError> {
             return Err(AppError::Storage);
         }
         let result = if EmptyClipboard() != 0
-            && SetClipboardData(CF_HDROP as u32, memory as HANDLE) != null_mut()
+            && !SetClipboardData(CF_HDROP as u32, memory as HANDLE).is_null()
         {
             Ok(())
         } else {

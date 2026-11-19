@@ -140,7 +140,7 @@ pub fn display_path(path: &Path) -> String {
         if let Some(unc_path) = value.strip_prefix(r"\\?\UNC\") {
             return format!(r"\\{unc_path}");
         }
-        return value.strip_prefix(r"\\?\").unwrap_or(&value).to_owned();
+        value.strip_prefix(r"\\?\").unwrap_or(&value).to_owned()
     }
     #[cfg(not(windows))]
     value.into_owned()

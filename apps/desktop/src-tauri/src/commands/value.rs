@@ -279,17 +279,16 @@ fn evaluate(state: &AppState, file_ids: Vec<i64>) -> Result<Vec<FileValueOutput>
                 file.modified_at_utc_ms,
             )
             .map_err(|_| "无法读取已有的价值评估。".to_owned())?
+            && is_final_assessment_status(&saved.status)
         {
-            if is_final_assessment_status(&saved.status) {
-                outputs.push(output_from_saved(
-                    file.id,
-                    &saved.status,
-                    saved.score,
-                    saved.confidence,
-                    saved.message,
-                ));
-                continue;
-            }
+            outputs.push(output_from_saved(
+                file.id,
+                &saved.status,
+                saved.score,
+                saved.confidence,
+                saved.message,
+            ));
+            continue;
         }
         match extract_value_text(Path::new(&file.canonical_path)) {
             Ok(content) => {

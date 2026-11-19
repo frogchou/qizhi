@@ -134,50 +134,49 @@ fn secure_service_database_path() -> Result<std::path::PathBuf, String> {
         .map(std::path::PathBuf::from)
         .ok_or_else(|| "无法定位 Windows 共享应用数据目录".to_owned())?;
     let directory = program_data.join("QizhiNtfsIndexer");
-    for current in [&directory] {
-        let display = current.to_string_lossy();
-        let mut wide = display
-            .encode_utf16()
-            .chain(std::iter::once(0))
-            .collect::<Vec<_>>();
-        let created = unsafe { CreateDirectoryW(wide.as_mut_ptr(), std::ptr::null()) };
-        if created == 0 && unsafe { GetLastError() } != ERROR_ALREADY_EXISTS {
-            return Err("无法创建本地索引服务数据目录".to_owned());
-        }
-        let attributes = unsafe { GetFileAttributesW(wide.as_ptr()) };
-        if attributes == INVALID_FILE_ATTRIBUTES || attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-            return Err("本地索引服务数据目录无效".to_owned());
-        }
-        let mut descriptor = std::ptr::null_mut();
-        let mut size = 0_u32;
-        let mut sddl = "D:P(A;OICI;GA;;;SY)(A;OICI;GA;;;BA)"
-            .encode_utf16()
-            .chain(std::iter::once(0))
-            .collect::<Vec<_>>();
-        if unsafe {
-            ConvertStringSecurityDescriptorToSecurityDescriptorW(
-                sddl.as_mut_ptr(),
-                1,
-                &mut descriptor,
-                &mut size,
-            )
-        } == 0
-        {
-            return Err("无法保护本地索引服务数据目录".to_owned());
-        }
-        let applied = unsafe {
-            windows_sys::Win32::Security::SetFileSecurityW(
-                wide.as_ptr(),
-                DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
-                descriptor,
-            )
-        };
-        unsafe {
-            let _ = LocalFree(descriptor);
-        }
-        if applied == 0 {
-            return Err("无法保护本地索引服务数据目录".to_owned());
-        }
+    let current = &directory;
+    let display = current.to_string_lossy();
+    let mut wide = display
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let created = unsafe { CreateDirectoryW(wide.as_mut_ptr(), std::ptr::null()) };
+    if created == 0 && unsafe { GetLastError() } != ERROR_ALREADY_EXISTS {
+        return Err("无法创建本地索引服务数据目录".to_owned());
+    }
+    let attributes = unsafe { GetFileAttributesW(wide.as_ptr()) };
+    if attributes == INVALID_FILE_ATTRIBUTES || attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        return Err("本地索引服务数据目录无效".to_owned());
+    }
+    let mut descriptor = std::ptr::null_mut();
+    let mut size = 0_u32;
+    let mut sddl = "D:P(A;OICI;GA;;;SY)(A;OICI;GA;;;BA)"
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    if unsafe {
+        ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            sddl.as_mut_ptr(),
+            1,
+            &mut descriptor,
+            &mut size,
+        )
+    } == 0
+    {
+        return Err("无法保护本地索引服务数据目录".to_owned());
+    }
+    let applied = unsafe {
+        windows_sys::Win32::Security::SetFileSecurityW(
+            wide.as_ptr(),
+            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+            descriptor,
+        )
+    };
+    unsafe {
+        let _ = LocalFree(descriptor);
+    }
+    if applied == 0 {
+        return Err("无法保护本地索引服务数据目录".to_owned());
     }
     Ok(directory.join("index.sqlite"))
 }

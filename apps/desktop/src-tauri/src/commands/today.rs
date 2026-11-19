@@ -609,7 +609,7 @@ fn recent_snapshot(state: &AppState, days: u8) -> Result<TodayReady, TodayUnavai
         &format!("past NTFS index synchronization started for {days} days"),
     );
     let result = (|| {
-        let (roots, exclusions, file_categories) = rules(&state)?;
+        let (roots, exclusions, file_categories) = rules(state)?;
         let (start, end) = recent_day_bounds(days);
         let configure = IndexerRequest {
             protocol_version: INDEXER_PROTOCOL_VERSION,
@@ -789,7 +789,7 @@ pub async fn exclude_file_directory(
 }
 
 fn launcher(state: &AppState) -> Result<ExplorerLauncher, String> {
-    let (roots, exclusions, _) = rules(&state).map_err(|value| value.remediation)?;
+    let (roots, exclusions, _) = rules(state).map_err(|value| value.remediation)?;
     Ok(ExplorerLauncher::new(
         state.database.files(),
         ScanPolicy::for_roots(exclusions, roots),

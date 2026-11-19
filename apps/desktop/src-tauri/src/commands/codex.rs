@@ -257,7 +257,7 @@ pub fn inspect_codex_material_sources_with_state(
         .map_err(|_| "无法读取项目资料。".to_owned())?;
     materials
         .iter()
-        .map(|material| inspect_material_source(&state, material))
+        .map(|material| inspect_material_source(state, material))
         .collect()
 }
 
@@ -296,7 +296,7 @@ pub fn refresh_codex_material_with_state(
     }
     let temporary;
     let source = match material.kind.as_str() {
-        "local" => resolve_local_material_source(&state, &material)?,
+        "local" => resolve_local_material_source(state, &material)?,
         "ragflow_document" => {
             let metadata = material_metadata(&material)?;
             let dataset_id = metadata
@@ -388,7 +388,7 @@ pub fn refresh_codex_material_with_state(
         .project_files()
         .snapshot_local_files_with_confirmations(
             project_id,
-            &[source.clone()],
+            std::slice::from_ref(&source),
             true,
             original_only_confirmed,
         )
@@ -746,10 +746,10 @@ fn inspect_material_source(
 }
 
 fn cleanup_temporary_refresh_source(material: &CodexMaterial, source: &Path) {
-    if material.kind == "ragflow_document" {
-        if let Some(parent) = source.parent() {
-            let _ = std::fs::remove_dir_all(parent);
-        }
+    if material.kind == "ragflow_document"
+        && let Some(parent) = source.parent()
+    {
+        let _ = std::fs::remove_dir_all(parent);
     }
 }
 

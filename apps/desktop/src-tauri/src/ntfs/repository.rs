@@ -44,7 +44,8 @@ impl NtfsIndexRepository {
                             current_mount_path: row.get(1)?,
                             serial_number: row.get(2)?,
                             file_system: row.get(3)?,
-                            state: VolumeState::from_str(&state).ok_or(rusqlite::Error::InvalidQuery)?,
+                            state: VolumeState::parse_value(&state)
+                                .ok_or(rusqlite::Error::InvalidQuery)?,
                             state_message: row.get(5)?,
                         },
                         last_indexed_at_utc_ms: row.get(6)?,
@@ -248,7 +249,7 @@ impl NtfsIndexRepository {
                                 current_mount_path: row.get(1)?,
                                 serial_number: row.get(2)?,
                                 file_system: row.get(3)?,
-                                state: VolumeState::from_str(&state)
+                                state: VolumeState::parse_value(&state)
                                     .ok_or(rusqlite::Error::InvalidQuery)?,
                                 state_message: row.get(5)?,
                             },
