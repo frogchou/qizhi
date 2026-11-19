@@ -477,10 +477,15 @@
   margin: 4px 0 8px;
 }
 .live-modal .live-guide dl {
-  margin: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  margin: 12px 0 0;
+  font-size: 13px;
+  line-height: 1.65;
 }
 .live-modal .live-guide dl > div {
-  margin-top: 7px;
+  min-width: 0;
 }
 .live-modal .live-guide dt {
   color: #155b57;

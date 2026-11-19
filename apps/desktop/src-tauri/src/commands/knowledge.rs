@@ -278,11 +278,7 @@ fn ensure_upload_candidate(
     if !policy.is_allowed(&path) {
         return Err("该文件已不在允许扫描范围内，无法上传。".to_owned());
     }
-    let (start, end) = crate::commands::today::current_day_bounds();
-    if file.modified_at_utc_ms < start
-        || file.modified_at_utc_ms >= end
-        || !crate::commands::today::is_visible_today_file(file, file_filter, policy)
-    {
+    if !crate::commands::today::is_visible_today_file(file, file_filter, policy) {
         return Err("所选文件已不在当前今日列表中，无法上传。".to_owned());
     }
     let metadata = std::fs::metadata(&path)
@@ -830,6 +826,30 @@ mod tests {
             .expect_err("a file outside the approved scan scope cannot be uploaded");
 
         assert_eq!(error, "该文件已不在允许扫描范围内，无法上传。".to_owned());
+    }
+
+    #[test]
+    fn allows_uploading_an_indexed_file_from_the_recent_workspace() {
+        let root = std::env::current_dir().expect("current directory");
+        let path = root.join("Cargo.toml");
+        let (today_start, _) = crate::commands::today::current_day_bounds();
+        let file = FileRecord {
+            id: 1,
+            canonical_path: path.to_string_lossy().to_string(),
+            file_identity: "recent-index-record".to_owned(),
+            modified_at_utc_ms: today_start - 1,
+            size_bytes: 1,
+            source: "本机 NTFS 索引".to_owned(),
+        };
+        let allowed_root = ScanPolicy::new(vec![])
+            .validate_root(&root)
+            .expect("current directory is a valid root");
+        let policy = ScanPolicy::for_roots(vec![], vec![allowed_root]);
+
+        let candidate = ensure_upload_candidate(&file, &policy, &FileTypeFilter::default())
+            .expect("an indexed file shown in the recent workspace can be uploaded");
+
+        assert_eq!(candidate, path);
     }
 
     #[test]

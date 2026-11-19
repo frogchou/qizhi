@@ -5,9 +5,6 @@
   "packageManager": "pnpm@11.7.0",
   "scripts": {
     "check": "pnpm --filter @qizhi/desktop check",
-    "test": "pnpm --filter @qizhi/desktop test",
-    "server:check": "cd server && corepack pnpm typecheck",
-    "server:test": "cd server && corepack pnpm test",
-    "server:console": "cd server && corepack pnpm console:build"
+    "test": "pnpm --filter @qizhi/desktop test"
   }
 }
