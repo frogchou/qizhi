@@ -192,6 +192,30 @@ async function install(page: Page) {
           endpoint: "http://127.0.0.1:3010",
           hasToken: true,
         };
+      if (command === "list_model_providers")
+        return [
+          {
+            providerId: "openai",
+            displayName: "OpenAI / OpenAI 兼容",
+            endpoint: "https://api.openai.com/v1",
+            model: "gpt-5.6-sol",
+            apiKeyMask: "••••••••",
+            supportsResponses: true,
+            isActive: true,
+            updatedAtUtcMs: 1,
+          },
+        ];
+      if (command === "get_active_model_provider")
+        return {
+          providerId: "openai",
+          displayName: "OpenAI / OpenAI 兼容",
+          endpoint: "https://api.openai.com/v1",
+          model: "gpt-5.6-sol",
+          apiKeyMask: "••••••••",
+          supportsResponses: true,
+          isActive: true,
+          updatedAtUtcMs: 1,
+        };
       if (command === "factory_download") {
         state.calls.push({ method: "DOWNLOAD", ...args });
         return true;
@@ -699,9 +723,7 @@ test("实况连接直达设置，保留其他分类和尚未保存的连接草�
     categories = page.getByRole("navigation", { name: "设置分类" });
   await nav.getByRole("button", { name: "设置" }).click();
   await categories.getByRole("button", { name: "连接服务" }).click();
-  await page
-    .getByLabel("OpenAI Base URL")
-    .fill("https://draft.example.test/v1");
+  await page.getByLabel("模型 Base URL").fill("https://draft.example.test/v1");
   await nav.getByRole("button", { name: "智能工厂" }).click();
   await page.getByRole("button", { name: "中台实况" }).click();
   await expect(
@@ -709,7 +731,7 @@ test("实况连接直达设置，保留其他分类和尚未保存的连接草�
   ).toHaveAttribute("aria-current", "page");
   await page.getByLabel("工厂控制面地址").fill("http://127.0.0.1:5321");
   await categories.getByRole("button", { name: "连接服务" }).click();
-  await expect(page.getByLabel("OpenAI Base URL")).toHaveValue(
+  await expect(page.getByLabel("模型 Base URL")).toHaveValue(
     "https://draft.example.test/v1",
   );
   await nav.getByRole("button", { name: "智能工厂" }).click();

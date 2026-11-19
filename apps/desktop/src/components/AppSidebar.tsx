@@ -64,7 +64,8 @@ export function AppSidebar({
   useEffect(() => {
     void getVersion()
       .then((runtimeVersion) => {
-        if (runtimeVersion) setVersion(runtimeVersion);
+        if (typeof runtimeVersion === "string" && runtimeVersion.trim())
+          setVersion(runtimeVersion);
       })
       .catch(() => undefined);
   }, []);

@@ -220,19 +220,20 @@ test.beforeEach(async ({ page }) => {
               }),
             120,
           );
-          return new Promise((resolve) =>
-            setTimeout(
-              () =>
-                resolve({
-                  markdown:
-                    "# 今日成果\n\n- **完成了本地索引优化**\n\n**事实: **我已完成目录聚合。",
-                  truncated: false,
-                  fileCount: 1,
-                  templateTitle: "今日工作总结",
-                }),
-              300,
-            ),
-          );
+          return new Promise((resolve) => {
+            (
+              window as unknown as {
+                finishWorkSummary: () => void;
+              }
+            ).finishWorkSummary = () =>
+              resolve({
+                markdown:
+                  "# 今日成果\n\n- **完成了本地索引优化**\n\n**事实: **我已完成目录聚合。",
+                truncated: false,
+                fileCount: 1,
+                templateTitle: "今日工作总结",
+              });
+          });
         }
         if (command === "list_scan_rules")
           return Promise.resolve({
@@ -283,6 +284,13 @@ test("summary opens immediately, streams formatted Markdown, and keeps a rounded
     "事实:",
   ]);
   await expect(page.locator(".summary-markdown")).not.toContainText("**事实:");
+  await page.evaluate(() =>
+    (
+      window as unknown as {
+        finishWorkSummary: () => void;
+      }
+    ).finishWorkSummary(),
+  );
   await expect(page.getByRole("button", { name: "复制" })).toBeEnabled();
   await page.screenshot({
     path: testInfo.outputPath("summary-streaming-dialog.png"),
