@@ -172,7 +172,15 @@ impl UsnVolumeSource for WindowsUsnVolumeSource {
             .parse::<i64>()
             .map_err(|_| "本地 USN 检查点格式无效".to_owned())?;
 
+        // Writing index pages can generate more USN records on this same volume.
+        // Leave those records for the next synchronization instead of chasing the journal tail.
+        let replay_end = query_journal(&handle)
+            .map_err(|error| error.to_string())?
+            .next_usn;
         for _ in 0..1_000_000 {
+            if cursor >= replay_end {
+                break;
+            }
             let page = read_replay_page(&handle, cursor, journal_id)
                 .map_err(|error| format!("无法读取 NTFS 变更日志: {error:?}"))?;
             let next_usn = page

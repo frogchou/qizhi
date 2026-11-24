@@ -1161,6 +1161,12 @@ describe("TodayPage", () => {
       target: { value: "all" },
     });
     fireEvent.change(screen.getByLabelText("按文件名搜索"), {
+      target: { value: "周报" },
+    });
+    expect(screen.getByText("周报.docx")).toBeInTheDocument();
+    expect(screen.queryByText("analysis.py")).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("按文件名搜索"), {
       target: { value: "周*.docx" },
     });
     expect(screen.getByText("周报.docx")).toBeInTheDocument();

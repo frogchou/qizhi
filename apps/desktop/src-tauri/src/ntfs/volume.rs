@@ -50,11 +50,25 @@ pub fn inspect_volume(mount_path: &str) -> QualifiedVolume {
     use windows_sys::Win32::{
         Storage::FileSystem::{
             GetDriveTypeW, GetVolumeInformationW, GetVolumeNameForVolumeMountPointW,
+            GetVolumePathNameW,
         },
         System::WindowsProgramming::{DRIVE_FIXED, DRIVE_REMOTE, DRIVE_REMOVABLE},
     };
 
-    let canonical_mount_path = normalize_mount_path(mount_path);
+    let requested_path = normalize_mount_path(mount_path);
+    let mut volume_path_buffer = [0_u16; 32768];
+    let canonical_mount_path = if unsafe {
+        GetVolumePathNameW(
+            wide_null(&requested_path).as_ptr(),
+            volume_path_buffer.as_mut_ptr(),
+            volume_path_buffer.len() as u32,
+        )
+    } != 0
+    {
+        string_from_wide_null(&volume_path_buffer)
+    } else {
+        requested_path
+    };
     let wide_path = wide_null(&canonical_mount_path);
     let drive_kind = match unsafe {
         // The string is explicitly NUL-terminated and lives through the call.
@@ -146,4 +160,23 @@ fn string_from_wide_null(value: &[u16]) -> String {
         .position(|unit| *unit == 0)
         .unwrap_or(value.len());
     String::from_utf16_lossy(&value[..length])
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::inspect_volume;
+
+    #[test]
+    fn directory_root_resolves_to_its_volume_mount_point() {
+        let directory = std::env::temp_dir();
+        let inspected = inspect_volume(&directory.to_string_lossy());
+
+        assert!(inspected.mount_path.ends_with('\\'));
+        assert!(
+            directory
+                .to_string_lossy()
+                .to_ascii_lowercase()
+                .starts_with(&inspected.mount_path.to_ascii_lowercase())
+        );
+    }
 }

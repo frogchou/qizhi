@@ -800,6 +800,9 @@ fn is_same_or_descendant(path: &str, root: &str) -> bool {
 }
 
 fn wildcard_matches(value: &str, pattern: &str) -> bool {
+    if !pattern.contains('*') && !pattern.contains('?') {
+        return value.to_lowercase().contains(&pattern.to_lowercase());
+    }
     let value = value.to_lowercase().chars().collect::<Vec<_>>();
     let pattern = pattern.to_lowercase().chars().collect::<Vec<_>>();
     let mut previous = vec![false; value.len() + 1];
@@ -825,7 +828,9 @@ fn wildcard_matches(value: &str, pattern: &str) -> bool {
 mod tests {
     use std::collections::HashMap;
 
-    use super::{WorkspaceBuildInput, WorkspaceCategory, WorkspaceSort, WorkspaceTree};
+    use super::{
+        WorkspaceBuildInput, WorkspaceCategory, WorkspaceSort, WorkspaceTree, wildcard_matches,
+    };
     use crate::contracts::FileRecord;
 
     fn record(id: i64, name: &str) -> FileRecord {
@@ -869,5 +874,12 @@ mod tests {
             names(WorkspaceCategory::All),
             vec!["diagram.png", "main.rs", "report.docx"]
         );
+    }
+
+    #[test]
+    fn plain_search_matches_part_of_a_filename() {
+        assert!(wildcard_matches("测试测试1124.docx", "测试"));
+        assert!(wildcard_matches("周报.docx", "周*.docx"));
+        assert!(!wildcard_matches("周报.docx", "报告"));
     }
 }
