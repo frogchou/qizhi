@@ -65,6 +65,9 @@ function valueStatusClass(status: TodayFile["status"]) {
 function wildcardMatches(value: string, query: string) {
   const normalized = query.trim();
   if (!normalized) return true;
+  if (!normalized.includes("*") && !normalized.includes("?")) {
+    return value.toLocaleLowerCase().includes(normalized.toLocaleLowerCase());
+  }
   const pattern = normalized
     .replace(/[.+^${}()|[\]\\]/g, "\\$&")
     .replace(/\*/g, ".*")
