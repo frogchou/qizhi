@@ -172,7 +172,7 @@ export function FactorySettingsSection() {
                   className="factory-field-hint factory-field-info"
                 >
                   <ControlIcon name="info" size={14} />
-                  请在受信任的内网使用此 HTTP 地址。
+                  HTTP 连接未加密，请确认地址和网络环境可信。
                 </p>
               )}
             </div>

@@ -151,19 +151,13 @@ export function isLoopback(hostname: string): boolean {
 }
 
 export function factoryOrigin(value: string): string {
-  const message = "请输入 HTTPS 控制面地址，或受信任的本机、内网 HTTP 地址。";
+  const message = "请输入 HTTP 或 HTTPS 控制面地址。";
   let url: URL;
   try {
     url = new URL(value.trim());
   } catch {
     throw new Error(message);
   }
-  const host = url.hostname;
-  const local =
-    isLoopback(host) ||
-    (/^(?:10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.)/.test(host) &&
-      /^[\d.]+$/.test(host)) ||
-    /^\[f[cd][\da-f]{2}:/i.test(host);
   if (
     url.username ||
     url.password ||
@@ -173,7 +167,7 @@ export function factoryOrigin(value: string): string {
     value.includes("?") ||
     value.includes("\\") ||
     invalidControl(value.trim()) ||
-    (url.protocol !== "https:" && !(url.protocol === "http:" && local))
+    (url.protocol !== "https:" && url.protocol !== "http:")
   )
     throw new Error(message);
   return url.origin;

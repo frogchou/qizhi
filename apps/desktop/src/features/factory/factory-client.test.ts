@@ -122,8 +122,13 @@ describe("factory desktop transport", () => {
     expect(factoryOrigin("http://192.168.2.219:3010/")).toBe(
       "http://192.168.2.219:3010",
     );
-    for (const input of [
+    expect(factoryOrigin("http://121.28.95.155:3010/")).toBe(
+      "http://121.28.95.155:3010",
+    );
+    expect(factoryOrigin("http://public.example/")).toBe(
       "http://public.example",
+    );
+    for (const input of [
       "https://host/path",
       "https://one@host",
       "https://host/?token=private",

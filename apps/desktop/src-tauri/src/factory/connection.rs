@@ -2,12 +2,12 @@ use crate::{config::SecretStore, database::Database};
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
-use url::{Host, Url};
+use url::Url;
 use uuid::Uuid;
 
 const STORAGE: &str = "无法读取或保存工厂连接，请检查本机凭据管理器。";
 const TOKEN: &str = "请为此控制面地址输入管理员令牌。";
-const ADDRESS: &str = "请输入 HTTPS 控制面地址，或受信任的本机、内网 HTTP 地址。";
+const ADDRESS: &str = "请输入 HTTP 或 HTTPS 控制面地址。";
 
 #[derive(Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -218,13 +218,7 @@ pub(super) fn normalize_endpoint(value: &str) -> Result<String, String> {
     {
         return Err(ADDRESS.to_owned());
     }
-    let local = match url.host() {
-        Some(Host::Domain(name)) => name == "localhost",
-        Some(Host::Ipv4(ip)) => ip.is_loopback() || ip.is_private(),
-        Some(Host::Ipv6(ip)) => ip.is_loopback() || ip.is_unique_local(),
-        None => return Err(ADDRESS.to_owned()),
-    };
-    if !(url.scheme() == "https" || url.scheme() == "http" && local) {
+    if url.host().is_none() || !matches!(url.scheme(), "http" | "https") {
         return Err(ADDRESS.to_owned());
     }
     Ok(url.origin().ascii_serialization())
@@ -244,15 +238,19 @@ mod tests {
     }
 
     #[test]
-    fn addresses_do_not_carry_secrets_or_accept_plain_http_on_public_networks() {
+    fn addresses_accept_public_http_without_carrying_secrets() {
         assert_eq!(
             normalize_endpoint("http://192.168.2.219:3010/").unwrap(),
             "http://192.168.2.219:3010"
         );
+        assert_eq!(
+            normalize_endpoint("http://121.28.95.155:3010/").unwrap(),
+            "http://121.28.95.155:3010"
+        );
         assert!(normalize_endpoint("https://control.example.org").is_ok());
+        assert!(normalize_endpoint("http://control.example.org").is_ok());
         assert!(normalize_endpoint("http://[::1]:3010").is_ok());
         for value in [
-            "http://control.example.org",
             "https://user@host",
             "https://host/?admin=x",
             "file:///c:/tmp",
