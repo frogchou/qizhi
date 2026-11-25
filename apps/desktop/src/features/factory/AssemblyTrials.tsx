@@ -226,6 +226,9 @@ export function AssemblyReview({
 
 export function AssemblyTrials({
   draft,
+  selectedBuild,
+  onBuildChange,
+  onManageVersion,
   disabled,
   dirty,
   onChange,
@@ -233,6 +236,9 @@ export function AssemblyTrials({
   onNewTask,
 }: {
   draft: AssemblyDraft;
+  selectedBuild?: string;
+  onBuildChange: (id: string) => void;
+  onManageVersion: (agentId: string, version: string) => void;
   disabled: boolean;
   dirty: boolean;
   onChange: () => void;
@@ -240,10 +246,12 @@ export function AssemblyTrials({
   onNewTask: (scope: TaskScope) => void;
 }) {
   const builds = generationOptions(draft.candidates);
-  const [selected, select] = useState(() => builds[0]?.candidate.id),
+  const [firstBuild] = useState(() => builds[0]?.candidate.id),
     [source, showSource] = useState(false);
   const candidate = (
-    builds.find((item) => item.candidate.id === selected) ?? builds[0]
+    builds.find(
+      (item) => item.candidate.id === (selectedBuild ?? firstBuild),
+    ) ?? builds[0]
   )?.candidate;
   if (!candidate) return <Empty>还没有可测试的版本。</Empty>;
   return (
@@ -254,7 +262,7 @@ export function AssemblyTrials({
           <select
             aria-label="生成记录"
             value={candidate.id}
-            onChange={(e) => select(e.target.value)}
+            onChange={(e) => onBuildChange(e.target.value)}
           >
             {builds.map(({ candidate: item, label }) => (
               <option key={item.id} value={item.id}>
@@ -295,6 +303,17 @@ export function AssemblyTrials({
               }
             >
               用此版本新建需求
+            </button>
+          )}
+          {candidate.releaseStatus && (
+            <button
+              type="button"
+              className="ui-action"
+              onClick={() =>
+                onManageVersion(candidate.agentId, candidate.version)
+              }
+            >
+              管理此版本
             </button>
           )}
         </div>
@@ -440,8 +459,9 @@ function TrialForm({
           {run ? (
             <>
               <label className="assembly-field">
-                测试记录
+                选择测试记录
                 <select
+                  aria-label="选择测试记录"
                   value={run.id}
                   onChange={(e) => {
                     selectRun(e.target.value);

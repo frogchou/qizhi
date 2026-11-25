@@ -395,6 +395,7 @@ export function AgentDetail({
   onChange,
   stale,
   onBased,
+  onTest,
 }: {
   id: string;
   version: string;
@@ -403,6 +404,7 @@ export function AgentDetail({
   onChange: () => void;
   stale: boolean;
   onBased?: (agent: Agent) => Promise<void>;
+  onTest?: (record: NonNullable<Agent["assembly"]>) => void;
 }) {
   const read = useFactoryRead<Page<Agent>>(
     readPath("agents", { agentId: id, version, limit: 1 }),
@@ -422,6 +424,7 @@ export function AgentDetail({
   const resourceId = encodeURIComponent(id),
     resourceVersion = encodeURIComponent(version);
   const disabled = action.busy || stale || Boolean(read.error);
+  const assembly = agent?.assembly;
   const deleting = agent?.status === "deleting";
   const identity = useFactoryRead<{ status: string }>(
     deleting ? `/v1/factory/agents/${resourceId}/status` : null,
@@ -498,6 +501,15 @@ export function AgentDetail({
             <AssemblyReview record={agent.assembly} onTask={onTask} />
           )}
           <div className="fc-actions">
+            {assembly && onTest && (
+              <button
+                type="button"
+                className="ui-action ui-small"
+                onClick={() => onTest(assembly)}
+              >
+                打开版本测试
+              </button>
+            )}
             {onBased && agent.assembly && !deleting && (
               <button
                 type="button"

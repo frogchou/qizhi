@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { AssemblyTrials } from "./AssemblyTrials";
@@ -49,7 +50,19 @@ it("keeps the selected build and sample when another build has the same release 
   const send = vi
     .spyOn(factoryApi, "post")
     .mockResolvedValue({ id: "run-1", taskId: "task-1" });
-  const view = render(<AssemblyTrials {...props} />);
+  function Harness({ draft: current }: { draft: AssemblyDraft }) {
+    const [selectedBuild, onBuildChange] = useState<string>();
+    return (
+      <AssemblyTrials
+        {...props}
+        draft={current}
+        selectedBuild={selectedBuild}
+        onBuildChange={onBuildChange}
+        onManageVersion={vi.fn()}
+      />
+    );
+  }
+  const view = render(<Harness draft={draft} />);
   const selector = screen.getByRole("combobox", { name: "生成记录" });
   expect(within(selector).getByRole("option")).toHaveTextContent(
     /2026.+v2\.3\.0/,
@@ -57,12 +70,7 @@ it("keeps the selected build and sample when another build has the same release 
   fireEvent.change(screen.getByRole("textbox", { name: "样例需求" }), {
     target: { value: "检查第一份报价" },
   });
-  view.rerender(
-    <AssemblyTrials
-      {...props}
-      draft={{ ...draft, candidates: [first, second] }}
-    />,
-  );
+  view.rerender(<Harness draft={{ ...draft, candidates: [first, second] }} />);
   expect(selector).toHaveValue(first.id);
   expect(within(selector).getAllByRole("option")).toHaveLength(2);
   expect(

@@ -69,6 +69,12 @@ it("shows real editable versions and keeps the editor usable after a conflict or
     onNewTask: vi.fn(),
   };
   const view = render(<AssemblyWorkspace {...props} />);
+  const tabs = screen.getByRole("tablist", { name: "智能体装配导航" });
+  expect(
+    within(tabs)
+      .getAllByRole("tab")
+      .map((tab) => tab.textContent),
+  ).toEqual(["智能体管理", "智能体组装", "智能体测试"]);
   const selector = screen.getByRole("combobox", { name: "智能体与版本" });
   expect(
     await within(selector).findByRole("option", {
@@ -90,11 +96,24 @@ it("shows real editable versions and keeps the editor usable after a conflict or
     screen.getByText("智能体已生成，代码、资源和测试用例已保存。"),
   ).toBeVisible();
   expect(screen.getByRole("heading", { name: "基本信息" })).toBeVisible();
-  expect(screen.getByRole("checkbox", { name: /采购规则/ })).toBeVisible();
+  const library = screen.getByRole("button", { name: /RAGFlow 知识库/ });
+  expect(library).toHaveAttribute("aria-expanded", "false");
+  fireEvent.click(library);
+  const rules = screen.getByRole("checkbox", { name: /采购规则/ });
+  fireEvent.click(rules);
+  fireEvent.click(library);
+  expect(library).toHaveTextContent("采购规则");
+  expect(library).toHaveAttribute("aria-expanded", "false");
   expect(screen.getByRole("button", { name: "生成智能体" })).toBeEnabled();
-  expect(screen.getByRole("button", { name: "测试智能体" })).toBeDisabled();
-  expect(screen.queryByRole("link", { name: /前往测试区/ })).toBeNull();
+  expect(screen.queryByRole("button", { name: "测试智能体" })).toBeNull();
   fireEvent.change(goal, { target: { value: "检查五月报价" } });
+  fireEvent.click(within(tabs).getByRole("tab", { name: "智能体测试" }));
+  expect(
+    screen.getByRole("tabpanel", { name: "智能体测试" }),
+  ).toHaveTextContent("尚未生成");
+  expect(screen.queryByRole("heading", { name: "基本信息" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "返回组装" }));
+  expect(goal).toHaveValue("检查五月报价");
   fireEvent.click(screen.getByRole("button", { name: "保存修改" }));
   const error = await screen.findByRole("alert");
   expect(error).toHaveTextContent(

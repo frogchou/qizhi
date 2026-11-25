@@ -131,11 +131,14 @@ export function editingVersionLabel(config: AssemblyConfig, state = "编辑中")
   const version = config.version.trim()
     ? "v" + config.version.trim()
     : "版本号待填写";
-  return [name, version, state].join(" · ");
+  return [name, version, state].filter(Boolean).join(" · ");
 }
 
-export function editableVersionOptions(drafts: DraftSummary[]) {
-  const labels = drafts.map((d) => editingVersionLabel(d.config));
+export function editableVersionOptions(
+  drafts: DraftSummary[],
+  state = "编辑中",
+) {
+  const labels = drafts.map((d) => editingVersionLabel(d.config, state));
   const counts = new Map<string, number>();
   for (const label of labels) counts.set(label, (counts.get(label) ?? 0) + 1);
   return drafts.map((draft, i) => ({

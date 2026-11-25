@@ -773,20 +773,22 @@ test("装配编辑保留手工输入，明确选用建议与多个真实知识�
   await expect(panel.getByRole("heading", { name: "基本信息" })).toBeVisible();
   await panel.getByLabel("智能体与版本").selectOption("quote-draft");
   await panel
-    .getByLabel("工作委托", { exact: true })
+    .getByRole("textbox", { name: "工作委托", exact: true })
     .fill("保留人工调整的结算日期");
-  await panel.getByRole("button", { name: "管理智能体", exact: true }).click();
-  const manager = panel.getByRole("region", { name: "管理智能体" });
+  await panel.getByRole("tab", { name: "智能体管理", exact: true }).click();
+  const manager = panel.getByRole("tabpanel", { name: "智能体管理" });
   await expect(
     manager.getByRole("button", { name: /审计助理.*v1\.0\.0/ }),
   ).toBeVisible();
-  await panel.getByRole("button", { name: "创建智能体", exact: true }).click();
-  await expect(panel.getByLabel("工作委托", { exact: true })).toHaveValue(
-    "保留人工调整的结算日期",
-  );
+  await panel.getByRole("tab", { name: "智能体组装", exact: true }).click();
+  await expect(
+    panel.getByRole("textbox", { name: "工作委托", exact: true }),
+  ).toHaveValue("保留人工调整的结算日期");
   await expect(
     panel.getByRole("heading", { name: "资源与权限" }),
   ).toBeVisible();
+  await panel.getByRole("button", { name: /RAGFlow 知识库/ }).click();
+  await panel.getByRole("button", { name: /精选 Skill/ }).click();
   await expect(
     panel.getByText("RAGFlow 已连接", { exact: false }),
   ).toBeVisible();
@@ -814,17 +816,83 @@ test("装配编辑保留手工输入，明确选用建议与多个真实知识�
         mcpTools: [],
       },
     });
+  await panel.getByText("与装配助手沟通", { exact: true }).click();
   await panel.getByLabel("给装配助手的消息").fill("按最近生效日");
   await panel.getByRole("button", { name: "发送给装配助手" }).click();
   await expect(
     panel.getByText("遇到同币种的两份有效报价，应选哪份？"),
   ).toBeVisible();
 });
+test("三页签保留未提交内容，并把指定生成记录交给测试", async ({
+  page,
+}, testInfo) => {
+  const studio = await openStudio(page);
+  const nav = studio.getByRole("tablist", { name: "智能体装配导航" });
+  const editor = nav.getByRole("tab", { name: "智能体组装" });
+  const tests = nav.getByRole("tab", { name: "智能体测试" });
+  const management = nav.getByRole("tab", { name: "智能体管理" });
+  await expect(nav.getByRole("tab")).toHaveText([
+    "智能体管理",
+    "智能体组装",
+    "智能体测试",
+  ]);
+  await expect(editor).toHaveAttribute("aria-selected", "true");
+  await studio.getByLabel("智能体与版本").selectOption("quote-draft");
+  const groups = studio.locator(".studio-resource-toggle");
+  await expect(groups).toHaveCount(4);
+  await expect(
+    studio.locator('.studio-resource-toggle[aria-expanded="true"]'),
+  ).toHaveCount(0);
+  await expect(studio.getByRole("textbox", { name: "样例需求" })).toHaveCount(
+    0,
+  );
+  const tools = studio.getByRole("button", { name: /MCP 工具/ });
+  await tools.click();
+  await studio.getByRole("checkbox", { name: /发送通知/ }).check();
+  await tools.click();
+  await expect(tools).toContainText("发送通知");
+  await expect(tools).toContainText("对外写入");
+  await tools.click();
+  await studio.getByRole("checkbox", { name: /发送通知/ }).uncheck();
+  await tools.click();
+  await expect(studio.getByText("修改已保存", { exact: true })).toBeVisible();
+  await studio
+    .getByRole("textbox", { name: "工作委托", exact: true })
+    .fill("下次生成时增加审批步骤");
+  await editor.focus();
+  await page.keyboard.press("End");
+  await expect(tests).toBeFocused();
+  await expect(studio.getByRole("heading", { name: "资源与权限" })).toHaveCount(
+    0,
+  );
+  const record = studio.getByLabel("生成记录", { exact: true });
+  await record.selectOption("sealed-older");
+  await studio.getByLabel("样例需求").fill("只测试选中的旧记录");
+  await tests.focus();
+  await page.keyboard.press("Home");
+  await expect(management).toBeFocused();
+  await expect(
+    studio.getByRole("button", { name: "组装新智能体" }),
+  ).toBeVisible();
+  await tests.click();
+  await expect(record).toHaveValue("sealed-older");
+  await expect(studio.getByLabel("样例需求")).toHaveValue("只测试选中的旧记录");
+  await editor.click();
+  await expect(
+    studio.getByRole("textbox", { name: "工作委托", exact: true }),
+  ).toHaveValue("下次生成时增加审批步骤");
+  await studio.getByRole("button", { name: /测试上次生成/ }).click();
+  await expect(tests).toHaveAttribute("aria-selected", "true");
+  await expect(record).toHaveValue("sealed-one");
+  await expect(studio.getByLabel("样例需求")).toHaveValue("");
+  await page.screenshot({ path: testInfo.outputPath("testing.png") });
+});
 test("用指定生成版本和附件测试，答复后人工认可并按同一快照发布", async ({
   page,
 }, testInfo) => {
   const panel = await openStudio(page);
   await panel.getByLabel("智能体与版本").selectOption("quote-draft");
+  await panel.getByRole("tab", { name: "智能体测试" }).click();
   await panel
     .getByLabel("生成记录", { exact: true })
     .selectOption("sealed-one");
@@ -898,6 +966,19 @@ test("用指定生成版本和附件测试，答复后人工认可并按同一�
       ),
     )
     .toMatchObject({ candidateId: "sealed-one", runId: "run-one" });
+  await panel.getByRole("button", { name: "管理此版本" }).click();
+  const managed = panel.getByRole("tabpanel", { name: "智能体管理" });
+  await expect(
+    managed.getByRole("heading", { name: "发布依据" }),
+  ).toBeVisible();
+  await managed.getByRole("button", { name: "打开版本测试" }).click();
+  await expect(panel.getByRole("tab", { name: "智能体测试" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await expect(panel.getByLabel("生成记录", { exact: true })).toHaveValue(
+    "sealed-one",
+  );
   await page
     .getByRole("navigation", { name: "主导航" })
     .getByRole("button", { name: "智能工厂" })
@@ -931,6 +1012,7 @@ test("从已上线版本新建正式工单，带入主能力和知识库并保�
   });
   const panel = await openStudio(page);
   await panel.getByLabel("智能体与版本").selectOption("quote-draft");
+  await panel.getByRole("tab", { name: "智能体测试" }).click();
   await panel
     .getByLabel("生成记录", { exact: true })
     .selectOption("sealed-one");
@@ -1052,8 +1134,8 @@ test("资源登记与下架使用精确版本，删除一个智能体版本保�
   await library.getByRole("button", { name: "保存资源版本" }).click();
   await expect(row).toHaveCount(2);
   await library.getByRole("button", { name: "关闭窗口" }).click();
-  await panel.getByRole("button", { name: "管理智能体" }).click();
-  const manager = panel.getByRole("region", { name: "管理智能体" });
+  await panel.getByRole("tab", { name: "智能体管理" }).click();
+  const manager = panel.getByRole("tabpanel", { name: "智能体管理" });
   await manager.getByLabel("版本状态").selectOption("");
   await manager.getByRole("button", { name: /v0.9.0/ }).click();
   await manager
@@ -1084,6 +1166,9 @@ test("桌面与窄屏的装配页可选资源并切换到版本管理", async ({
   await expect(
     panel.getByRole("heading", { name: "资源与权限" }),
   ).toBeVisible();
+  const datasetGroup = panel.getByRole("button", { name: /RAGFlow 知识库/ });
+  await expect(datasetGroup).toHaveAttribute("aria-expanded", "false");
+  await datasetGroup.click();
   await expect(panel.getByRole("checkbox", { name: /采购报价/ })).toBeVisible();
   for (const width of [1280, 412]) {
     await page.setViewportSize({ width, height: 820 });
@@ -1096,9 +1181,7 @@ test("桌面与窄屏的装配页可选资源并切换到版本管理", async ({
         ),
       )
       .toBe(true);
-    await expect(
-      panel.getByRole("button", { name: "管理智能体" }),
-    ).toBeVisible();
+    await expect(panel.getByRole("tab", { name: "智能体管理" })).toBeVisible();
     await panel.getByRole("checkbox", { name: /采购报价/ }).check();
     await panel.getByRole("checkbox", { name: /产品资料/ }).check();
     await expect(
@@ -1115,17 +1198,15 @@ test("桌面与窄屏的装配页可选资源并切换到版本管理", async ({
     await page.screenshot({
       path: testInfo.outputPath("assembly-selection-" + width + ".png"),
     });
-    await panel.getByRole("button", { name: "管理智能体" }).click();
-    const manager = panel.getByRole("region", { name: "管理智能体" });
+    await panel.getByRole("tab", { name: "智能体管理" }).click();
+    const manager = panel.getByRole("tabpanel", { name: "智能体管理" });
     await expect(
       manager.getByRole("button", { name: /审计助理.*v1\.0\.0/ }),
     ).toBeVisible();
     await page.screenshot({
       path: testInfo.outputPath("version-manager-" + width + ".png"),
     });
-    await panel
-      .getByRole("button", { name: "创建智能体", exact: true })
-      .click();
+    await panel.getByRole("tab", { name: "智能体组装", exact: true }).click();
     await expect(
       panel.getByRole("checkbox", { name: /采购报价/ }),
     ).toBeChecked();
@@ -1152,7 +1233,7 @@ test("从新委托生成时保护重复请求并能停止服务端操作", async
   await panel
     .getByRole("textbox", { name: "工作委托", exact: true })
     .fill("生成供应商报价核对流程");
-  await panel.getByRole("button", { name: "发送给装配助手" }).click();
+  await panel.getByRole("button", { name: "整理工作委托" }).click();
   await expect(panel.getByText(/两份有效报价/)).toBeVisible();
   const generate = panel.getByRole("button", { name: "生成智能体" });
   await generate.click();

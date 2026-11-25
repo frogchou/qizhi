@@ -84,11 +84,11 @@
   font-weight: 600;
 }
 
-.assembly-studio .studio-tabs button[aria-pressed="true"] {
+.assembly-studio .studio-tabs button[aria-selected="true"] {
   color: var(--q-accent);
 }
 
-.studio-tabs button[aria-pressed="true"]::after {
+.studio-tabs button[aria-selected="true"]::after {
   position: absolute;
   inset: auto 0 -1px;
   height: 3px;
@@ -129,17 +129,105 @@
   color: var(--muted);
   font-size: 12px;
 }
-.studio-test-link {
-  margin-inline-end: 3px;
+.assembly-studio[hidden],
+.assembly-studio [role="tabpanel"][hidden],
+.studio-resource-options[hidden] {
+  display: none;
+}
+.studio-tabs button:focus-visible,
+.studio-resource-toggle:focus-visible,
+.studio-conversation summary:focus-visible,
+.studio-saved summary:focus-visible {
+  outline: 2px solid var(--q-accent);
+  outline-offset: 3px;
+}
+.studio-brief-input {
+  display: flex;
+  align-items: flex-end;
+  gap: 14px;
+}
+.studio-brief-input textarea {
+  flex: 1;
+  min-width: 0;
+  min-height: 60px;
+  resize: vertical;
+  font: inherit;
+  color: var(--ink);
+  background: #fbfcfa;
+  border: 1px solid #cbd8cf;
+  border-radius: 7px;
+  padding: 9px 12px;
+}
+.studio-brief-input textarea:focus-visible {
+  outline: 2px solid var(--q-accent);
+  outline-offset: 1px;
+}
+.studio-brief-input .ui-action {
+  flex: none;
+}
+.studio-conversation {
+  margin-top: 12px;
+}
+.studio-conversation > summary,
+.studio-saved > summary {
+  width: fit-content;
+  max-width: 100%;
+  cursor: pointer;
   color: var(--q-accent);
-  font-size: 13px;
   font-weight: 600;
-  text-underline-offset: 3px;
 }
-.studio-testing h2 {
-  scroll-margin-top: 24px;
+.studio-conversation[open] > summary,
+.studio-saved[open] > summary {
+  margin-bottom: 14px;
 }
-
+.studio-conversation summary span,
+.studio-saved summary span {
+  font-weight: 400;
+  margin-left: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.studio-build-footer {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 10px 18px;
+  margin: 0 0 16px;
+  padding: 14px 18px;
+  background: #edf3ed;
+  border: 1px solid #d2ded4;
+  border-radius: 10px;
+}
+.studio-build-state {
+  font-size: 13px;
+  color: var(--muted);
+}
+.studio-manager-actions {
+  float: right;
+  margin: 0 0 8px 12px;
+}
+.studio-manager .live-list {
+  clear: both;
+}
+.studio-manager .studio-actions,
+.studio-saved .studio-actions {
+  flex-wrap: wrap;
+}
+.studio-saved .assembly-field {
+  max-width: 32rem;
+}
+.studio-no-tests {
+  padding: clamp(24px, 4vw, 56px);
+  text-align: center;
+}
+.studio-no-tests > .ui-glyph {
+  color: var(--muted);
+}
+.assembly-studio .studio-no-tests h2 {
+  font-size: 18px;
+  margin: 8px 0 4px;
+}
 .studio-command .studio-actions,
 .studio-test-bar .studio-actions,
 .studio-count {
@@ -214,63 +302,108 @@
 }
 
 .studio-basics .assembly-field :is(input, textarea)::placeholder,
-.studio-assistant textarea::placeholder {
+.studio-brief textarea::placeholder {
   color: #718176;
 }
 
-.studio-resources {
-  container-type: inline-size;
+.studio-resource-groups {
+  display: grid;
+  gap: 0;
 }
-
-.studio-resources .assembly-resource-grid {
-  grid-template-columns: minmax(0, 1fr);
+.studio-resource-group {
+  border-top: 1px solid var(--line);
+}
+.studio-resource-groups > :last-child .studio-resource-group {
+  border-bottom: 1px solid var(--line);
+}
+.assembly-studio .studio-resource-toggle {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
   gap: 12px;
+  width: 100%;
+  min-height: 65px;
+  padding: 10px 5px;
   margin: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
 }
-
-.studio-resources .assembly-choices {
-  padding: 0 10px 5px;
-  border-color: #d8e2db;
-  border-radius: 8px;
+.assembly-studio .studio-resource-toggle:hover,
+.assembly-studio .studio-resource-toggle[aria-expanded="true"] {
+  background: #f1f6f1;
 }
-
-.studio-resources .assembly-choices legend {
-  font-size: 13px;
-  color: #355645;
+.studio-resource-icon {
+  display: grid;
+  place-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 7px;
+  background: #eaf1ea;
+  color: #376749;
 }
-
-.studio-resources .assembly-choice-list {
-  max-height: 252px;
+.studio-resource-caption {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.studio-resource-caption strong {
+  font-size: 14px;
+  font-weight: 650;
+}
+.studio-resource-caption small {
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.studio-resource-count {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.studio-resource-arrow {
+  color: var(--muted);
+}
+.studio-resource-toggle[aria-expanded="true"] .studio-resource-arrow {
+  transform: rotate(180deg);
+}
+.studio-resource-options {
+  padding: 2px 10px 12px 15px;
+}
+.studio-resource-options .assembly-choices {
+  border: 0;
+  padding: 0;
+}
+.studio-resource-options .assembly-choice-list {
+  max-height: 260px;
   overflow-y: auto;
   scrollbar-width: thin;
 }
-
-.studio-resources .assembly-choice {
+.studio-resource-options .assembly-choice {
   gap: 9px;
-  padding: 7px 0;
+  padding: 8px 2px;
   cursor: pointer;
 }
-
 .assembly-choice > span {
   min-width: 0;
   overflow-wrap: anywhere;
 }
-
-.studio-resources .assembly-choice + .assembly-choice {
+.studio-resource-options .assembly-choice + .assembly-choice {
   border-top: 1px solid #edf1eb;
 }
-
-.studio-resources .assembly-choice small {
+.studio-resource-options .assembly-choice small {
   margin-top: 2px;
   font-size: 12px;
 }
-
-@container (min-width: 450px) {
-  .studio-resources .assembly-resource-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+.studio-resource-options .assembly-connection {
+  margin: 6px 0 0;
 }
-
 .studio-operations {
   padding-block: 16px;
 }
@@ -444,9 +577,21 @@
   }
 
   .studio-tabs {
+    gap: clamp(10px, 3vw, 24px);
     margin: 12px 0;
   }
 
+  .studio-brief-input {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .studio-brief-input .ui-action {
+    align-self: flex-end;
+  }
+  .studio-resource-toggle {
+    column-gap: 7px;
+  }
   .studio-draft,
   .studio-test-bar > .assembly-field {
     width: 100%;

@@ -4,7 +4,7 @@
 
 栖知是一款面向 Windows 知识工作者的本地优先工作助手。它使用内置的 NTFS/USN 索引快速发现近期文件变动，把分散的文档整理成可检索、可总结、可继续处理的工作上下文，并连接 RAGFlow、OpenAI 兼容服务、TypeSafe AI JEV 与本机 Codex CLI。
 
-> 当前处于早期开发阶段（`0.1.2`）。接口、数据结构和安装方式仍可能变化，请先在测试环境中使用。
+> 当前处于早期开发阶段（`0.1.3`）。接口、数据结构和安装方式仍可能变化，请先在测试环境中使用。
 
 ## 智能工厂
 
@@ -37,7 +37,7 @@ flowchart LR
 
 ## 智能体装配
 
-从栖知左侧打开「智能体装配」，可在同页看到工作流程、交付标准、可调用的工具和知识库。选择「生成智能体」后，可按生成记录上传样例并「测试智能体」。同版本的多次生成各自保留源码、测试和产物。在「管理智能体」审核或管理已发布版本。要查看当前实例、上线版本及待审版本，打开「智能工厂」中的「智能体生产线」。[装配与使用说明](apps/desktop/src/features/factory/README.md)
+从左侧「智能体装配」进入工作台。默认打开「智能体组装」，填写工作委托并按类别授权资源后即可生成。「智能体测试」支持为指定的生成记录上传样例、查看结果和提交发布。「智能体管理」可以继续已保存的组装、审核和管理已登记版本。智能工厂的「智能体生产线」仍可查看正在运行的实例、已上线版本和待审核版本。[装配与使用说明](apps/desktop/src/features/factory/README.md)
 
 ## 核心能力
 
@@ -145,7 +145,7 @@ pnpm --filter @qizhi/desktop tauri build
 该命令会先执行 TypeScript 检查和 Vite 生产构建，再编译 Rust release 程序并生成 NSIS x64 安装器。输出位于：
 
 ```text
-apps/desktop/src-tauri/target/release/bundle/nsis/栖知_0.1.2_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/栖知_0.1.3_x64-setup.exe
 ```
 
 安装器采用按计算机安装模式，安装内置 NTFS 索引服务时会出现 Windows UAC 确认。

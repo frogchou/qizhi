@@ -94,7 +94,14 @@ export async function installAssemblyFixture(page: Page) {
         capabilities: [],
         datasetIds: [],
       },
-      candidates: [candidate],
+      candidates: [
+        candidate,
+        {
+          ...candidate,
+          id: "sealed-older",
+          createdAt: new Date(Date.parse(now) - 60000).toISOString(),
+        },
+      ],
       runs: [] as {
         id: string;
         candidateId: string;
@@ -330,7 +337,7 @@ export async function installAssemblyFixture(page: Page) {
       if (path.endsWith("/runs")) {
         const run = {
           id: "run-one",
-          candidateId: "sealed-one",
+          candidateId: String(body.candidateId),
           taskId: "trial-order",
           state: "awaiting_user_input",
           accepted: false,
