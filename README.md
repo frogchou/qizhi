@@ -4,7 +4,7 @@
 
 栖知是一款面向 Windows 知识工作者的本地优先工作助手。它使用内置的 NTFS/USN 索引快速发现近期文件变动，把分散的文档整理成可检索、可总结、可继续处理的工作上下文，并连接 RAGFlow、OpenAI 兼容服务、TypeSafe AI JEV 与本机 Codex CLI。
 
-> 当前处于早期开发阶段（`0.1.1`）。接口、数据结构和安装方式仍可能变化，请先在测试环境中使用。
+> 当前处于早期开发阶段（`0.1.2`）。接口、数据结构和安装方式仍可能变化，请先在测试环境中使用。
 
 ## 智能工厂
 
@@ -35,6 +35,10 @@ flowchart LR
 
 桌面端将需求与经用户选择的资料快照提交给中台；中台规划并调度智能体，持续返回任务状态、实时输出、质量结论和可下载成果。中台的完整架构图、智能体生命周期和部署说明见 [qizhi_mg README](https://github.com/frogchou/qizhi_mg#readme) 与 [智能体编排运行手册](https://github.com/frogchou/qizhi_mg/blob/main/docs/runbooks/agent-orchestration.md)。
 
+## 智能体装配
+
+从栖知左侧打开「智能体装配」，可在同页看到工作流程、交付标准、可调用的工具和知识库。选择「生成智能体」后，可按生成记录上传样例并「测试智能体」。同版本的多次生成各自保留源码、测试和产物。在「管理智能体」审核或管理已发布版本。要查看当前实例、上线版本及待审版本，打开「智能工厂」中的「智能体生产线」。[装配与使用说明](apps/desktop/src/features/factory/README.md)
+
 ## 核心能力
 
 - **今日与过去**：根据 NTFS 变更记录发现文件，按目录聚合、筛选、搜索、排序和批量选择。
@@ -52,6 +56,7 @@ flowchart LR
 | 知识库      | RAGFlow 检索、Agent 问答、引用和资料下载               |
 | Codex 工作  | 本机 Codex 项目、会话、资料和生成物管理                |
 | 智能工厂    | 可视化智能体工单、资源、执行、质检、监控与交付         |
+| 智能体装配  | 创建和测试智能体、选择资源权限、管理和审核版本         |
 | 设置        | 扫描与隐私、模型服务、RAGFlow、JEV、Codex 与总结提示词 |
 
 更详细的代码地图见 [桌面端说明](apps/desktop/README.md)、[前端功能模块](apps/desktop/src/features/README.md) 和 [Rust/Tauri 核心](apps/desktop/src-tauri/README.md)。
@@ -140,7 +145,7 @@ pnpm --filter @qizhi/desktop tauri build
 该命令会先执行 TypeScript 检查和 Vite 生产构建，再编译 Rust release 程序并生成 NSIS x64 安装器。输出位于：
 
 ```text
-apps/desktop/src-tauri/target/release/bundle/nsis/栖知_0.1.1_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/栖知_0.1.2_x64-setup.exe
 ```
 
 安装器采用按计算机安装模式，安装内置 NTFS 索引服务时会出现 Windows UAC 确认。
