@@ -78,6 +78,13 @@ export type Agent = {
   approvedAt?: string | null;
   capabilities: { name: string; description: string }[];
   runningCount: number;
+  assembly?: {
+    draftId: string;
+    candidateId: string;
+    runId: string;
+    packageDigest: string;
+  } | null;
+  integrityIssue?: string | null;
 };
 export type Quality = {
   id: string;
@@ -212,6 +219,7 @@ export type TaskNode = {
   depends_on?: string[];
   output?: {
     output?: {
+      assemblyVerification?: { receipts: AssemblyReceipt[] };
       summary?: string;
       answer?: string;
       message?: string;
@@ -222,6 +230,15 @@ export type TaskNode = {
     error?: { message?: string } | string;
     evidence?: { title?: string; source?: string; excerpt?: string }[];
   } | null;
+};
+export type AssemblyReceipt = {
+  status?: string;
+  requestKey?: string;
+  resource: string;
+  effect: string;
+  mode: "real" | "simulated" | "unverified";
+  provider?: string;
+  reason?: string;
 };
 export type Attempt = {
   id: string;
@@ -278,12 +295,26 @@ export type TaskDetail = {
     updated_at: string;
     current_plan_version?: number;
     revision_number?: number;
+    authorized_dataset_ids?: string[] | null;
+    authorized_capabilities?: string[] | null;
+    authorized_mcp_tools?: string[] | null;
   };
   planSummary: PlanSummary | null;
   plans: TaskPlan[];
   nodes: TaskNode[];
   attempts: Attempt[];
   activities: Activity[];
+  events?: {
+    id?: string;
+    instance_id?: string;
+    sequence?: number;
+    occurred_at?: string;
+    payload?: Partial<AssemblyReceipt> & {
+      stage?: string;
+      step?: number;
+      datasetIds?: string[];
+    };
+  }[];
   workflow?: {
     key: string;
     label: string;
@@ -320,7 +351,42 @@ export type TaskDetail = {
     sourceType: string;
     createdAt: string;
   }[];
-  interactions?: { id: string; title: string; prompt: string; state: string }[];
+  interactions?: TaskInteraction[];
+  capabilityCalls?: {
+    id: string;
+    planId: string;
+    parentKey: string;
+    childKey?: string;
+    capability: string;
+    reason?: string;
+    explanation?: string;
+    state: string;
+    createdAt: string;
+    settledAt?: string;
+  }[];
+};
+export type ResponseField = {
+  type: "string" | "boolean" | "number" | "array";
+  enum?: (string | boolean | number)[];
+  items?: { type: "string" | "number" | "boolean" };
+  minLength?: number;
+  maxLength?: number;
+  minimum?: number;
+  maximum?: number;
+  minItems?: number;
+  maxItems?: number;
+};
+export type TaskInteraction = {
+  id: string;
+  title: string;
+  prompt: string;
+  state: string;
+  responseSchema?: {
+    properties: Record<string, ResponseField>;
+    required?: string[];
+  };
+  answer?: Record<string, unknown>;
+  answeredAt?: string;
 };
 export type TaskTab = "plan" | "quality" | "delivery" | "monitor";
 export type TaskLink = { id: string; title: string; tab: TaskTab };
@@ -328,6 +394,12 @@ export type OpenTask = (id: string, title: string, tab?: TaskTab) => void;
 export type OpenAgent = (agentId: string, version: string) => void;
 
 const states: Record<string, string> = {
+  queued: "已排队",
+  assembly_preparing: "准备试跑",
+  dispatching: "正在调用",
+  indeterminate: "结果待核对",
+  preparing: "准备中",
+  simulated_write: "模拟写入",
   received: "已接收",
   planning: "规划中",
   planned: "已编排",

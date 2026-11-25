@@ -29,6 +29,15 @@ describe("factory development action responses", () => {
       });
     for (const [path, status, body, text] of [
       [
+        "/v1/factory/agents/x/versions/1.0.0/delete",
+        409,
+        {
+          code: "agent_version_in_use",
+          taskIds: ["task-running", "private task"],
+        },
+        "task-running",
+      ],
+      [
         deleting,
         409,
         {

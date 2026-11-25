@@ -180,11 +180,13 @@ export function Modal({
   title,
   onClose,
   closeDisabled = false,
+  wide = false,
   children,
 }: {
   title: string;
   onClose: () => void;
   closeDisabled?: boolean;
+  wide?: boolean;
   children: ReactNode;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
@@ -196,10 +198,11 @@ export function Modal({
   return (
     <dialog
       ref={ref}
-      className="fc-modal live-modal"
+      className={"fc-modal live-modal" + (wide ? " assembly-modal-wide" : "")}
       aria-label={title}
       onCancel={(e) => {
         e.preventDefault();
+        e.stopPropagation();
         if (!closeDisabled) onClose();
       }}
     >

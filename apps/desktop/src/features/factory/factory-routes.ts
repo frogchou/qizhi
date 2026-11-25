@@ -10,7 +10,13 @@ export const factoryCollections = [
   "packages",
 ] as const;
 type Collection = (typeof factoryCollections)[number];
+type Assembly = "/v1/factory/assemblies";
+type Resources = "/v1/factory/assembly-resources";
 export type FactoryReadPath =
+  | Assembly
+  | Resources
+  | `${Assembly}/${string}`
+  | `${Resources}/${"mcp" | "skill"}/${string}/${string}`
   | "/v1/factory/overview"
   | `/v1/factory/agents/${string}/status`
   | `/v1/factory/${Collection | "changes"}${"" | `?${string}`}`
@@ -18,13 +24,19 @@ export type FactoryReadPath =
   | "/v1/agents"
   | `/v1/tasks/${string}`;
 export type FactoryWritePath =
+  | Assembly
+  | Resources
+  | `${Assembly}/${string}/${"save" | "suggest" | "generate" | "delete" | "runs" | "publish"}`
+  | `${Assembly}/${string}/operations/${string}/stop`
+  | `${Assembly}/${string}/runs/${string}/accept`
+  | `${Resources}/${"mcp" | "skill"}/${string}/${string}/state`
   | "/v1/tasks"
   | "/v1/factory/releases"
   | `/v1/factory/agents/${string}/delete`
   | `/v1/tasks/${string}/${"review" | "stop" | "approve"}`
   | `/v1/tasks/${string}/interactions/${string}/${"respond" | "cancel"}`
   | `/v1/agents/${string}/versions/${string}/approve`
-  | `/v1/factory/agents/${string}/versions/${string}/offline`;
+  | `/v1/factory/agents/${string}/versions/${string}/${"offline" | "delete"}`;
 
 const filters = new Set([
   "state",
@@ -86,6 +98,40 @@ export function validFactoryRoute(
   const segments = (mark < 0 ? path : path.slice(0, mark)).slice(4).split("/");
   const [group, a, b, c, d, e] = segments;
   const length = segments.length;
+  if (
+    group === "factory" &&
+    (a === "assemblies" || a === "assembly-resources")
+  ) {
+    if (mark >= 0 || (method !== "GET" && method !== "POST")) return false;
+    if (length === 2) return true;
+    if (a === "assembly-resources")
+      return (
+        (b === "skill" || b === "mcp") &&
+        safeFactoryId(c) &&
+        safeFactoryId(d) &&
+        ((method === "GET" && length === 5) ||
+          (method === "POST" && length === 6 && e === "state"))
+      );
+    if (!safeFactoryId(b)) return false;
+    if (method === "GET")
+      return (
+        length === 3 ||
+        (length === 6 &&
+          c === "candidates" &&
+          safeFactoryId(d) &&
+          e === "source")
+      );
+    return (
+      (length === 4 &&
+        ["save", "suggest", "generate", "delete", "runs", "publish"].includes(
+          c,
+        )) ||
+      (length === 6 &&
+        safeFactoryId(d) &&
+        ((c === "operations" && e === "stop") ||
+          (c === "runs" && e === "accept")))
+    );
+  }
   if (method === "GET" && group === "factory" && length === 2) {
     if (a === "overview") return mark < 0;
     return (
@@ -119,7 +165,7 @@ export function validFactoryRoute(
         safeFactoryId(b) &&
         c === "versions" &&
         safeFactoryId(d) &&
-        e === "offline")
+        (e === "offline" || e === "delete"))
     );
   }
   if (group === "agents")

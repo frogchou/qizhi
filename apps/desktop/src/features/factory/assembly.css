@@ -1,0 +1,285 @@
+.fc-live .live-inspector[data-assembly="true"] {
+  width: min(690px, 91%);
+}
+.assembly-workspace,
+.assembly-version-manager,
+.assembly-task-auth,
+.assembly-form {
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.55;
+}
+.assembly-workspace[hidden] {
+  display: none;
+}
+.assembly-editable {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+.fc .assembly-toolbar,
+.assembly-draft-nav,
+.assembly-actions,
+.assembly-row,
+.assembly-connection {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+.fc .assembly-toolbar,
+.assembly-row {
+  justify-content: space-between;
+}
+.assembly-toolbar {
+  padding: 15px 0 10px;
+}
+.assembly-toolbar h3,
+.assembly-row h3 {
+  margin: 0;
+}
+.assembly-draft-nav > label {
+  flex: 1;
+}
+.assembly-draft-nav {
+  align-items: end;
+  margin-bottom: 12px;
+}
+.assembly-tabs {
+  position: sticky;
+  top: 48px;
+  z-index: 1;
+  padding: 5px 0 7px;
+  background: var(--paper, #fff);
+}
+.assembly-field {
+  display: grid;
+  min-width: 0;
+  align-content: start;
+  gap: 4px;
+  margin: 8px 0;
+  color: #274b46;
+  font-size: 13px;
+  font-weight: 600;
+}
+.assembly-field :is(input:not([type="checkbox"]), select, textarea) {
+  box-sizing: border-box;
+  width: 100%;
+  margin: 0;
+  min-width: 0;
+  min-height: 34px;
+  padding: 6px 9px;
+  border: 1px solid var(--q-border, #c4d6cf);
+  border-radius: var(--q-radius, 7px);
+  background: var(--q-surface, white);
+  color: var(--q-ink, #213e38);
+  font: inherit;
+  font-weight: 400;
+}
+.assembly-field textarea {
+  min-height: 58px;
+  resize: vertical;
+}
+.assembly-field :is(input, select, textarea):focus-visible,
+.assembly-disclosure > summary:focus-visible {
+  outline: 2px solid var(--q-ring, #298477);
+  outline-offset: 2px;
+}
+.assembly-workspace h4,
+.assembly-section h3,
+.assembly-question h3 {
+  margin: 0 0 6px;
+}
+.assembly-workspace > .assembly-field:first-of-type textarea {
+  min-height: 78px;
+}
+.assembly-assistant,
+.assembly-question,
+.assembly-disclosure,
+.assembly-section,
+.assembly-library article {
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px solid var(--q-border, #d6e2db);
+  border-radius: 8px;
+  background: var(--q-surface, #fff);
+}
+.assembly-assistant,
+.assembly-question {
+  background: #f2f7f4;
+}
+.assembly-message p {
+  margin: 2px 0 10px;
+  white-space: pre-wrap;
+}
+.assembly-disclosure > summary {
+  cursor: pointer;
+  color: #245349;
+  font-weight: 650;
+}
+.assembly-grid,
+.assembly-resource-grid,
+.assembly-diff {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 8px 12px;
+}
+.assembly-resource-grid {
+  margin: 12px 0;
+}
+.assembly-choices {
+  margin: 0;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--q-border, #d1ded7);
+  border-radius: 7px;
+}
+.assembly-choices legend {
+  padding: 0 4px;
+  font-weight: 650;
+}
+.assembly-choice {
+  display: flex;
+  gap: 8px;
+  align-items: start;
+  padding: 6px 0;
+  font-size: 13px;
+}
+.assembly-choice input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  margin: 2px 0 0;
+  accent-color: #337b67;
+}
+.assembly-choice small,
+.assembly-assertions small {
+  display: block;
+  color: #58716b;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.assembly-choice em {
+  margin-left: 6px;
+  color: #447467;
+  font-size: 11px;
+  font-style: normal;
+}
+.fc .assembly-connection {
+  margin: 5px 0;
+  justify-content: start;
+  color: #49685f;
+  font-size: 12px;
+}
+.assembly-actions {
+  margin: 12px 0;
+}
+.fc .assembly-modal-wide {
+  width: min(690px, calc(100vw - 28px));
+  max-width: calc(100vw - 28px);
+  max-height: 86vh;
+  padding: 17px 20px;
+  overflow: auto;
+}
+.assembly-version-manager {
+  overflow-wrap: anywhere;
+}
+.assembly-version-manager .live-filter {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+}
+.assembly-code {
+  max-height: 45vh;
+  overflow: auto;
+  margin: 6px 0 12px;
+  padding: 10px;
+  border-radius: 6px;
+  background: #f2f5f3;
+  color: #173e32;
+  font:
+    12px/1.55 Consolas,
+    monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.assembly-diff section:first-child pre {
+  background: #fff2ec;
+}
+.assembly-diff section:last-child pre {
+  background: #eaf5ed;
+}
+.assembly-assertions {
+  padding-left: 18px;
+}
+.assembly-assertions span {
+  margin-left: 6px;
+}
+.assembly-operations > div {
+  padding: 8px 0;
+  border-block-start: 1px solid var(--q-border, #d1ded7);
+}
+.assembly-operations .fc-badge {
+  margin-left: 8px;
+}
+.assembly-operations p {
+  margin: 4px 0;
+  white-space: pre-wrap;
+}
+.assembly-question .live-attachments {
+  margin: 8px 0;
+}
+.assembly-skill-files {
+  min-width: 0;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--q-border, #d1ded7);
+  border-radius: 8px;
+}
+.assembly-skill-files legend {
+  padding: 0 5px;
+  font-weight: 650;
+}
+.assembly-skill-files p {
+  margin-top: 4px;
+}
+.assembly-skill-files input {
+  width: 100%;
+  min-width: 0;
+}
+.assembly-skill-files ul {
+  padding: 0;
+  margin: 8px 0 0;
+  list-style: none;
+}
+.assembly-skill-files li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 7px 0;
+  border-top: 1px solid var(--q-border, #d1ded7);
+}
+.assembly-skill-files li > div:first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.assembly-skill-files li small {
+  display: block;
+  margin-top: 2px;
+}
+@media (max-width: 720px) {
+  .fc-live .live-inspector[data-assembly="true"] {
+    width: min(100%, 630px);
+  }
+  .assembly-grid,
+  .assembly-resource-grid,
+  .assembly-diff {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .assembly-tabs {
+    position: static;
+  }
+}

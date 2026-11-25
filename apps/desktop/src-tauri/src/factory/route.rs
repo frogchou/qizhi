@@ -76,6 +76,85 @@ pub(super) fn validate(method: &str, path: &str) -> Result<(), String> {
             query.is_none_or(|q| valid_query(name, q))
         }
         ("GET", ["", "v1", "factory", "overview"], None) => true,
+        ("GET" | "POST", ["", "v1", "factory", "assemblies" | "assembly-resources"], None) => true,
+        ("GET", ["", "v1", "factory", "assemblies", draft], None) => valid_id(draft),
+        (
+            "GET",
+            [
+                "",
+                "v1",
+                "factory",
+                "assemblies",
+                draft,
+                "candidates",
+                candidate,
+                "source",
+            ],
+            None,
+        ) => valid_id(draft) && valid_id(candidate),
+        (
+            "POST",
+            [
+                "",
+                "v1",
+                "factory",
+                "assemblies",
+                draft,
+                "save" | "suggest" | "generate" | "delete" | "runs" | "publish",
+            ],
+            None,
+        ) => valid_id(draft),
+        (
+            "POST",
+            [
+                "",
+                "v1",
+                "factory",
+                "assemblies",
+                draft,
+                "operations",
+                record,
+                "stop",
+            ]
+            | [
+                "",
+                "v1",
+                "factory",
+                "assemblies",
+                draft,
+                "runs",
+                record,
+                "accept",
+            ],
+            None,
+        ) => valid_id(draft) && valid_id(record),
+        (
+            "POST",
+            [
+                "",
+                "v1",
+                "factory",
+                "assembly-resources",
+                "skill" | "mcp",
+                resource,
+                version,
+                "state",
+            ],
+            None,
+        ) => valid_id(resource) && valid_id(version),
+        (
+            "GET",
+            [
+                "",
+                "v1",
+                "factory",
+                "assembly-resources",
+                "skill" | "mcp",
+                resource,
+                version,
+            ],
+            None,
+        ) => valid_id(resource) && valid_id(version),
         ("GET", ["", "v1", "factory", "agents", agent, "status"], None)
         | ("POST", ["", "v1", "factory", "agents", agent, "delete"], None) => valid_id(agent),
         ("GET", ["", "v1", "tasks" | "agents"], None) => true,
@@ -111,7 +190,7 @@ pub(super) fn validate(method: &str, path: &str) -> Result<(), String> {
                 agent,
                 "versions",
                 version,
-                "offline",
+                "offline" | "delete",
             ],
             None,
         ) => valid_id(agent) && valid_id(version),
@@ -142,6 +221,13 @@ mod tests {
             "/v1/factory/quality?state=awaiting_review&offset=20&limit=5",
             "/v1/tasks/abc-A/interactions",
             "/v1/factory/agents/alpha/status",
+            "/v1/factory/assemblies",
+            "/v1/factory/assemblies/options",
+            "/v1/factory/assemblies/draft",
+            "/v1/factory/assemblies/draft/candidates/snapshot/source",
+            "/v1/factory/assembly-resources",
+            "/v1/factory/assembly-resources/skill/rules/1.2.0",
+            "/v1/tasks/capability-options",
         ] {
             assert!(validate("GET", path).is_ok(), "{path}");
         }
@@ -152,6 +238,18 @@ mod tests {
             "/v1/tasks/t/review",
             "/v1/tasks/t/stop",
             "/v1/factory/agents/alpha/delete",
+            "/v1/factory/agents/alpha/versions/1.0.1/delete",
+            "/v1/factory/assemblies",
+            "/v1/factory/assemblies/draft/save",
+            "/v1/factory/assemblies/draft/suggest",
+            "/v1/factory/assemblies/draft/generate",
+            "/v1/factory/assemblies/draft/operations/job/stop",
+            "/v1/factory/assemblies/draft/runs",
+            "/v1/factory/assemblies/draft/runs/trial/accept",
+            "/v1/factory/assemblies/draft/publish",
+            "/v1/factory/assemblies/draft/delete",
+            "/v1/factory/assembly-resources",
+            "/v1/factory/assembly-resources/mcp/reader/0.1.0/state",
         ] {
             assert!(validate("POST", path).is_ok(), "{path}");
         }
@@ -175,7 +273,17 @@ mod tests {
             ("DELETE", "/v1/factory/agents/a/delete"),
             ("POST", "/v1/factory/agents/../delete"),
             ("POST", "/v1/factory/agents/a/delete?force=1"),
-            ("POST", "/v1/factory/agents/a/versions/1.0.0/delete"),
+            ("POST", "/v1/factory/agents/a/versions/1.0.0/delete?force=1"),
+            ("POST", "/v1/factory/assemblies/../save"),
+            ("GET", "/v1/factory/assemblies/draft/save"),
+            (
+                "POST",
+                "/v1/factory/assembly-resources/all/id/version/state",
+            ),
+            (
+                "POST",
+                "/v1/factory/assemblies/draft/runs/missing/accept?override=1",
+            ),
             ("GET", "/v1/factory/agents/%2e%2e/status"),
             ("GET", "/v1/tasks/t/stop"),
         ] {

@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import assemblyErrors from "./assembly-errors.json";
 import { useEffect, useSyncExternalStore } from "react";
 import {
   factoryOrigin,
@@ -167,11 +168,14 @@ async function operationFailure(
     path.startsWith("/v1/factory/agents/") && path.endsWith("/delete");
   const stop = path.startsWith("/v1/tasks/") && path.endsWith("/stop");
   const review = path.startsWith("/v1/tasks/") && path.endsWith("/review");
+  const assembly =
+    path.startsWith("/v1/factory/assemblies") ||
+    path.startsWith("/v1/factory/assembly-resources");
   const { status } = response;
   const limit = 16 * 1024;
   if (
-    (!deletion && !stop && !review) ||
-    ![403, 409, 503].includes(status) ||
+    (!deletion && !stop && !review && !assembly) ||
+    ![400, 403, 409, 422, 503].includes(status) ||
     Number(response.headers.get("content-length")) > limit
   )
     return;
@@ -192,12 +196,38 @@ async function operationFailure(
       text += decoder.decode(value, { stream: true });
     }
     const payload = JSON.parse(text + decoder.decode());
+    if (assembly)
+      return assemblyErrors.find((message) => message === payload?.message);
     if (review && status === 409) {
       if (payload?.code === "stale_review")
         return "验收轮次已变化，请刷新工单后再提交。";
       if (payload?.code === "idempotency_conflict")
         return "此次提交与上次请求不一致，请核对最新工单。";
     } else if (deletion) {
+      if (path.includes("/versions/")) {
+        if (status === 409 && payload?.code === "agent_version_in_use") {
+          const ids = Array.isArray(payload.taskIds)
+            ? payload.taskIds
+                .filter(
+                  (v: unknown) => typeof v === "string" && safeFactoryId(v),
+                )
+                .slice(0, 20)
+            : [];
+          return (
+            "此版本仍被未结束的工单使用。" +
+            (ids.length
+              ? "关联工单 " + ids.join("、")
+              : "请查看此版本的在办工单。")
+          );
+        }
+        if (status === 409 && payload?.code === "agent_version_busy")
+          return "此版本正在自检或下线，请完成后再删除。";
+        if (
+          status === 503 &&
+          payload?.code === "agent_version_delete_incomplete"
+        )
+          return "节点尚未完成版本撤销，请刷新后重试删除此版本。";
+      }
       if (status === 409 && payload?.code === "agent_in_use")
         return "仍有未结束的工单使用此智能体。请等待工单结束，或先停止相关工单，再刷新重试。";
       if (
@@ -386,7 +416,35 @@ export type LocalUpload = {
   upload: UploadReceipt | null;
   error: string | null;
 };
+function downloadBlob(blob: Blob, fileName: string) {
+  const link = document.createElement("a");
+  const url = URL.createObjectURL(blob);
+  link.href = url;
+  link.download = (fileName.split(/[\\/]/).pop() || "工厂交付物")
+    .replace(/[<>:"|?*]/g, "_")
+    .slice(0, 140);
+  link.rel = "noopener";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 60000);
+  return true;
+}
 export const factoryApi = {
+  async saveSkillFile(
+    fileName: string,
+    bytes: Uint8Array<ArrayBuffer>,
+  ): Promise<boolean> {
+    if (isDesktop())
+      return invoke<boolean>("factory_save_skill_file", {
+        fileName,
+        bytes: Array.from(bytes),
+      });
+    return downloadBlob(
+      new Blob([bytes], { type: "application/octet-stream" }),
+      fileName,
+    );
+  },
   async pickUploads(): Promise<LocalUpload[]> {
     if (!isDesktop()) throw new Error("此入口需要栖知桌面端。");
     return invoke<LocalUpload[]>("factory_pick_uploads");
@@ -465,17 +523,6 @@ export const factoryApi = {
       (response) => response.blob(),
       { artifact: true },
     );
-    const link = document.createElement("a");
-    const url = URL.createObjectURL(blob);
-    link.href = url;
-    link.download = (fileName.split(/[\\/]/).pop() || "工厂交付物")
-      .replace(/[<>:"|?*]/g, "_")
-      .slice(0, 140);
-    link.rel = "noopener";
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    window.setTimeout(() => URL.revokeObjectURL(url), 60000);
-    return true;
+    return downloadBlob(blob, fileName);
   },
 };

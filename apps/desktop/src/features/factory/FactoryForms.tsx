@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { TaskAuthorization, useTaskAuthorization } from "./TaskAuthorization";
+import type { TaskScope } from "./assembly-model";
 import { factoryApi } from "./factory-client";
 import {
   FactoryAttachments,
@@ -23,17 +25,20 @@ import {
 } from "./factory-model";
 
 export function RequirementForm({
+  seed,
   onClose,
   onCreated,
   refresh,
   stale,
 }: {
+  seed?: TaskScope;
   onClose: () => void;
   onCreated: OpenTask;
   refresh: () => void;
   stale: boolean;
 }) {
   const attachments = useFactoryAttachments();
+  const auth = useTaskAuthorization(seed);
   const [goal, setGoal] = useState(""),
     [manual, setManual] = useState(true),
     action = useAction(refresh);
@@ -50,6 +55,7 @@ export function RequirementForm({
           e.preventDefault();
           if (
             !goal.trim() ||
+            !auth.ready ||
             stale ||
             attachments.busy ||
             attachments.failures.length
@@ -61,9 +67,10 @@ export function RequirementForm({
               taskId: string;
               state: string;
             }>("/v1/tasks", {
-              goal: goal.trim(),
+              goal: auth.goal(goal.trim()),
               acceptanceMode: manual ? "human_review" : "platform_auto",
               sourceSystem: "qizhi_desktop",
+              ...auth.body,
               ...(inputIds.length ? { inputIds } : {}),
             });
             if (!result.taskId)
@@ -89,6 +96,7 @@ export function RequirementForm({
           attachments={attachments}
           disabled={action.busy || stale}
         />
+        <TaskAuthorization auth={auth} disabled={action.busy || stale} />
         <label className="fc-check">
           <input
             type="checkbox"
@@ -113,6 +121,7 @@ export function RequirementForm({
             className="ui-action ui-primary"
             disabled={
               !goal.trim() ||
+              !auth.ready ||
               action.busy ||
               attachments.busy ||
               !!attachments.failures.length ||

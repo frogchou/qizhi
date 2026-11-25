@@ -65,13 +65,49 @@ fn public_status(status: StatusCode) -> Result<(), String> {
 // Only map known operator-facing conditions; a control plane or proxy can return
 // stack traces, internal paths or credentials in any other field.
 fn operation_failure(path: &str, status: StatusCode, payload: &Value) -> Option<String> {
-    if !matches!(status.as_u16(), 403 | 409 | 503) {
+    if !matches!(status.as_u16(), 400 | 403 | 409 | 422 | 503) {
         return None;
     }
     let code = payload.get("code").and_then(Value::as_str).unwrap_or("");
     let legacy = payload.get("message").and_then(Value::as_str).unwrap_or("");
+    if path.starts_with("/v1/factory/assemblies")
+        || path.starts_with("/v1/factory/assembly-resources")
+    {
+        let reasons: Vec<&str> = serde_json::from_str(include_str!(
+            "../../../src/features/factory/assembly-errors.json"
+        ))
+        .ok()?;
+        return reasons
+            .contains(&legacy)
+            .then(|| format!("{legacy}（HTTP {}）", status.as_u16()));
+    }
     let message = if path.starts_with("/v1/factory/agents/") && path.ends_with("/delete") {
+        if path.contains("/versions/")
+            && status == StatusCode::CONFLICT
+            && code == "agent_version_in_use"
+        {
+            let ids: Vec<_> = payload["taskIds"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .filter(|s| route::valid_id(s))
+                .take(20)
+                .collect();
+            let detail = if ids.is_empty() {
+                "请查看此版本的在办工单。".to_owned()
+            } else {
+                format!("关联工单 {}", ids.join("、"))
+            };
+            return Some(format!("此版本仍被未结束的工单使用。{detail}（HTTP 409）"));
+        }
         match (status.as_u16(), code) {
+            (409, "agent_version_busy") if path.contains("/versions/") => {
+                "此版本正在自检或下线，请完成后再删除。"
+            }
+            (503, "agent_version_delete_incomplete") if path.contains("/versions/") => {
+                "节点尚未完成版本撤销，请刷新后重试删除此版本。"
+            }
             (409, "agent_in_use") => {
                 "仍有未结束的工单使用此智能体。请等待工单结束，或先停止相关工单，再刷新重试。"
             }
@@ -174,8 +210,11 @@ async fn json_request(
     let status = response.status();
     if let Err(fallback) = public_status(status) {
         if method == Method::POST
-            && matches!(status.as_u16(), 403 | 409 | 503)
-            && (path.ends_with("/delete") || path.ends_with("/stop"))
+            && matches!(status.as_u16(), 400 | 403 | 409 | 422 | 503)
+            && (path.ends_with("/delete")
+                || path.ends_with("/stop")
+                || path.starts_with("/v1/factory/assemblies")
+                || path.starts_with("/v1/factory/assembly-resources"))
         {
             let payload = bounded_json(&mut response, 16 * 1024)
                 .await
@@ -296,6 +335,17 @@ pub async fn factory_download(
     .map_err(|_| "交付物下载中断。".to_owned())?
 }
 
+#[tauri::command]
+pub async fn factory_save_skill_file(
+    app: tauri::AppHandle,
+    file_name: String,
+    bytes: Vec<u8>,
+) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || download::save_skill_file(app, file_name, bytes))
+        .await
+        .map_err(|_| "随包文件保存中断。".to_owned())?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -310,6 +360,9 @@ mod tests {
         let delete = "/v1/factory/agents/alpha/delete";
         let stop = "/v1/tasks/fixture/stop";
         let private = "private vault or server error";
+        let version_conflict = operation_failure("/v1/factory/agents/alpha/versions/1.0.0/delete", StatusCode::CONFLICT,
+            &serde_json::json!({"code":"agent_version_in_use","taskIds":["task-running","private task"],"debug":private})).unwrap();
+        assert!(version_conflict.contains("task-running") && !version_conflict.contains("private"));
         let found = |path, status, code: &str, message: &str| {
             operation_failure(
                 path,

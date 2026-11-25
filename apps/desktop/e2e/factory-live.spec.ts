@@ -1,4 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { installAssemblyFixture } from "./factory-assembly.fixture";
 
 // This fixture is confined to Playwright. Every observation and write uses the same desktop command surface as a packaged client.
 type Call = {
@@ -10,6 +13,7 @@ type Call = {
   taskId?: string;
   artifactId?: string;
   fileName?: string;
+  bytes?: number[];
 };
 type Fixture = {
   calls: Call[];
@@ -23,6 +27,7 @@ type Fixture = {
     occurredAt: string;
   }[];
   disconnect: boolean;
+  readyCandidate?: boolean;
   failNextAmend?: boolean;
   deleted?: boolean;
   deleting?: boolean;
@@ -218,6 +223,10 @@ async function install(page: Page) {
         };
       if (command === "factory_download") {
         state.calls.push({ method: "DOWNLOAD", ...args });
+        return true;
+      }
+      if (command === "factory_save_skill_file") {
+        state.calls.push({ method: command, ...args });
         return true;
       }
       if (command !== "factory_request") {
@@ -420,6 +429,12 @@ async function install(page: Page) {
           connection,
           metrics: { inputCount: 3, artifactCount: 1, sessionCount: 2 },
         };
+      if (path === "/v1/factory/agents/audit-assistant/status")
+        return {
+          agentId: "audit-assistant",
+          status: state.deleting ? "deleting" : "active",
+          versionCount: 2,
+        };
       if (path === "/v1/factory/agents")
         return readPage(
           agents().filter(
@@ -573,6 +588,7 @@ test.beforeEach(async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/");
   await expect(page.getByText("实时连接", { exact: false })).toBeVisible();
+  await installAssemblyFixture(page);
 });
 test("八栋楼读取真实接口，抽屉覆盖河谷并保留导航", async ({ page }) => {
   const map = page.locator(".fc-plate"),
@@ -590,7 +606,7 @@ test("八栋楼读取真实接口，抽屉覆盖河谷并保留导航", async ({
   for (const [area, expected] of [
     ["intake", "所有渠道的需求"],
     ["control", "采购文件审核"],
-    ["line", "审计助理"],
+    ["line", "装配智能体"],
     ["quality", "采购文件审核"],
     ["runtime", "1.0 MiB"],
     ["monitor", "已收到审核实例心跳"],
@@ -607,6 +623,470 @@ test("八栋楼读取真实接口，抽屉覆盖河谷并保留导航", async ({
   await panel.getByRole("button", { name: "打开栖知知识库" }).click();
   await expect(page.locator(".knowledge-page")).toBeVisible();
   expect(errors).toEqual([]);
+});
+test("导入 Skill 文件夹可核对相对路径，复制新版本保留附件并下载原字节", async ({
+  page,
+}, testInfo) => {
+  const fixture = testInfo.outputPath("报价规则");
+  await mkdir(join(fixture, "examples"), { recursive: true });
+  await writeFile(join(fixture, "SKILL.md"), "# 比较报价");
+  await writeFile(join(fixture, "examples", "币种.csv"), "currency\nCNY");
+  await page.locator('[data-area="line"]').click();
+  await page.getByRole("button", { name: "精选资源管理" }).click();
+  const library = page.getByRole("dialog", { name: "精选资源管理" });
+  await library.getByRole("button", { name: "登记资源", exact: true }).click();
+  await library.getByLabel("资源名称").fill("比价规则");
+  await library.getByLabel("资源标识").fill("compare-quotes");
+  await library.getByLabel("资源用途").fill("核对币种");
+  await library.getByLabel("选择资料文件夹").setInputFiles(fixture);
+  await expect(
+    library.getByRole("textbox", { name: "Skill 正文", exact: true }),
+  ).toHaveValue("# 比较报价");
+  await expect(
+    library.getByText("examples/币种.csv", { exact: true }),
+  ).toBeVisible();
+  await library.getByLabel("选择辅助文件").setInputFiles([
+    {
+      name: "table.bin",
+      mimeType: "application/octet-stream",
+      buffer: Buffer.from([0, 1, 254]),
+    },
+    { name: "omit.txt", mimeType: "text/plain", buffer: Buffer.from("略") },
+  ]);
+  await library
+    .getByRole("button", { name: "移除 omit.txt", exact: true })
+    .click();
+  await library.getByRole("button", { name: "保存资源版本" }).click();
+  const row = library.getByRole("article").filter({ hasText: "比价规则" });
+  await row.getByRole("button", { name: "查看版本内容" }).click();
+  const detail = page.getByRole("dialog", { name: "资源版本内容" });
+  await detail.getByRole("button", { name: "查看 examples/币种.csv" }).click();
+  await expect(
+    detail.locator("pre").filter({ hasText: "currency" }),
+  ).toContainText("CNY");
+  await page.screenshot({
+    path: testInfo.outputPath("skill-package-files.png"),
+  });
+  await detail.getByRole("button", { name: "下载 table.bin" }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        window.factoryLiveFixture.calls.find(
+          (c) => c.method === "factory_save_skill_file",
+        ),
+      ),
+    )
+    .toMatchObject({ fileName: "table.bin", bytes: [0, 1, 254] });
+  await page.keyboard.press("Escape");
+  await expect(detail).toHaveCount(0);
+  await expect(library).toBeVisible();
+  await row.getByRole("button", { name: "登记新版本" }).click();
+  await library.getByLabel("资源版本").fill("1.1.0");
+  await library.getByRole("button", { name: "保存资源版本" }).click();
+  const bodies = await page.evaluate(() =>
+    window.factoryLiveFixture.calls
+      .filter(
+        (c) =>
+          c.method === "POST" && c.path === "/v1/factory/assembly-resources",
+      )
+      .map((c) => c.body),
+  );
+  expect(bodies).toHaveLength(2);
+  expect((bodies[1] as { files: unknown[] }).files).toEqual([
+    { path: "examples/币种.csv", contentBase64: "Y3VycmVuY3kKQ05Z" },
+    { path: "table.bin", contentBase64: "AAH+" },
+  ]);
+  expect(bodies[1]).toMatchObject({
+    version: "1.1.0",
+    content: "# 比较报价",
+    files: [
+      { path: "examples/币种.csv", contentBase64: "Y3VycmVuY3kKQ05Z" },
+      { path: "table.bin", contentBase64: "AAH+" },
+    ],
+  });
+});
+test("生产线草稿保留手工输入，明确选用建议与多个真实知识库", async ({
+  page,
+}) => {
+  await page.locator('[data-area="line"]').click();
+  const panel = page.locator(".live-inspector");
+  await expect(
+    panel.getByRole("heading", { name: "装配智能体" }),
+  ).toBeVisible();
+  await panel.getByLabel("装配草稿").selectOption("quote-draft");
+  await panel
+    .getByLabel("工作委托", { exact: true })
+    .fill("保留人工调整的结算日期");
+  await panel.getByRole("button", { name: "管理智能体", exact: true }).click();
+  const manager = page.getByRole("dialog", { name: "管理智能体" });
+  await expect(manager.getByRole("button", { name: /审计助理/ })).toBeVisible();
+  await manager.getByRole("button", { name: "关闭窗口" }).click();
+  await expect(panel.getByLabel("工作委托", { exact: true })).toHaveValue(
+    "保留人工调整的结算日期",
+  );
+  await panel.getByRole("button", { name: "资源与权限", exact: true }).click();
+  await expect(
+    panel.getByText("RAGFlow 已连接", { exact: false }),
+  ).toBeVisible();
+  const suggested = panel.getByRole("checkbox", { name: /报价规范/ });
+  await expect(suggested).not.toBeChecked();
+  await suggested.check();
+  await panel.getByRole("checkbox", { name: /产品资料/ }).check();
+  await panel.getByRole("checkbox", { name: /采购报价/ }).check();
+  await panel.getByRole("button", { name: "保存草稿", exact: true }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          window.factoryLiveFixture.calls
+            .filter((c) => c.path?.endsWith("/save"))
+            .at(-1)?.body,
+      ),
+    )
+    .toMatchObject({
+      revision: 1,
+      description: "保留人工调整的结算日期",
+      config: {
+        skills: ["quote-rules@1.0.0"],
+        datasetIds: ["products", "prices"],
+        mcpTools: [],
+      },
+    });
+  await panel.getByRole("button", { name: "工作说明", exact: true }).click();
+  await panel.getByLabel("给装配助手的消息").fill("按最近生效日");
+  await panel.getByRole("button", { name: "发送给装配助手" }).click();
+  await expect(
+    panel.getByText("遇到同币种的两份有效报价，应选哪份？"),
+  ).toBeVisible();
+});
+test("用指定候选和附件试跑，答复后人工认可并按同一快照发布", async ({
+  page,
+}, testInfo) => {
+  await page.locator('[data-area="line"]').click();
+  const panel = page.locator(".live-inspector");
+  await panel.getByLabel("装配草稿").selectOption("quote-draft");
+  await panel.getByRole("button", { name: "候选与试跑", exact: true }).click();
+  await panel.getByRole("button", { name: "查看源码与差异" }).click();
+  const source = page.getByRole("dialog", { name: "候选源码与差异" });
+  await expect(source).toContainText("return amount * rate;");
+  await source.getByRole("button", { name: "版本差异" }).click();
+  await expect(source).toContainText("return amount;");
+  await source.getByRole("button", { name: "关闭窗口" }).click();
+  await panel.getByLabel("样例需求").fill("试跑五月报价");
+  await panel.getByRole("button", { name: "上传本地文件" }).click();
+  await panel.getByRole("button", { name: "启动试跑" }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          window.factoryLiveFixture.calls.find(
+            (c) => c.path?.endsWith("/runs") && c.method === "POST",
+          )?.body,
+      ),
+    )
+    .toMatchObject({
+      candidateId: "sealed-one",
+      inputIds: ["local-upload"],
+      goal: "试跑五月报价",
+    });
+  await panel.getByRole("button", { name: /打开试跑工单/ }).click();
+  await panel.getByLabel("currency").fill("CNY");
+  await panel.getByRole("button", { name: "提交答复并继续" }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          window.factoryLiveFixture.calls.find((c) =>
+            c.path?.endsWith("/respond"),
+          )?.body,
+      ),
+    )
+    .toMatchObject({ response: { currency: "CNY" } });
+  await panel.getByRole("button", { name: "交付成果" }).click();
+  const artifact = panel.getByRole("button", { name: "下载 核对结果.txt" });
+  await artifact.click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          window.factoryLiveFixture.calls.find(
+            (c) => c.method === "DOWNLOAD" && c.taskId === "trial-order",
+          )?.artifactId,
+      ),
+    )
+    .toBe("actual-artifact");
+  await artifact.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath("trial-delivery.png") });
+  await panel.getByRole("button", { name: "返回上一级" }).click();
+  await expect(panel.getByText("生效日边界", { exact: false })).toBeVisible();
+  await panel.getByText("试跑工具回执", { exact: true }).click();
+  await expect(
+    panel.getByText("preview-adapter", { exact: true }),
+  ).toBeVisible();
+  await panel.getByRole("button", { name: "认可此次试跑" }).click();
+  await panel.getByRole("button", { name: "提交发布审核" }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          window.factoryLiveFixture.calls.find((c) =>
+            c.path?.endsWith("/publish"),
+          )?.body,
+      ),
+    )
+    .toMatchObject({ candidateId: "sealed-one", runId: "run-one" });
+});
+test("从已上线候选新建正式工单，带入主能力和知识库并保留写入授权选择", async ({
+  page,
+}) => {
+  await page.evaluate(() => {
+    window.factoryLiveFixture.readyCandidate = true;
+  });
+  await page.locator('[data-area="line"]').click();
+  const panel = page.locator(".live-inspector");
+  await panel.getByLabel("装配草稿").selectOption("quote-draft");
+  await panel.getByRole("button", { name: "候选与试跑", exact: true }).click();
+  await panel.getByRole("button", { name: "用此版本新建需求" }).click();
+  const form = page.getByRole("dialog", { name: "新建需求" });
+  await expect(
+    form.getByRole("checkbox", { name: /正式报价核对/ }),
+  ).toBeChecked();
+  await expect(form.getByRole("checkbox", { name: /检索资料/ })).toBeChecked();
+  await expect(form.getByRole("checkbox", { name: /产品资料/ })).toBeChecked();
+  await expect(
+    form.getByRole("checkbox", { name: /发送通知/ }),
+  ).not.toBeChecked();
+  await form.getByLabel("需求内容").fill("核对七月报价");
+  await form.getByRole("button", { name: "提交并跟随" }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          window.factoryLiveFixture.calls.find(
+            (c) => c.path === "/v1/tasks" && c.method === "POST",
+          )?.body,
+      ),
+    )
+    .toMatchObject({
+      authorizedCapabilities: [
+        "enterprise.quote.reconcile",
+        "knowledge.retrieve",
+      ],
+      authorizedDatasetIds: ["products"],
+      authorizedMcpTools: [],
+    });
+});
+test("正式工单只有勾选后才授权外部效果，并记录目的地", async ({ page }) => {
+  await page.getByRole("button", { name: /新建需求/ }).click();
+  const form = page.getByRole("dialog", { name: "新建需求" });
+  await form.getByLabel("需求内容").fill("核对报价并发给采购");
+  await form.getByText("本次任务授权", { exact: true }).click();
+  await form.getByRole("checkbox", { name: "明确指定本次授权" }).check();
+  await form.getByRole("checkbox", { name: /发送通知/ }).check();
+  await form.getByRole("checkbox", { name: /采购报价/ }).check();
+  await expect(form.getByRole("button", { name: "提交并跟随" })).toBeDisabled();
+  await form.getByLabel("对外写入的目的地或接收方").fill("采购一组");
+  await form.getByRole("button", { name: "提交并跟随" }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          window.factoryLiveFixture.calls.find(
+            (c) => c.path === "/v1/tasks" && c.method === "POST",
+          )?.body,
+      ),
+    )
+    .toMatchObject({
+      goal: expect.stringContaining("采购一组"),
+      authorizedMcpTools: ["send@1.0.0"],
+      authorizedDatasetIds: ["prices"],
+    });
+});
+test("中台重连带来新修订时，合并保留人工改动及服务器新字段", async ({
+  page,
+}) => {
+  const panel = page.locator(".live-inspector");
+  await page.locator('[data-area="line"]').click();
+  await panel.getByLabel("装配草稿").selectOption("quote-draft");
+  await panel
+    .getByRole("textbox", { name: "工作委托", exact: true })
+    .fill("人工增加月底核验");
+  await page.evaluate(() => {
+    window.factoryLiveFixture.disconnect = true;
+  });
+  await expect(panel.getByText(/中台连接已中断/)).toBeVisible();
+  await expect(panel.getByRole("button", { name: "保存草稿" })).toBeDisabled();
+  await page.evaluate(() => {
+    (
+      window as unknown as { amendFactoryDraft: () => void }
+    ).amendFactoryDraft();
+    window.factoryLiveFixture.disconnect = false;
+  });
+  await panel.getByRole("button", { name: "合并我的改动" }).click();
+  await panel.getByRole("button", { name: "保存草稿" }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          window.factoryLiveFixture.calls.find((c) => c.path?.endsWith("/save"))
+            ?.body,
+      ),
+    )
+    .toMatchObject({
+      revision: 2,
+      description: "人工增加月底核验",
+      config: { workflow: "中台新增汇率校验" },
+    });
+});
+test("资源登记与下架使用精确版本，删除一个智能体版本保留另一版", async ({
+  page,
+}) => {
+  await page.locator('[data-area="line"]').click();
+  const panel = page.locator(".live-inspector");
+  await panel.getByRole("button", { name: "精选资源管理" }).click();
+  const library = page.getByRole("dialog", { name: "精选资源管理" });
+  await library.getByRole("button", { name: "登记资源", exact: true }).click();
+  await library.getByLabel("资源名称").fill("税率规范");
+  await library.getByLabel("资源标识").fill("tax-rules");
+  await library.getByLabel("资源用途").fill("校验税率");
+  await library.getByLabel("Skill 正文", { exact: true }).fill("# 核对税率");
+  await library.getByRole("button", { name: "保存资源版本" }).click();
+  const row = library.getByRole("article").filter({ hasText: "税率规范" });
+  await row.getByRole("button", { name: "下架" }).click();
+  await library.getByRole("button", { name: "确认变更" }).click();
+  await expect(row).toContainText("已下架");
+  await row.getByRole("button", { name: "登记新版本" }).click();
+  await expect(
+    library.getByRole("textbox", { name: "Skill 正文", exact: true }),
+  ).toHaveValue("# 核对税率");
+  await library.getByLabel("资源版本").fill("1.1.0");
+  await library
+    .getByRole("textbox", { name: "Skill 正文", exact: true })
+    .fill("# 按生效日核对税率");
+  await library.getByRole("button", { name: "保存资源版本" }).click();
+  await expect(row).toHaveCount(2);
+  await library.getByRole("button", { name: "关闭窗口" }).click();
+  await panel.getByRole("button", { name: "管理智能体" }).click();
+  const manager = page.getByRole("dialog", { name: "管理智能体" });
+  await manager.getByLabel("版本状态").selectOption("");
+  await manager.getByRole("button", { name: /v0.9.0/ }).click();
+  await manager
+    .getByRole("button", { name: "删除此版本", exact: true })
+    .click();
+  await manager
+    .getByRole("button", { name: "确认删除此版本", exact: true })
+    .click();
+  await expect(
+    manager.getByText(/已删除 audit-assistant v0.9.0/),
+  ).toBeVisible();
+  await manager.getByRole("button", { name: "返回上一级" }).click();
+  await manager.getByLabel("版本状态").selectOption("");
+  await expect(manager.getByRole("button", { name: /v1.0.0/ })).toBeVisible();
+  await expect(manager.getByRole("button", { name: /v0.9.0/ })).toHaveCount(0);
+});
+test("桌面与窄屏装配窗口可读取资源、独立滚动并保持正常布局", async ({
+  page,
+}, testInfo) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  page.on("console", (entry) => {
+    if (["error", "warning"].includes(entry.type())) errors.push(entry.text());
+  });
+  await page.setViewportSize({ width: 1280, height: 820 });
+  await page.locator('[data-area="line"]').click();
+  const panel = page.locator(".live-inspector");
+  await panel.getByLabel("装配草稿").selectOption("quote-draft");
+  await panel.getByRole("button", { name: "资源与权限", exact: true }).click();
+  await expect(panel.getByRole("checkbox", { name: /采购报价/ })).toBeVisible();
+  for (const width of [1280, 412]) {
+    await page.setViewportSize({ width, height: 820 });
+    await expect(page).toHaveTitle(/栖知|qizhi/i);
+    await expect(page.locator("vite-error-overlay")).toHaveCount(0);
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () => document.documentElement.scrollWidth <= window.innerWidth,
+        ),
+      )
+      .toBe(true);
+    await expect(
+      panel.getByRole("button", { name: "管理智能体" }),
+    ).toBeVisible();
+    await panel.getByRole("checkbox", { name: /采购报价/ }).check();
+    await panel.getByRole("checkbox", { name: /产品资料/ }).check();
+    await expect(
+      panel.getByRole("checkbox", { name: /采购报价/ }),
+    ).toBeChecked();
+    if (width === 1280)
+      await panel.evaluate((el) => {
+        el.scrollTop = 0;
+      });
+    else
+      await panel
+        .getByRole("checkbox", { name: /采购报价/ })
+        .scrollIntoViewIfNeeded();
+    await page.screenshot({
+      path: testInfo.outputPath("assembly-selection-" + width + ".png"),
+    });
+    await panel.getByRole("button", { name: "管理智能体" }).click();
+    const manager = page.getByRole("dialog", { name: "管理智能体" });
+    await expect(
+      manager.getByRole("button", { name: /审计助理/ }),
+    ).toBeVisible();
+    await page.screenshot({
+      path: testInfo.outputPath("version-manager-" + width + ".png"),
+    });
+    await manager.getByRole("button", { name: "关闭窗口" }).click();
+    await expect(
+      panel.getByRole("checkbox", { name: /采购报价/ }),
+    ).toBeChecked();
+    await panel.evaluate((el) => {
+      el.scrollTop = 0;
+    });
+  }
+  expect(errors).toEqual([]);
+});
+test("处理连接设置后继续未保存的手工委托", async ({ page }) => {
+  const panel = page.locator(".live-inspector");
+  await page.locator('[data-area="line"]').click();
+  await panel.getByLabel("装配草稿").selectOption("quote-draft");
+  await panel
+    .getByRole("textbox", { name: "工作委托", exact: true })
+    .fill("继续在原草稿编辑的业务规则");
+  await page.getByRole("button", { name: "中台实况" }).click();
+  await page
+    .getByRole("navigation", { name: "主导航" })
+    .getByRole("button", { name: "智能工厂" })
+    .click();
+  await page.locator('[data-area="line"]').click();
+  await expect(
+    panel.getByRole("textbox", { name: "工作委托", exact: true }),
+  ).toHaveValue("继续在原草稿编辑的业务规则");
+});
+test("从新委托生成时保护重复请求并能停止服务端操作", async ({ page }) => {
+  const panel = page.locator(".live-inspector");
+  await page.locator('[data-area="line"]').click();
+  await panel
+    .getByRole("textbox", { name: "工作委托", exact: true })
+    .fill("生成供应商报价核对流程");
+  await panel.getByRole("button", { name: "发送给装配助手" }).click();
+  await expect(panel.getByText(/两份有效报价/)).toBeVisible();
+  await panel.getByRole("button", { name: "候选与试跑", exact: true }).click();
+  const generate = panel.getByRole("button", { name: "生成候选包" });
+  await generate.click();
+  await expect(panel.getByRole("alert")).toContainText("请重试");
+  await generate.click();
+  await expect(panel.getByText("校验候选源码")).toBeVisible();
+  await panel.getByRole("button", { name: "停止操作" }).click();
+  await expect(panel.getByText("用户已停止操作")).toBeVisible();
+  const requests = await page.evaluate(() =>
+    window.factoryLiveFixture.calls
+      .filter((c) => c.path?.endsWith("/generate"))
+      .map((c) => c.body),
+  );
+  expect(requests).toHaveLength(2);
+  expect(requests[0]?.requestId).toBeTruthy();
+  expect(requests[1]).toEqual(requests[0]);
 });
 test("验收传真实轮次，交付按任务和制品编号下载，新需求记录来源", async ({
   page,
@@ -659,8 +1139,11 @@ test("验收传真实轮次，交付按任务和制品编号下载，新需求�
 });
 test("生产线托管新建、审核上线、下线和版本升级", async ({ page }) => {
   const panel = page.locator(".live-inspector"),
-    dialog = page.getByRole("dialog");
+    dialog = page.getByRole("dialog", {
+      name: /^(新建智能体|升级智能体版本)$/,
+    });
   await page.locator('[data-area="line"]').click();
+  await panel.getByRole("button", { name: "管理智能体" }).click();
   await panel.getByRole("button", { name: "新建智能体" }).click();
   await dialog.getByLabel("智能体标识").fill("test-writer");
   await dialog.getByLabel("版本号").fill("1.0.0");
@@ -699,10 +1182,11 @@ test("手机宽度的实况抽屉可滚动，登记已安装的包使用服务�
     panel = page.locator(".live-inspector"),
     before = await map.boundingBox();
   await page.locator('[data-area="line"]').click();
+  await panel.getByRole("button", { name: "管理智能体" }).click();
   await expect(panel.getByRole("button", { name: /审计助理/ })).toBeVisible();
   expect(await map.boundingBox()).toEqual(before);
   await panel.getByRole("button", { name: "新建智能体" }).click();
-  const dialog = page.getByRole("dialog");
+  const dialog = page.getByRole("dialog", { name: "新建智能体" });
   await dialog.getByLabel("登记方式").selectOption("package");
   await dialog
     .getByLabel("已安装但尚未登记的包")
@@ -831,11 +1315,13 @@ test("接待页按渠道浏览，键盘可切换；中台与质检默认展示�
   await expect(panel.getByText("采购文件审核", { exact: true })).toBeVisible();
   await page.keyboard.press("Escape");
   await page.locator('[data-area="line"]').click();
+  await panel.getByRole("button", { name: "管理智能体" }).click();
   await expect(panel.getByLabel("版本状态")).toHaveValue("ready");
   await expect(panel.getByText(/v1.0.0/)).toBeVisible();
   await expect(panel.getByText(/v0.9.0/)).toHaveCount(0);
   await panel.getByLabel("版本状态").selectOption("");
   await expect(panel.getByText(/v0.9.0/)).toBeVisible();
+  await page.keyboard.press("Escape");
   await page.keyboard.press("Escape");
   await page.locator('[data-area="quality"]').click();
   await expect(panel.getByLabel("质检结果")).toHaveValue("pending_quality");
@@ -898,6 +1384,7 @@ test("删除全部版本用智能体标识，可刷新在用冲突，撤销失�
     window.factoryLiveFixture.blockDeletion = true;
   });
   await page.locator('[data-area="line"]').click();
+  await panel.getByRole("button", { name: "管理智能体" }).click();
   await panel.getByRole("button", { name: /审计助理/ }).click();
   await panel
     .getByRole("button", { name: "删除智能体（全部版本）", exact: true })
@@ -955,6 +1442,7 @@ test("删除全部版本用智能体标识，可刷新在用冲突，撤销失�
   await panel.getByRole("button", { name: "返回上一级" }).click();
   await panel.getByLabel("版本状态").selectOption("");
   await expect(panel.getByText("没有符合条件的智能体版本")).toBeVisible();
+  await page.keyboard.press("Escape");
   await page.keyboard.press("Escape");
   await page.locator('[data-area="delivery"]').click();
   await expect(

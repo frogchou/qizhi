@@ -4,7 +4,6 @@ import { areas, type Area } from "./simulation";
 import { useFactoryFeed, useFactoryRead } from "./factory-feed";
 import { LiveCampus, flowLegend } from "./LiveCampus";
 import {
-  AgentCatalog,
   AgentDetail,
   Assets,
   Deliveries,
@@ -16,6 +15,8 @@ import {
 } from "./FactoryAreas";
 import { FactoryTaskDetail } from "./FactoryTaskDetail";
 import { RequirementForm, ReleaseForm } from "./FactoryForms";
+import { AssemblyWorkspace } from "./AssemblyWorkspace";
+import type { TaskScope } from "./assembly-model";
 import {
   ContextHelp,
   FactoryGuide,
@@ -39,7 +40,7 @@ type Location =
   | { kind: "task"; link: TaskLink }
   | { kind: "agent"; id: string; version: string };
 type ModalState =
-  | { kind: "new" }
+  | { kind: "new"; scope?: TaskScope }
   | { kind: "release"; agent: Agent | null }
   | { kind: "guide" };
 const nameForArea = (id: Area) =>
@@ -64,6 +65,7 @@ export function LiveFactoryPage({
   const feed = useFactoryFeed();
   const [history, setHistory] = useState<Location[]>([]),
     [modal, setModal] = useState<ModalState | null>(null);
+  const [lineVisited, setLineVisited] = useState(false);
   const readBlocked = feed.state !== "live";
   const view = history[history.length - 1],
     open = Boolean(view),
@@ -101,7 +103,11 @@ export function LiveFactoryPage({
     if (!open || modal) return;
     // A successful server action can remove the focused control before the next keypress.
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !event.defaultPrevented) {
+      if (
+        event.key === "Escape" &&
+        !event.defaultPrevented &&
+        !document.querySelector("dialog[open]")
+      ) {
         event.preventDefault();
         setHistory([]);
       }
@@ -110,8 +116,10 @@ export function LiveFactoryPage({
     return () => document.removeEventListener("keydown", onKey);
   }, [open, modal]);
   const overview = () => setHistory([]);
-  const openArea = (area: Area, filter?: string) =>
+  const openArea = (area: Area, filter?: string) => {
+    if (area === "line") setLineVisited(true);
     setHistory([{ kind: "building", area, filter }]);
+  };
   function push(next: Location) {
     setHistory((old) =>
       old.length && locationKey(old[old.length - 1]) === locationKey(next)
@@ -206,13 +214,7 @@ export function LiveFactoryPage({
           />
         );
       case "line":
-        return (
-          <AgentCatalog
-            revision={feed.revision}
-            onAgent={onAgent}
-            onRelease={() => setModal({ kind: "release", agent: null })}
-          />
-        );
+        return null;
       case "quality":
         return <QualityDesk {...areaProps} initialFilter={view.filter} />;
       case "assets":
@@ -325,6 +327,7 @@ export function LiveFactoryPage({
             id="factory-live-inspector"
             aria-label="工厂详情面板"
             className="fc-inspector live-inspector"
+            data-assembly={selectedArea === "line"}
             data-open={open}
             inert={!open}
             aria-hidden={!open}
@@ -354,6 +357,17 @@ export function LiveFactoryPage({
             <div className="live-drawer-content" key={viewKey}>
               {contents()}
             </div>
+            {lineVisited && (
+              <AssemblyWorkspace
+                active={selectedArea === "line"}
+                endpoint={endpoint}
+                revision={feed.revision}
+                stale={readBlocked}
+                onChange={feed.refresh}
+                onTask={onTask}
+                onNewTask={(scope) => setModal({ kind: "new", scope })}
+              />
+            )}
           </aside>
         </div>
         <div className="fc-tools">
@@ -403,6 +417,7 @@ export function LiveFactoryPage({
       </footer>
       {modal?.kind === "new" && (
         <RequirementForm
+          seed={modal.scope}
           stale={readBlocked}
           onClose={() => setModal(null)}
           onCreated={onTask}

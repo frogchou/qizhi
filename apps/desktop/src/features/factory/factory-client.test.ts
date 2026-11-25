@@ -23,12 +23,48 @@ describe("factory desktop transport", () => {
       ["GET", "/v1/factory/agents/a/delete"],
       ["DELETE", "/v1/factory/agents/a/delete"],
       ["POST", "/v1/factory/agents/a/delete?force=1"],
-      ["POST", "/v1/factory/agents/a/versions/1.0.0/delete"],
+      ["POST", "/v1/factory/agents/a/versions/1.0.0/delete?force=1"],
       ["POST", "/v1/factory/agents/%2e%2e/delete"],
       ["GET", "/v1/factory/agents/%2f/status"],
       ["GET", "/v1/tasks/demo-id/stop"],
     ])
       expect(validFactoryRoute(method, path)).toBe(false);
+  });
+  it("admits only the documented method and identifiers for assembly work", () => {
+    const root = "/v1/factory/assemblies";
+    for (const [method, path] of [
+      ["GET", root],
+      ["GET", root + "/options"],
+      ["GET", root + "/draft"],
+      ["GET", root + "/draft/candidates/snapshot/source"],
+      ["POST", root],
+      ["POST", root + "/draft/save"],
+      ["POST", root + "/draft/suggest"],
+      ["POST", root + "/draft/generate"],
+      ["POST", root + "/draft/delete"],
+      ["POST", root + "/draft/runs"],
+      ["POST", root + "/draft/operations/op/stop"],
+      ["POST", root + "/draft/runs/trial/accept"],
+      ["POST", root + "/draft/publish"],
+      ["GET", "/v1/tasks/capability-options"],
+      ["GET", "/v1/factory/assembly-resources"],
+      ["POST", "/v1/factory/assembly-resources"],
+      ["GET", "/v1/factory/assembly-resources/skill/rules/1.2.0"],
+      ["POST", "/v1/factory/assembly-resources/mcp/read/1.0.0/state"],
+      ["POST", "/v1/factory/agents/qa/versions/1.2.0%2Bnotes/delete"],
+    ])
+      expect(validFactoryRoute(method, path), path).toBe(true);
+    for (const [method, path] of [
+      ["POST", root + "/options"],
+      ["GET", root + "/draft/save"],
+      ["POST", root + "/draft/publish?force=1"],
+      ["POST", root + "/../save"],
+      ["GET", root + "/draft/candidates/%2F/source"],
+      ["POST", "/v1/factory/assembly-resources/unknown/read/1.0/state"],
+      ["POST", "/v1/factory/assembly-resources/skill/rules/1.2.0"],
+      ["POST", root + "/draft/candidates/snapshot/source"],
+    ])
+      expect(validFactoryRoute(method, path), path).toBe(false);
   });
   it("reads masks and performs allowlisted requests through IPC without an address or token", async () => {
     const invoke = vi.fn().mockResolvedValue({

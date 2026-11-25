@@ -14,6 +14,7 @@ import {
 } from "./FactoryControls";
 import { runtimeHelpId, runtimeName } from "./factory-help";
 import { factoryApi } from "./factory-client";
+import { AssemblyReview } from "./AssemblyTrials";
 import {
   bytes,
   stateName,
@@ -376,6 +377,7 @@ export function AgentDetail({
   onRelease,
   onChange,
   stale,
+  onBased,
 }: {
   id: string;
   version: string;
@@ -384,6 +386,7 @@ export function AgentDetail({
   onRelease: (agent: Agent) => void;
   onChange: () => void;
   stale: boolean;
+  onBased?: (agent: Agent) => Promise<void>;
 }) {
   const read = useFactoryRead<Page<Agent>>(
     readPath("agents", { agentId: id, version, limit: 1 }),
@@ -391,7 +394,9 @@ export function AgentDetail({
   );
   const agent = read.data?.items[0],
     action = useAction(onChange);
-  const [confirm, setConfirm] = useState<"offline" | "delete" | null>(null);
+  const [confirm, setConfirm] = useState<
+    "offline" | "delete" | "version" | null
+  >(null);
   const [removed, setRemoved] = useState(false),
     [deleteAttempted, setDeleteAttempted] = useState(false);
   const refreshAgent = () => {
@@ -402,6 +407,11 @@ export function AgentDetail({
     resourceVersion = encodeURIComponent(version);
   const disabled = action.busy || stale || Boolean(read.error);
   const deleting = agent?.status === "deleting";
+  const identity = useFactoryRead<{ status: string }>(
+    deleting ? `/v1/factory/agents/${resourceId}/status` : null,
+    revision,
+  );
+  const deletingAll = identity.data?.status === "deleting";
   async function removeAgent() {
     setDeleteAttempted(true);
     try {
@@ -463,7 +473,25 @@ export function AgentDetail({
               </li>
             ))}
           </ul>
+          {agent.integrityIssue === "assembly_digest_mismatch" && (
+            <p className="live-notice error" role="alert">
+              节点包内容与发布摘要不一致。请保存新候选并重新试跑。
+            </p>
+          )}
+          {agent.assembly && (
+            <AssemblyReview record={agent.assembly} onTask={onTask} />
+          )}
           <div className="fc-actions">
+            {onBased && agent.assembly && !deleting && (
+              <button
+                type="button"
+                className="ui-action ui-small"
+                disabled={disabled || Boolean(confirm)}
+                onClick={() => void action.run(() => onBased(agent))}
+              >
+                基于此版本装配
+              </button>
+            )}
             <button
               className="ui-action ui-small"
               disabled={disabled || deleting || confirm !== null}
@@ -474,7 +502,11 @@ export function AgentDetail({
             {canApprove && (
               <button
                 className="ui-action ui-primary"
-                disabled={disabled || confirm !== null}
+                disabled={
+                  disabled ||
+                  confirm !== null ||
+                  agent.integrityIssue === "assembly_digest_mismatch"
+                }
                 onClick={() =>
                   void action.run(async () => {
                     await factoryApi.post(
@@ -502,6 +534,79 @@ export function AgentDetail({
               </button>
             )}
           </div>
+          {deleting && <ReadNotice read={identity} />}
+          {(!deleting || identity.data?.status === "active") && !confirm && (
+            <button
+              type="button"
+              className="ui-action ui-small ui-danger live-danger-link"
+              disabled={disabled}
+              onClick={() => setConfirm("version")}
+            >
+              {deleting ? "重试删除此版本" : "删除此版本"}
+            </button>
+          )}
+          {confirm === "version" && (
+            <section
+              aria-label="删除指定版本确认"
+              className="live-confirm live-danger-confirm"
+            >
+              <strong>
+                删除 {id} v{version}？
+              </strong>
+              <p>
+                中台将检查绑定到该版本的工单和调用，撤销该版本在节点的启动资格。
+              </p>
+              <div className="fc-actions">
+                <button
+                  type="button"
+                  className="ui-action ui-danger ui-small"
+                  disabled={disabled}
+                  onClick={() =>
+                    void action.run(async () => {
+                      try {
+                        const result = await factoryApi.post<{
+                          agentId: string;
+                          version: string;
+                          status: string;
+                        }>(
+                          `/v1/factory/agents/${resourceId}/versions/${resourceVersion}/delete`,
+                          {},
+                        );
+                        if (
+                          result.agentId === id &&
+                          result.status === "deleting"
+                        ) {
+                          setConfirm(null);
+                          return "智能体正在撤销全部版本，请查看最新状态。";
+                        }
+                        if (
+                          result.agentId !== id ||
+                          result.version !== version ||
+                          result.status !== "deleted"
+                        )
+                          throw Error("中台未确认指定版本已删除，请刷新核对。");
+                        setRemoved(true);
+                        setConfirm(null);
+                        return "已删除 " + id + " v" + version + "。";
+                      } finally {
+                        read.retry();
+                      }
+                    })
+                  }
+                >
+                  确认删除此版本
+                </button>
+                <button
+                  type="button"
+                  className="ui-action ui-small"
+                  disabled={action.busy}
+                  onClick={() => setConfirm(null)}
+                >
+                  取消
+                </button>
+              </div>
+            </section>
+          )}
           {confirm === "offline" && agent.status === "ready" && (
             <div className="live-confirm">
               <p>
@@ -543,7 +648,9 @@ export function AgentDetail({
           disabled={disabled}
           onClick={() => setConfirm("delete")}
         >
-          {deleting ? "重试删除智能体（全部版本）" : "删除智能体（全部版本）"}
+          {deletingAll
+            ? "重试删除智能体（全部版本）"
+            : "删除智能体（全部版本）"}
         </button>
       )}
       {!removed && confirm === "delete" && (agent || deleteAttempted) && (
@@ -553,6 +660,7 @@ export function AgentDetail({
         >
           <strong>删除智能体 {agent?.displayName ?? id} 的全部版本？</strong>
           <small>智能体标识 {id}</small>
+          <VersionImpact id={id} revision={revision} />
           <p>
             确认后中台将移除该智能体所有版本的登记并撤销节点发布。历史工单、执行记录和已归档的成果保留。在用实例或未结束的绑定工单会阻止删除。
           </p>
@@ -596,6 +704,32 @@ export function AgentDetail({
           version={version}
           onTask={onTask}
         />
+      )}
+    </>
+  );
+}
+function VersionImpact({ id, revision }: { id: string; revision: number }) {
+  const [offset, setOffset] = useState(0);
+  const read = useFactoryRead<Page<Agent>>(
+    readPath("agents", { agentId: id, offset, limit: pageSize }),
+    revision,
+  );
+  return (
+    <>
+      <ReadNotice read={read} />
+      {read.data && (
+        <>
+          <p>
+            涉及 {read.data.total} 个登记版本 ·{" "}
+            {read.data.items.map((a) => "v" + a.version).join("、")}
+          </p>
+          <Pagination
+            total={read.data.total}
+            limit={pageSize}
+            offset={offset}
+            onChange={setOffset}
+          />
+        </>
       )}
     </>
   );

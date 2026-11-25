@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { factoryApi } from "./factory-client";
 import { FactoryDelivery } from "./FactoryDelivery";
+import { FactoryInteraction } from "./FactoryInteraction";
+import { ReceiptDetails } from "./AssemblyReceipts";
 import { RevisionForm, type RevisionDecision } from "./FactoryRevisionForm";
 import {
   ActionNotice,
@@ -174,14 +176,6 @@ function Plan({ detail, onAgent }: { detail: TaskDetail; onAgent: OpenAgent }) {
           ))}
         </>
       ) : null}
-      {detail.interactions
-        ?.filter((i) => i.state === "pending")
-        .map((i) => (
-          <div className="live-notice" key={i.id}>
-            <strong>{i.title}</strong>
-            <p>{i.prompt}</p>
-          </div>
-        ))}
     </>
   );
 }
@@ -436,6 +430,46 @@ function Timeline({ detail }: { detail: TaskDetail }) {
         </article>
       ))}
       {!detail.attempts.length && <Empty>尚无执行实例</Empty>}
+      <AssemblyTrace detail={detail} />
+      {!!detail.capabilityCalls?.length && (
+        <section>
+          <h3>业务能力调用</h3>
+          {detail.capabilityCalls.map((call) => {
+            const child = detail.nodes.find(
+              (n) => n.plan_id === call.planId && n.node_key === call.childKey,
+            );
+            return (
+              <article key={call.id} className="live-card">
+                <strong>{call.capability}</strong>
+                <Badge value={call.state} />
+                <Facts
+                  rows={[
+                    ["调用节点", call.parentKey],
+                    ["执行节点", call.childKey],
+                    [
+                      "执行智能体",
+                      child?.agent_id &&
+                        [child.agent_id, child.agent_version]
+                          .filter(Boolean)
+                          .join(" · v"),
+                    ],
+                    ["调用原因", call.reason],
+                    ["结果说明", call.explanation],
+                    ["开始", when(call.createdAt)],
+                    ["结束", call.settledAt && when(call.settledAt)],
+                    [
+                      "耗时",
+                      call.settledAt
+                        ? duration(call.createdAt, call.settledAt)
+                        : undefined,
+                    ],
+                  ]}
+                />
+              </article>
+            );
+          })}
+        </section>
+      )}
       <h3>执行时间线</h3>
       {ordered.slice(0, max).map((e) => (
         <article className="live-card" key={e.id}>
@@ -454,8 +488,58 @@ function Timeline({ detail }: { detail: TaskDetail }) {
     </>
   );
 }
+function duration(start: string, end: string) {
+  const ms = Date.parse(end) - Date.parse(start);
+  if (!Number.isFinite(ms) || ms < 0) return undefined;
+  return ms < 1000 ? ms + " 毫秒" : (ms / 1000).toFixed(1) + " 秒";
+}
+function AssemblyTrace({ detail }: { detail: TaskDetail }) {
+  const observations =
+    detail.events?.filter(
+      (e) =>
+        e.payload?.stage === "assembly_turn" ||
+        e.payload?.stage === "assembly_tool",
+    ) ?? [];
+  const finalReceipts = observations.some(
+    (e) => e.payload?.stage === "assembly_tool",
+  )
+    ? []
+    : detail.nodes.flatMap(
+        (n) => n.output?.output?.assemblyVerification?.receipts ?? [],
+      );
+  if (!observations.length && !finalReceipts.length) return null;
+  return (
+    <section>
+      <h3>装配执行记录</h3>
+      {observations.map((e, i) => (
+        <article className="live-card" key={e.id ?? i}>
+          <strong>
+            {e.payload!.stage === "assembly_turn"
+              ? "业务步骤 " + (e.payload?.step ?? "")
+              : "工具执行回执"}
+          </strong>
+          {e.occurred_at && <small>{when(e.occurred_at)}</small>}
+          {e.payload?.stage === "assembly_turn" ? (
+            <p>
+              本步知识库 · {e.payload.datasetIds?.join("、") || "不用知识库"}
+            </p>
+          ) : (
+            <ReceiptDetails item={e.payload!} />
+          )}
+        </article>
+      ))}
+      {finalReceipts.map((r, i) => (
+        <article className="live-card" key={i}>
+          <ReceiptDetails item={r} />
+        </article>
+      ))}
+    </section>
+  );
+}
 const stoppableStates = new Set([
   "received",
+  "assembly_preparing",
+  "checking",
   "planning",
   "planned",
   "running",
@@ -569,9 +653,27 @@ export function FactoryTaskDetail({
           ["需求来源", stateName(task.source_system ?? "unknown")],
           ["提交时间", when(task.created_at)],
           ["更新时间", when(task.updated_at)],
+          [
+            "授权知识库",
+            task.authorized_dataset_ids?.join("、") ||
+              (task.authorized_dataset_ids ? "不用知识库" : undefined),
+          ],
+          ["授权业务能力", task.authorized_capabilities?.join("、")],
+          ["授权工具", task.authorized_mcp_tools?.join("、")],
         ]}
       />
       <StopTask key={task.id} task={task} stale={stale} refresh={refreshTask} />
+      {detail.interactions
+        ?.filter((i) => i.state === "pending")
+        .map((q) => (
+          <FactoryInteraction
+            key={q.id}
+            taskId={task.id}
+            question={q}
+            stale={stale}
+            onChange={refreshTask}
+          />
+        ))}
       <nav className="live-tabs" aria-label="工单详情">
         {tabs.map(([id, name]) => (
           <button

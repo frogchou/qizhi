@@ -1,7 +1,7 @@
 use reqwest::blocking::Client;
 use std::{
     io::{self, Read, Write},
-    path::Path,
+    path::{Path, PathBuf},
     time::Duration,
 };
 use tauri_plugin_dialog::DialogExt;
@@ -56,6 +56,36 @@ fn write_to_destination(
     Ok(())
 }
 
+fn choose_destination(app: &tauri::AppHandle, name: &str) -> Result<Option<PathBuf>, String> {
+    let Some(location) = app
+        .dialog()
+        .file()
+        .set_file_name(suggested_name(name))
+        .blocking_save_file()
+    else {
+        return Ok(None);
+    };
+    location
+        .into_path()
+        .map(Some)
+        .map_err(|_| SAVE_FAILED.to_owned())
+}
+
+pub(super) fn save_skill_file(
+    app: tauri::AppHandle,
+    name: String,
+    bytes: Vec<u8>,
+) -> Result<bool, String> {
+    if bytes.len() > 256 * 1024 {
+        return Err("Skill 随包文件超过 256 KiB。".to_owned());
+    }
+    let Some(path) = choose_destination(&app, &name)? else {
+        return Ok(false);
+    };
+    write_to_destination(bytes.as_slice(), Some(bytes.len() as u64), &path)?;
+    Ok(true)
+}
+
 pub(super) fn download(
     app: tauri::AppHandle,
     auth: Auth,
@@ -64,15 +94,9 @@ pub(super) fn download(
     name: String,
 ) -> Result<bool, String> {
     let route = route::artifact(&task, &artifact)?;
-    let Some(location) = app
-        .dialog()
-        .file()
-        .set_file_name(suggested_name(&name))
-        .blocking_save_file()
-    else {
+    let Some(path) = choose_destination(&app, &name)? else {
         return Ok(false);
     };
-    let path = location.into_path().map_err(|_| SAVE_FAILED)?;
     let client = Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .retry(reqwest::retry::never())
