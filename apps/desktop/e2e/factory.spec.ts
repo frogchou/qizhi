@@ -125,6 +125,35 @@ test("运行中的园区响应系统减少动态偏好", async ({ page }) => {
   expect(await vehicle.getAttribute("transform")).toBe(still);
 });
 
+test("演示生产线按模拟执行显示工单，版本目录说明数据来源", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "暂停模拟" }).click();
+  await page.getByRole("button", { name: /^智能体生产线，/ }).click();
+  const panel = page.getByRole("complementary", { name: "工单面板" });
+  await expect(panel.getByRole("tab")).toHaveText([
+    "正在运行",
+    "已上线",
+    "待审核",
+  ]);
+  await expect(panel.getByText("共 1 个模拟运行实例")).toBeVisible();
+  await expect(
+    panel.getByRole("button", { name: /栖知产品介绍 PPT/ }),
+  ).toBeVisible();
+  await expect(panel.getByText("供应商资料汇总")).toHaveCount(0);
+  for (const name of ["已上线", "待审核"]) {
+    await panel.getByRole("tab", { name }).click();
+    await expect(panel.getByRole("tabpanel")).toContainText(
+      "演示模式未连接版本目录",
+    );
+    await expect(panel.getByRole("combobox")).toHaveCount(0);
+  }
+  await panel.getByRole("tab", { name: "正在运行" }).click();
+  await panel.getByRole("button", { name: /栖知产品介绍 PPT/ }).click();
+  await expect(
+    panel.getByRole("heading", { name: "栖知产品介绍 PPT" }),
+  ).toBeVisible();
+});
+
 for (const width of [1280, 1024, 412]) {
   test(`资产仓抽屉覆盖地图并可直达知识库（${width}px）`, async ({ page }) => {
     await page.setViewportSize({ width, height: width === 1024 ? 680 : 820 });

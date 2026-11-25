@@ -4,17 +4,20 @@ import { BrandLogo } from "./BrandLogo";
 import { getVersion } from "@tauri-apps/api/app";
 import { useEffect, useState } from "react";
 
-export type AppRoute = "today" | "knowledge" | "codex" | "factory" | "settings";
+export type AppRoute =
+  "today" | "knowledge" | "codex" | "factory" | "assembly" | "settings";
 type IconName = AppRoute;
 const items: { route: AppRoute; label: string; icon: IconName }[] = [
   { route: "today", label: "今日", icon: "today" },
   { route: "knowledge", label: "知识库", icon: "knowledge" },
   { route: "codex", label: "Codex 工作", icon: "codex" },
   { route: "factory", label: "智能工厂", icon: "factory" },
+  { route: "assembly", label: "智能体装配", icon: "assembly" },
   { route: "settings", label: "设置", icon: "settings" },
 ];
 
 function NavIcon({ name }: { name: IconName }) {
+  if (name === "assembly") return <ControlIcon name="layers" size={17} />;
   if (name === "factory")
     return (
       <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -60,7 +63,7 @@ export function AppSidebar({
   onOpenBasket?: () => void;
 }) {
   const basket = useMaterialBasket();
-  const [version, setVersion] = useState("0.1.1");
+  const [version, setVersion] = useState("0.1.2");
   useEffect(() => {
     void getVersion()
       .then((runtimeVersion) => {

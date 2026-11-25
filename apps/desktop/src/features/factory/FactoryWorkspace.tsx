@@ -1,15 +1,21 @@
 import { FactoryPage } from "./FactoryPage";
 import { useFactoryMode } from "./factory-client";
 import { LiveFactoryPage } from "./LiveFactoryPage";
+import type { FactoryNavigationTarget } from "./factory-model";
+import { createDraftFromVersion } from "./assembly-model";
 
 export function FactoryWorkspace({
   active,
+  initialTarget,
   onOpenKnowledge,
   onOpenSettings,
+  onOpenDraft,
 }: {
   active: boolean;
+  initialTarget?: FactoryNavigationTarget;
   onOpenKnowledge: () => void;
   onOpenSettings: () => void;
+  onOpenDraft: (endpoint: string, draftId: string) => void;
 }) {
   const connection = useFactoryMode();
   if (connection.mode === "demo")
@@ -20,6 +26,11 @@ export function FactoryWorkspace({
       <LiveFactoryPage
         key={connection.revision}
         endpoint={connection.endpoint}
+        initialTarget={initialTarget}
+        onEditAgent={async (agent) => {
+          const draftId = await createDraftFromVersion(agent);
+          onOpenDraft(connection.endpoint, draftId);
+        }}
         onKnowledge={onOpenKnowledge}
         onSettings={onOpenSettings}
       />

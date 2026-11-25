@@ -126,7 +126,7 @@ export function CampusSurface({
             >
               <span className="fc-sign">
                 <i />
-                {a.id === "line" ? "智能体生产线" : a.name}
+                {a.name}
                 {item.count !== undefined && <b>{item.count}</b>}
                 {item.ticket && (
                   <span className="fc-ticket">{item.ticket}</span>
@@ -147,9 +147,7 @@ export function CampusSurface({
                 : { bottom: 101 - lots[section.id][1] + "%" }),
             }}
           >
-            <strong>
-              {section.id === "line" ? "智能体生产线" : section.name}
-            </strong>
+            <strong>{section.name}</strong>
             <div>{section.description}</div>
             {buildings[section.id].tip}
           </div>

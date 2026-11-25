@@ -1,4 +1,5 @@
 import type { Area } from "./simulation";
+import type { TaskScope } from "./assembly-model";
 
 export type AreaSummary = {
   count: number;
@@ -171,14 +172,6 @@ export type Delivery = {
   updatedAt: string;
   artifactCount: number;
   answer: string | null;
-};
-export type ManagedPackage = {
-  packageName: string;
-  agentId: string;
-  version: string;
-  displayName: string;
-  status: string | null;
-  declared: boolean;
 };
 export type PlanSummary = {
   mode?: string;
@@ -390,12 +383,14 @@ export type TaskInteraction = {
 };
 export type TaskTab = "plan" | "quality" | "delivery" | "monitor";
 export type TaskLink = { id: string; title: string; tab: TaskTab };
+export type FactoryNavigationTarget =
+  { kind: "task"; link: TaskLink } | { kind: "new"; scope: TaskScope };
 export type OpenTask = (id: string, title: string, tab?: TaskTab) => void;
 export type OpenAgent = (agentId: string, version: string) => void;
 
 const states: Record<string, string> = {
   queued: "已排队",
-  assembly_preparing: "准备试跑",
+  assembly_preparing: "准备测试",
   dispatching: "正在调用",
   indeterminate: "结果待核对",
   preparing: "准备中",
@@ -582,10 +577,58 @@ export function nodeArea(capability?: string): Area {
   if (capability?.startsWith("quality.")) return "quality";
   return "line";
 }
+
+// Desktop and browser transports both expose the control plane's documented error text.
+// Keep the wire reasons intact and present them in the terms used by the studio.
+const assemblyMessages = new Map([
+  [
+    "已封存候选源码、资源及用例。",
+    "智能体已生成，代码、资源和测试用例已保存。",
+  ],
+  ["正在隔离环境逐项运行候选固定用例。", "正在逐项运行智能体的固定测试。"],
+  ["用户已停止试跑", "用户已停止测试。"],
+  [
+    "草稿已有更新，请刷新后再保存。",
+    "当前版本的编辑内容已更新，请重新读取后再保存。",
+  ],
+  [
+    "样例参数与候选的输入约定不匹配。",
+    "样例参数与这次生成的智能体所需输入不匹配。",
+  ],
+  [
+    "样例仍有未获证实的必需条件，请查看工单逐项验收并重新试跑。",
+    "仍有必需的验收条件待验证，请查看工单的逐项结果并重新测试。",
+  ],
+  ["试跑记录与所选候选快照不匹配。", "这份测试结果与所选生成记录不匹配。"],
+  ["该版本已绑定其他候选或试跑。", "这个版本已绑定其他生成记录或测试结果。"],
+  [
+    "样例工单需完成验收，并由装配者认可此次试跑。",
+    "请完成样例工单验收，并在测试记录中认可结果。",
+  ],
+  [
+    "请先停止该草稿仍在执行的操作或试跑。",
+    "请先停止此版本正在执行的操作或测试。",
+  ],
+  ["试跑尚未完成。", "测试尚未完成。"],
+  [
+    "运行环境已变化，请重新生成并试跑。",
+    "运行环境已变化，请重新生成并测试智能体。",
+  ],
+]);
+
 export function errorText(error: unknown) {
-  return error instanceof Error
-    ? error.message
-    : typeof error === "string" && error
-      ? error
-      : "无法读取中台响应";
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === "string" && error
+        ? error
+        : "无法读取中台响应";
+  return factoryMessage(message);
+}
+
+export function factoryMessage(message: string) {
+  const suffix = message.indexOf("（HTTP ");
+  const reason = suffix === -1 ? message : message.slice(0, suffix);
+  const copy = assemblyMessages.get(reason);
+  return copy ? copy + message.slice(reason.length) : message;
 }

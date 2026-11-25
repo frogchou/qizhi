@@ -11,7 +11,7 @@ export const areas = [
   },
   {
     id: "line",
-    name: "生产线",
+    name: "智能体生产线",
     description: "运行专业智能体并汇集各节点产物",
   },
   {

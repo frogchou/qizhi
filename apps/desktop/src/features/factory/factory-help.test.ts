@@ -151,13 +151,14 @@ describe("factory contextual help catalogue", () => {
           },
         ],
         total: 1,
+        offset: 0,
+        limit: 20,
       }),
     );
     const { unmount } = render(
       createElement(AgentCatalog, {
         revision: 1,
         onAgent: () => undefined,
-        onRelease: () => undefined,
       }),
     );
     expect(screen.getByText(/本地服务运行时/)).toBeVisible();

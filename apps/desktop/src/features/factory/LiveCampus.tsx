@@ -22,8 +22,7 @@ const metricLabels: Record<string, string> = {
   running: "执行中",
   planned: "已编排",
   plans: "计划",
-  agents: "已注册智能体",
-  runningAgents: "工作中",
+  runningInstances: "运行实例",
   pendingReviewVersions: "待审核版本",
   readyVersions: "已上线版本",
   pendingReview: "待人工验收",
@@ -49,7 +48,7 @@ const metricLabels: Record<string, string> = {
 const fields: Record<Area, string[]> = {
   intake: ["tasks", "qizhiDesktop", "api", "console", "unknown"],
   control: ["planning", "running", "accepted", "plans"],
-  line: ["agents", "runningAgents", "pendingReviewVersions"],
+  line: ["runningInstances", "readyVersions", "pendingReviewVersions"],
   quality: ["pendingReview", "automaticPassed", "failed"],
   assets: ["configuredDatasets", "connectedDatasets", "inputs", "artifacts"],
   runtime: ["active", "readyRuntimes", "attempts"],

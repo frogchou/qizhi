@@ -1,6 +1,7 @@
 import { useRef } from "react";
 import type { SkillFile } from "./skill-files";
-import type { AssemblyReceipt } from "./factory-model";
+import { when, type Agent, type AssemblyReceipt } from "./factory-model";
+import { factoryApi } from "./factory-client";
 
 export const assemblies = "/v1/factory/assemblies";
 export const resources = "/v1/factory/assembly-resources";
@@ -114,6 +115,53 @@ export type AssemblyDraft = DraftSummary & {
   runs: AssemblyRun[];
   suggestions?: Partial<ResourceSelection>;
 };
+export async function createDraftFromVersion(agent: Agent): Promise<string> {
+  const draft = await factoryApi.post<DraftSummary>(assemblies, {
+    description: agent.description?.trim() || agent.displayName,
+    baseRelease: { agentId: agent.agentId, version: agent.version },
+  });
+  if (!draft?.id)
+    throw Error("尚未确认已建立新版本，请重新读取智能体与版本列表。");
+  return draft.id;
+}
+
+export function editingVersionLabel(config: AssemblyConfig, state = "编辑中") {
+  const name =
+    config.displayName.trim() || config.agentId.trim() || "未命名智能体";
+  const version = config.version.trim()
+    ? "v" + config.version.trim()
+    : "版本号待填写";
+  return [name, version, state].join(" · ");
+}
+
+export function editableVersionOptions(drafts: DraftSummary[]) {
+  const labels = drafts.map((d) => editingVersionLabel(d.config));
+  const counts = new Map<string, number>();
+  for (const label of labels) counts.set(label, (counts.get(label) ?? 0) + 1);
+  return drafts.map((draft, i) => ({
+    id: draft.id,
+    label:
+      counts.get(labels[i])! > 1 ? labels[i] + " · " + draft.id : labels[i],
+  }));
+}
+
+export function generationOptions(candidates: Candidate[]) {
+  const recent = [...candidates].sort(
+    (a, b) =>
+      b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id),
+  );
+  const builds = recent.map((candidate) => ({
+    candidate,
+    label: when(candidate.createdAt) + " · v" + candidate.version,
+  }));
+  const counts = new Map<string, number>();
+  for (const { label } of builds)
+    counts.set(label, (counts.get(label) ?? 0) + 1);
+  return builds.map(({ candidate, label }) => ({
+    candidate,
+    label: counts.get(label)! > 1 ? label + " · " + candidate.id : label,
+  }));
+}
 export type CandidateSource = {
   files: { path: string; content: string; previousContent?: string | null }[];
 };

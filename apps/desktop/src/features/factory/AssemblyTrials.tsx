@@ -18,6 +18,7 @@ import { useFactoryRead } from "./factory-feed";
 import { stateName, when, type Agent, type OpenTask } from "./factory-model";
 import {
   canAccept,
+  generationOptions,
   requiredChecksPassed,
   draftPath,
   useRequestId,
@@ -45,9 +46,10 @@ function SourceViewer({
   const file =
     read.data?.files.find((f) => f.path === path) ?? read.data?.files[0];
   return (
-    <Modal title="候选源码与差异" onClose={onClose} wide>
+    <Modal title="生成源码与差异" onClose={onClose} wide>
       <p className="live-subtle">
-        {candidate.agentId} · v{candidate.version} · 修订 {candidate.revision}
+        {candidate.agentId} · v{candidate.version} · {when(candidate.createdAt)}{" "}
+        生成
       </p>
       <ReadNotice read={read} />
       {file && (
@@ -78,7 +80,7 @@ function SourceViewer({
           )}
         </>
       )}
-      {read.data && !file && <Empty>此候选没有可展示的源文件</Empty>}
+      {read.data && !file && <Empty>这次生成没有可展示的源文件</Empty>}
     </Modal>
   );
 }
@@ -152,9 +154,9 @@ export function AssemblyReview({
       <ReadNotice read={read} />
       <Facts
         rows={[
-          ["候选快照", record.candidateId],
+          ["生成记录", record.candidateId],
           ["包摘要", <code>{record.packageDigest}</code>],
-          ["试跑记录", record.runId],
+          ["测试记录", record.runId],
         ]}
       />
       {candidate && (
@@ -211,10 +213,10 @@ export function AssemblyReview({
             type="button"
             className="ui-action ui-small"
             onClick={() =>
-              onTask(run.taskId, "发布试跑 " + run.taskId, "delivery")
+              onTask(run.taskId, "发布测试 " + run.taskId, "delivery")
             }
           >
-            查看试跑工单及产物
+            查看测试工单及产物
           </button>
         </>
       )}
@@ -237,74 +239,81 @@ export function AssemblyTrials({
   onTask: OpenTask;
   onNewTask: (scope: TaskScope) => void;
 }) {
-  const [selected, select] = useState(""),
+  const builds = generationOptions(draft.candidates);
+  const [selected, select] = useState(() => builds[0]?.candidate.id),
     [source, showSource] = useState(false);
-  const candidates = [...draft.candidates].sort(
-    (a, b) => b.revision - a.revision || b.createdAt.localeCompare(a.createdAt),
-  );
-  const candidate = candidates.find((c) => c.id === selected) ?? candidates[0];
-  if (!candidate)
-    return <Empty>生成候选后，可在这里检查源码、上传样例并试跑。</Empty>;
+  const candidate = (
+    builds.find((item) => item.candidate.id === selected) ?? builds[0]
+  )?.candidate;
+  if (!candidate) return <Empty>还没有可测试的版本。</Empty>;
   return (
     <>
-      <label className="assembly-field">
-        候选快照
-        <select value={candidate.id} onChange={(e) => select(e.target.value)}>
-          {candidates.map((c) => (
-            <option key={c.id} value={c.id}>
-              v{c.version} · 修订 {c.revision} · {when(c.createdAt)}
-            </option>
-          ))}
-        </select>
-      </label>
-      <Facts
-        rows={[
-          ["智能体", candidate.agentId],
-          ["包摘要", <code>{candidate.packageDigest}</code>],
-          ["测试环境标识", candidate.buildEnvironment],
-          [
-            "发布状态",
-            candidate.releaseStatus
-              ? stateName(candidate.releaseStatus)
-              : "尚未提交审核",
-          ],
-        ]}
-      />
-      <div className="fc-actions">
-        <button
-          type="button"
-          className="ui-action ui-small"
-          onClick={() => showSource(true)}
-        >
-          查看源码与差异
-        </button>
-        {candidate.releaseStatus === "ready" && (
+      <div className="studio-test-bar">
+        <label className="assembly-field">
+          生成记录
+          <select
+            aria-label="生成记录"
+            value={candidate.id}
+            onChange={(e) => select(e.target.value)}
+          >
+            {builds.map(({ candidate: item, label }) => (
+              <option key={item.id} value={item.id}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <span className="studio-version-status">
+          {candidate.releaseStatus
+            ? stateName(candidate.releaseStatus)
+            : "尚未提交发布审核"}
+        </span>
+        <div className="studio-actions">
           <button
             type="button"
-            className="ui-action ui-small"
-            onClick={() =>
-              onNewTask({
-                capabilities: [
-                  ...new Set([
-                    candidate.config.capability,
-                    ...candidate.config.capabilities,
-                  ]),
-                ],
-                datasetIds: candidate.config.datasetIds,
-                mcpTools: candidate.config.mcpTools,
-              })
-            }
+            className="ui-action"
+            onClick={() => showSource(true)}
           >
-            用此版本新建需求
+            查看源码与差异
           </button>
-        )}
+          {candidate.releaseStatus === "ready" && (
+            <button
+              type="button"
+              className="ui-action"
+              disabled={disabled}
+              onClick={() =>
+                onNewTask({
+                  capabilities: [
+                    ...new Set([
+                      candidate.config.capability,
+                      ...candidate.config.capabilities,
+                    ]),
+                  ],
+                  datasetIds: candidate.config.datasetIds,
+                  mcpTools: candidate.config.mcpTools,
+                })
+              }
+            >
+              用此版本新建需求
+            </button>
+          )}
+        </div>
       </div>
+      {(dirty || draft.revision !== candidate.revision) && (
+        <p className="live-notice">
+          此次测试使用已生成的内容。当前编辑有更新，可先生成智能体再测试最新配置。
+        </p>
+      )}
       <details className="assembly-disclosure">
         <summary>工作流程与授权范围</summary>
         <p>{candidate.config.workflow}</p>
         <Facts
           rows={[
-            ["验收条件", candidate.config.criteria.join("；")],
+            ["智能体", candidate.agentId],
+            ["生成时间", when(candidate.createdAt)],
+            ["包摘要", <code>{candidate.packageDigest}</code>],
+            ["测试环境标识", candidate.buildEnvironment],
+            ["验收条件", candidate.config.criteria.join("、")],
             ["Skill", candidate.config.skills.join("、") || "未选用"],
             ["工具", candidate.config.mcpTools.join("、") || "未选用"],
             ["知识库", candidate.config.datasetIds.join("、") || "不用知识库"],
@@ -385,194 +394,205 @@ function TrialForm({
       { ...body, requestId: request.forPayload(body) },
     );
     if (!result.id || !result.taskId)
-      throw Error("中台未返回试跑编号，请刷新草稿查看记录。");
+      throw Error("尚未收到测试工单号，请核对本次生成的测试记录。");
     request.confirmed();
     selectRun(result.id);
-    return "已提交试跑工单 " + result.taskId;
+    return "已提交测试工单 " + result.taskId;
   }
   return (
     <>
-      <section className="assembly-section">
-        <h3>样例试跑</h3>
-        <label className="assembly-field">
-          样例需求
-          <textarea
-            value={goal}
-            onChange={(e) => setGoal(e.target.value)}
-            placeholder="说明输入、期望产物和需要验证的行为"
-          />
-        </label>
-        <FactoryAttachments attachments={attachments} disabled={busy} />
-        <details className="assembly-disclosure">
-          <summary>结构化样例（可选）</summary>
+      <div className="studio-trial-columns">
+        <section className="assembly-section">
+          <h3>测试样例</h3>
           <label className="assembly-field">
-            输入 JSON
+            样例需求
             <textarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="{}"
+              value={goal}
+              onChange={(e) => setGoal(e.target.value)}
+              placeholder="说明输入、期望产物和需要验证的行为"
             />
           </label>
-        </details>
-        <button
-          type="button"
-          className="ui-action ui-primary"
-          disabled={
-            busy || !goal.trim() || Boolean(attachments.failures.length)
-          }
-          onClick={() => void action.run(start)}
-        >
-          启动试跑
-        </button>
-      </section>
-      <section className="assembly-section">
-        <h3>该快照的试跑记录</h3>
-        {run ? (
-          <>
+          <FactoryAttachments attachments={attachments} disabled={busy} />
+          <details className="assembly-disclosure">
+            <summary>结构化样例（可选）</summary>
             <label className="assembly-field">
-              试跑记录
-              <select
-                value={run.id}
-                onChange={(e) => {
-                  selectRun(e.target.value);
-                  setFeedback("");
-                }}
-              >
-                {runs.map((r) => (
-                  <option value={r.id} key={r.id}>
-                    {when(r.createdAt)} · {stateName(r.state)} · {r.id}
-                  </option>
-                ))}
-              </select>
+              输入 JSON
+              <textarea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                placeholder="{}"
+              />
             </label>
-            <div className="assembly-row">
-              <Badge value={run.state} />
-              {run.accepted && <strong>用户已认可</strong>}
+          </details>
+          <button
+            type="button"
+            className="ui-action ui-primary"
+            disabled={
+              busy || !goal.trim() || Boolean(attachments.failures.length)
+            }
+            onClick={() => void action.run(start)}
+          >
+            测试智能体
+          </button>
+        </section>
+        <section className="assembly-section">
+          <h3>测试记录</h3>
+          {run ? (
+            <>
+              <label className="assembly-field">
+                测试记录
+                <select
+                  value={run.id}
+                  onChange={(e) => {
+                    selectRun(e.target.value);
+                    setFeedback("");
+                  }}
+                >
+                  {runs.map((r) => (
+                    <option value={r.id} key={r.id}>
+                      {when(r.createdAt)} · {stateName(r.state)} · {r.id}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="assembly-row">
+                <Badge value={run.state} />
+                {run.accepted && <strong>用户已认可</strong>}
+                <button
+                  type="button"
+                  className="ui-action ui-small"
+                  onClick={() =>
+                    onTask(run.taskId, "测试工单 " + run.taskId, "plan")
+                  }
+                >
+                  打开测试工单 {run.taskId}
+                </button>
+              </div>
               <button
                 type="button"
-                className="ui-action ui-small"
+                className="ui-action ui-quiet ui-small"
                 onClick={() =>
-                  onTask(run.taskId, "试跑工单 " + run.taskId, "plan")
+                  onTask(run.taskId, "测试工单 " + run.taskId, "delivery")
                 }
               >
-                打开试跑工单 {run.taskId}
+                查看测试产物
               </button>
-            </div>
-            <h4>自动断言</h4>
-            {run.assertions.length ? (
-              <ul className="assembly-assertions">
-                {run.assertions.map((a, i) => (
-                  <li key={i}>
-                    <strong>{a.name}</strong>
-                    <span>
-                      {a.required ? "必需" : "参考"} ·{" "}
-                      {a.passed ? "通过" : "未通过"}
-                    </span>
-                    {a.message && <small>{a.message}</small>}
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="live-subtle">中台尚未返回断言记录。</p>
-            )}
-            <h4>样例验收条件</h4>
-            {run.candidateCompleted === false &&
-              ["awaiting_review", "accepted"].includes(run.state) && (
+              <h4>自动断言</h4>
+              {run.assertions.length ? (
+                <ul className="assembly-assertions">
+                  {run.assertions.map((a, i) => (
+                    <li key={i}>
+                      <strong>{a.name}</strong>
+                      <span>
+                        {a.required ? "必需" : "参考"} ·{" "}
+                        {a.passed ? "通过" : "未通过"}
+                      </span>
+                      {a.message && <small>{a.message}</small>}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="live-subtle">中台尚未返回断言记录。</p>
+              )}
+              <h4>样例验收条件</h4>
+              {run.candidateCompleted === false &&
+                ["awaiting_review", "accepted"].includes(run.state) && (
+                  <p className="live-notice">
+                    此工单缺少所选版本执行成功的记录，请重新测试。
+                  </p>
+                )}
+              {run.criteria?.length ? (
+                <ul className="assembly-assertions">
+                  {run.criteria.map((c) => {
+                    const f = run.findings?.find((v) => v.id === c.id);
+                    return (
+                      <li key={c.id}>
+                        <strong>{c.requirement}</strong>
+                        <span>
+                          {c.priority === "required" ? "必需" : "参考"} ·{" "}
+                          {stateName(f?.status)}
+                        </span>
+                        {f?.reason && <small>{f.reason}</small>}
+                        {Boolean(f?.evidenceIds?.length) && (
+                          <small>依据 {f!.evidenceIds!.join("、")}</small>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : (
+                <p className="live-subtle">工单尚未给出逐项验收结果。</p>
+              )}
+              {(dirty || draft.revision !== candidate.revision) && (
                 <p className="live-notice">
-                  此工单缺少原候选执行成功的记录，请重新试跑。
+                  当前编辑内容已有修改。请重新生成并测试后再提交发布审核。
                 </p>
               )}
-            {run.criteria?.length ? (
-              <ul className="assembly-assertions">
-                {run.criteria.map((c) => {
-                  const f = run.findings?.find((v) => v.id === c.id);
-                  return (
-                    <li key={c.id}>
-                      <strong>{c.requirement}</strong>
-                      <span>
-                        {c.priority === "required" ? "必需" : "参考"} ·{" "}
-                        {stateName(f?.status)}
-                      </span>
-                      {f?.reason && <small>{f.reason}</small>}
-                      {Boolean(f?.evidenceIds?.length) && (
-                        <small>依据 {f!.evidenceIds!.join("、")}</small>
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
-            ) : (
-              <p className="live-subtle">工单尚未给出逐项验收结果。</p>
-            )}
-            {(dirty || draft.revision !== candidate.revision) && (
-              <p className="live-notice">
-                当前草稿已有修改。发布这份工作说明前，请生成并验证当前修订的新候选。
-              </p>
-            )}
-            <TrialReceipts items={run.receipts} />
-            {run.feedback && <p>验收意见 · {run.feedback}</p>}
-            {!run.accepted && (
-              <label className="assembly-field">
-                验收意见（可选）
-                <textarea
-                  value={feedback}
-                  onChange={(e) => setFeedback(e.target.value)}
-                />
-              </label>
-            )}
-            <div className="fc-actions">
+              <TrialReceipts items={run.receipts} />
+              {run.feedback && <p>验收意见 · {run.feedback}</p>}
               {!run.accepted && (
+                <label className="assembly-field">
+                  验收意见（可选）
+                  <textarea
+                    value={feedback}
+                    onChange={(e) => setFeedback(e.target.value)}
+                  />
+                </label>
+              )}
+              <div className="fc-actions">
+                {!run.accepted && (
+                  <button
+                    type="button"
+                    className="ui-action ui-primary"
+                    disabled={busy || !canAccept(run)}
+                    onClick={() =>
+                      void action.run(async () => {
+                        await factoryApi.post(
+                          `${draftPath(draft.id)}/runs/${encodeURIComponent(run.id)}/accept`,
+                          { feedback: feedback.trim() || undefined },
+                        );
+                        return "已记录对该样例的认可。";
+                      })
+                    }
+                  >
+                    认可测试结果
+                  </button>
+                )}
                 <button
                   type="button"
                   className="ui-action ui-primary"
-                  disabled={busy || !canAccept(run)}
+                  disabled={
+                    busy ||
+                    dirty ||
+                    draft.revision !== candidate.revision ||
+                    !run.accepted ||
+                    Boolean(candidate.releaseStatus) ||
+                    !requiredChecksPassed(run)
+                  }
                   onClick={() =>
                     void action.run(async () => {
-                      await factoryApi.post(
-                        `${draftPath(draft.id)}/runs/${encodeURIComponent(run.id)}/accept`,
-                        { feedback: feedback.trim() || undefined },
-                      );
-                      return "已记录对该样例的认可。";
+                      const payload = {
+                        candidateId: candidate.id,
+                        runId: run.id,
+                      };
+                      await factoryApi.post(`${draftPath(draft.id)}/publish`, {
+                        ...payload,
+                        requestId: request.forPayload(payload),
+                      });
+                      request.confirmed();
+                      return `已提交 ${candidate.agentId} v${candidate.version}，等待管理员审核。`;
                     })
                   }
                 >
-                  认可此次试跑
+                  提交发布审核
                 </button>
-              )}
-              <button
-                type="button"
-                className="ui-action ui-primary"
-                disabled={
-                  busy ||
-                  dirty ||
-                  draft.revision !== candidate.revision ||
-                  !run.accepted ||
-                  Boolean(candidate.releaseStatus) ||
-                  !requiredChecksPassed(run)
-                }
-                onClick={() =>
-                  void action.run(async () => {
-                    const payload = {
-                      candidateId: candidate.id,
-                      runId: run.id,
-                    };
-                    await factoryApi.post(`${draftPath(draft.id)}/publish`, {
-                      ...payload,
-                      requestId: request.forPayload(payload),
-                    });
-                    request.confirmed();
-                    return `已提交 ${candidate.agentId} v${candidate.version}，等待管理员审核。`;
-                  })
-                }
-              >
-                提交发布审核
-              </button>
-            </div>
-          </>
-        ) : (
-          <p className="live-subtle">尚未对这个候选快照试跑。</p>
-        )}
-      </section>
+              </div>
+            </>
+          ) : (
+            <p className="live-subtle">这个版本还没有测试记录。</p>
+          )}
+        </section>
+      </div>
       <ActionNotice action={action} />
     </>
   );

@@ -1,6 +1,7 @@
 import { ControlIcon } from "../../components/ControlIcon";
 import { useEffect, useReducer, useRef, useState, type ReactNode } from "react";
 import { CampusMap } from "./CampusMap";
+import { LineTabs, type LineTab } from "./FactoryLine";
 import {
   areas,
   steps,
@@ -88,6 +89,31 @@ function JobList({
         <p className="fc-empty">此处暂无工单</p>
       )}
     </div>
+  );
+}
+function DemoLine({
+  jobs,
+  follow,
+}: {
+  jobs: Job[];
+  follow: (id: number) => void;
+}) {
+  const [tab, setTab] = useState<LineTab>("running");
+  const running = jobs.filter((item) => item.status === "working");
+  return (
+    <LineTabs tab={tab} onTab={setTab}>
+      {tab === "running" ? (
+        <>
+          <p className="live-count">共 {running.length} 个模拟运行实例</p>
+          <JobList jobs={running} follow={follow} />
+        </>
+      ) : (
+        <p className="fc-empty">
+          演示模式未连接版本目录。切换至中台实况可查看
+          {tab === "ready" ? "已上线" : "待审核"}的智能体版本。
+        </p>
+      )}
+    </LineTabs>
   );
 }
 function FactoryView({
@@ -359,6 +385,8 @@ function FactoryView({
                   <button onClick={() => setModal("log")}>查看执行日志</button>
                 </div>
               </>
+            ) : station?.id === "line" ? (
+              <DemoLine jobs={visibleJobs} follow={follow} />
             ) : (
               <>
                 {station && <p className="fc-reason">{station.description}</p>}

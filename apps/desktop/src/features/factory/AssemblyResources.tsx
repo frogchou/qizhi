@@ -213,8 +213,8 @@ export function AssemblyResources({
                 {confirm.state === "disabled"
                   ? "停用后，中台会阻止该版本尚未执行的调用。"
                   : confirm.state === "unlisted"
-                    ? "下架后，新草稿无法选择此版本。"
-                    : "启用后，新草稿可以选择此版本。"}
+                    ? "下架后，新的装配配置无法选择此版本。"
+                    : "启用后，新的装配配置可以选择此版本。"}
               </p>
               <div className="fc-actions">
                 <button
@@ -427,7 +427,7 @@ export function AssemblyResources({
               )}
               {provider?.effect === "external_write" && (
                 <label className="assembly-field">
-                  试跑模拟工具
+                  测试用模拟工具
                   <select
                     value={entry.simulationToolId}
                     onChange={(e) => change("simulationToolId", e.target.value)}

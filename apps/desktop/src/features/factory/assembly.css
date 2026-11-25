@@ -1,16 +1,8 @@
-.fc-live .live-inspector[data-assembly="true"] {
-  width: min(690px, 91%);
-}
-.assembly-workspace,
-.assembly-version-manager,
 .assembly-task-auth,
 .assembly-form {
   min-width: 0;
   font-size: 13px;
   line-height: 1.55;
-}
-.assembly-workspace[hidden] {
-  display: none;
 }
 .assembly-editable {
   border: 0;
@@ -18,9 +10,6 @@
   padding: 0;
   min-width: 0;
 }
-.fc .assembly-toolbar,
-.assembly-draft-nav,
-.assembly-actions,
 .assembly-row,
 .assembly-connection {
   display: flex;
@@ -28,30 +17,8 @@
   flex-wrap: wrap;
   gap: 8px 12px;
 }
-.fc .assembly-toolbar,
 .assembly-row {
   justify-content: space-between;
-}
-.assembly-toolbar {
-  padding: 15px 0 10px;
-}
-.assembly-toolbar h3,
-.assembly-row h3 {
-  margin: 0;
-}
-.assembly-draft-nav > label {
-  flex: 1;
-}
-.assembly-draft-nav {
-  align-items: end;
-  margin-bottom: 12px;
-}
-.assembly-tabs {
-  position: sticky;
-  top: 48px;
-  z-index: 1;
-  padding: 5px 0 7px;
-  background: var(--paper, #fff);
 }
 .assembly-field {
   display: grid;
@@ -86,15 +53,10 @@
   outline: 2px solid var(--q-ring, #298477);
   outline-offset: 2px;
 }
-.assembly-workspace h4,
 .assembly-section h3,
 .assembly-question h3 {
   margin: 0 0 6px;
 }
-.assembly-workspace > .assembly-field:first-of-type textarea {
-  min-height: 78px;
-}
-.assembly-assistant,
 .assembly-question,
 .assembly-disclosure,
 .assembly-section,
@@ -105,7 +67,6 @@
   border-radius: 8px;
   background: var(--q-surface, #fff);
 }
-.assembly-assistant,
 .assembly-question {
   background: #f2f7f4;
 }
@@ -173,22 +134,12 @@
   color: #49685f;
   font-size: 12px;
 }
-.assembly-actions {
-  margin: 12px 0;
-}
 .fc .assembly-modal-wide {
   width: min(690px, calc(100vw - 28px));
   max-width: calc(100vw - 28px);
   max-height: 86vh;
   padding: 17px 20px;
   overflow: auto;
-}
-.assembly-version-manager {
-  overflow-wrap: anywhere;
-}
-.assembly-version-manager .live-filter {
-  display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
 }
 .assembly-code {
   max-height: 45vh;
@@ -215,17 +166,6 @@
 }
 .assembly-assertions span {
   margin-left: 6px;
-}
-.assembly-operations > div {
-  padding: 8px 0;
-  border-block-start: 1px solid var(--q-border, #d1ded7);
-}
-.assembly-operations .fc-badge {
-  margin-left: 8px;
-}
-.assembly-operations p {
-  margin: 4px 0;
-  white-space: pre-wrap;
 }
 .assembly-question .live-attachments {
   margin: 8px 0;
@@ -271,15 +211,9 @@
   margin-top: 2px;
 }
 @media (max-width: 720px) {
-  .fc-live .live-inspector[data-assembly="true"] {
-    width: min(100%, 630px);
-  }
   .assembly-grid,
   .assembly-resource-grid,
   .assembly-diff {
     grid-template-columns: minmax(0, 1fr);
-  }
-  .assembly-tabs {
-    position: static;
   }
 }

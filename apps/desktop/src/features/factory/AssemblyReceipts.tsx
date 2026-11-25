@@ -35,7 +35,7 @@ export function TrialReceipts({
   if (!receipts?.length) return null;
   return (
     <details className="assembly-disclosure">
-      <summary>试跑工具回执</summary>
+      <summary>测试工具回执</summary>
       {receipts.map((item, i) => (
         <article className="live-card" key={item.requestKey ?? i}>
           <ReceiptDetails item={item} />

@@ -14,8 +14,8 @@ import {
   TaskList,
 } from "./FactoryAreas";
 import { FactoryTaskDetail } from "./FactoryTaskDetail";
-import { RequirementForm, ReleaseForm } from "./FactoryForms";
-import { AssemblyWorkspace } from "./AssemblyWorkspace";
+import { RequirementForm } from "./FactoryForms";
+import { ProductionLine, type LineView } from "./FactoryLine";
 import type { TaskScope } from "./assembly-model";
 import {
   ContextHelp,
@@ -26,6 +26,7 @@ import {
 import {
   when,
   type Agent,
+  type FactoryNavigationTarget,
   type OpenAgent,
   type OpenTask,
   type TaskDetail,
@@ -39,12 +40,8 @@ type Location =
   | { kind: "queue" }
   | { kind: "task"; link: TaskLink }
   | { kind: "agent"; id: string; version: string };
-type ModalState =
-  | { kind: "new"; scope?: TaskScope }
-  | { kind: "release"; agent: Agent | null }
-  | { kind: "guide" };
-const nameForArea = (id: Area) =>
-  id === "line" ? "智能体生产线" : areas.find((a) => a.id === id)!.name;
+type ModalState = { kind: "new"; scope?: TaskScope } | { kind: "guide" };
+const nameForArea = (id: Area) => areas.find((a) => a.id === id)!.name;
 function locationKey(view: Location) {
   if (view.kind === "building")
     return view.kind + "-" + view.area + "-" + (view.filter ?? "");
@@ -57,15 +54,26 @@ export function LiveFactoryPage({
   endpoint,
   onKnowledge,
   onSettings,
+  initialTarget,
+  onEditAgent,
 }: {
   endpoint: string;
   onKnowledge: () => void;
   onSettings: () => void;
+  initialTarget?: FactoryNavigationTarget;
+  onEditAgent?: (agent: Agent) => Promise<void>;
 }) {
   const feed = useFactoryFeed();
-  const [history, setHistory] = useState<Location[]>([]),
-    [modal, setModal] = useState<ModalState | null>(null);
-  const [lineVisited, setLineVisited] = useState(false);
+  const [history, setHistory] = useState<Location[]>(
+      initialTarget?.kind === "task" ? [initialTarget] : [],
+    ),
+    [modal, setModal] = useState<ModalState | null>(
+      initialTarget?.kind === "new" ? initialTarget : null,
+    );
+  const [lineView, setLineView] = useState<LineView>({
+    tab: "running",
+    offset: 0,
+  });
   const readBlocked = feed.state !== "live";
   const view = history[history.length - 1],
     open = Boolean(view),
@@ -117,7 +125,7 @@ export function LiveFactoryPage({
   }, [open, modal]);
   const overview = () => setHistory([]);
   const openArea = (area: Area, filter?: string) => {
-    if (area === "line") setLineVisited(true);
+    if (area === "line") setLineView({ tab: "running", offset: 0 });
     setHistory([{ kind: "building", area, filter }]);
   };
   function push(next: Location) {
@@ -197,7 +205,7 @@ export function LiveFactoryPage({
           id={view.id}
           version={view.version}
           {...areaProps}
-          onRelease={(agent) => setModal({ kind: "release", agent })}
+          onBased={onEditAgent}
           onChange={feed.refresh}
           stale={readBlocked}
         />
@@ -214,7 +222,14 @@ export function LiveFactoryPage({
           />
         );
       case "line":
-        return null;
+        return (
+          <ProductionLine
+            {...areaProps}
+            onAgent={onAgent}
+            view={lineView}
+            onView={setLineView}
+          />
+        );
       case "quality":
         return <QualityDesk {...areaProps} initialFilter={view.filter} />;
       case "assets":
@@ -327,7 +342,6 @@ export function LiveFactoryPage({
             id="factory-live-inspector"
             aria-label="工厂详情面板"
             className="fc-inspector live-inspector"
-            data-assembly={selectedArea === "line"}
             data-open={open}
             inert={!open}
             aria-hidden={!open}
@@ -357,17 +371,6 @@ export function LiveFactoryPage({
             <div className="live-drawer-content" key={viewKey}>
               {contents()}
             </div>
-            {lineVisited && (
-              <AssemblyWorkspace
-                active={selectedArea === "line"}
-                endpoint={endpoint}
-                revision={feed.revision}
-                stale={readBlocked}
-                onChange={feed.refresh}
-                onTask={onTask}
-                onNewTask={(scope) => setModal({ kind: "new", scope })}
-              />
-            )}
           </aside>
         </div>
         <div className="fc-tools">
@@ -421,15 +424,6 @@ export function LiveFactoryPage({
           stale={readBlocked}
           onClose={() => setModal(null)}
           onCreated={onTask}
-          refresh={feed.refresh}
-        />
-      )}
-      {modal?.kind === "release" && (
-        <ReleaseForm
-          stale={readBlocked}
-          agent={modal.agent}
-          onClose={() => setModal(null)}
-          onAgent={onAgent}
           refresh={feed.refresh}
         />
       )}

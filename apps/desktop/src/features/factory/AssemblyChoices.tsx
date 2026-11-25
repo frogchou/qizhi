@@ -38,48 +38,53 @@ export function ChoiceGroup({
   return (
     <fieldset className="assembly-choices" disabled={disabled}>
       <legend>{label}</legend>
-      {clearLabel && (
-        <label className="assembly-choice">
-          <input
-            type="checkbox"
-            checked={selected.length === 0}
-            onChange={() => onSelect([])}
-          />
-          <span>{clearLabel}</span>
-        </label>
-      )}
-      {choices.map((option: AssemblyOption) => (
-        <label key={option.id} className="assembly-choice">
-          <input
-            type="checkbox"
-            checked={selected.includes(option.id)}
-            onChange={(e) =>
-              onSelect(
-                e.target.checked
-                  ? [...selected, option.id]
-                  : selected.filter((id) => id !== option.id),
-              )
-            }
-          />
-          <span>
-            <strong>{option.label}</strong>
-            {suggested.includes(option.id) && !selected.includes(option.id) && (
-              <em>中台建议</em>
-            )}
-            <small>
-              {[
-                option.id !== option.label ? option.id : "",
-                effectLabel(option.effect),
-                option.destination && "目的地 " + option.destination,
-                option.description,
-              ]
-                .filter(Boolean)
-                .join(" · ")}
-            </small>
-          </span>
-        </label>
-      ))}
-      {!choices.length && <p className="live-subtle">目录中暂无可选项</p>}
+      <div className="assembly-choice-list">
+        {clearLabel && (
+          <label className="assembly-choice">
+            <input
+              type="checkbox"
+              checked={selected.length === 0}
+              onChange={() => onSelect([])}
+            />
+            <span>{clearLabel}</span>
+          </label>
+        )}
+        {choices.map((option: AssemblyOption) => (
+          <label key={option.id} className="assembly-choice">
+            <input
+              type="checkbox"
+              checked={selected.includes(option.id)}
+              disabled={
+                option.available === false && !selected.includes(option.id)
+              }
+              onChange={(e) =>
+                onSelect(
+                  e.target.checked
+                    ? [...selected, option.id]
+                    : selected.filter((id) => id !== option.id),
+                )
+              }
+            />
+            <span>
+              <strong>{option.label}</strong>
+              {suggested.includes(option.id) &&
+                !selected.includes(option.id) && <em>中台建议</em>}
+              <small>
+                {[
+                  option.id !== option.label ? option.id : "",
+                  option.available === false ? "当前不可用" : "",
+                  effectLabel(option.effect),
+                  option.destination && "目的地 " + option.destination,
+                  option.description,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </small>
+            </span>
+          </label>
+        ))}
+        {!choices.length && <p className="live-subtle">目录中暂无可选项</p>}
+      </div>
     </fieldset>
   );
 }

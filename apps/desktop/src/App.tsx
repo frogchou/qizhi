@@ -6,6 +6,8 @@ import {
   MaterialBasketProvider,
 } from "./features/materials/MaterialBasket";
 import { FactoryWorkspace } from "./features/factory/FactoryWorkspace";
+import { AssemblyPage } from "./features/factory/AssemblyPage";
+import type { FactoryNavigationTarget } from "./features/factory/factory-model";
 import { AppSidebar, type AppRoute } from "./components/AppSidebar";
 import { SettingsPage } from "./features/settings/SettingsPage";
 import { KnowledgePage } from "./features/knowledge/KnowledgePage";
@@ -27,6 +29,12 @@ export type CodexNavigationTarget = {
 function App({ commands = unavailableCommands }: { commands?: QizhiCommands }) {
   const [basketOpen, setBasketOpen] = useState(false);
   const [route, setRoute] = useState<AppRoute>("factory");
+  const [assemblyMounted, setAssemblyMounted] = useState(false);
+  const [assemblyEntry, setAssemblyEntry] = useState<{
+    endpoint: string;
+    draftId: string;
+  }>();
+  const [factoryTarget, setFactoryTarget] = useState<FactoryNavigationTarget>();
   const [settingsMounted, setSettingsMounted] = useState(false);
   const [settingsInitialCategory, setSettingsInitialCategory] = useState<
     "factory" | undefined
@@ -38,10 +46,23 @@ function App({ commands = unavailableCommands }: { commands?: QizhiCommands }) {
 
   function navigate(nextRoute: AppRoute) {
     setSettingsInitialCategory(undefined);
+    setFactoryTarget(undefined);
+    if (nextRoute === "assembly") setAssemblyMounted(true);
     if (nextRoute === "settings") setSettingsMounted(true);
     if (nextRoute === "knowledge") setKnowledgeMounted(true);
     if (nextRoute === "codex") setCodexMounted(true);
     setRoute(nextRoute);
+  }
+
+  function openFactory(target: FactoryNavigationTarget) {
+    navigate("factory");
+    setFactoryTarget(target);
+  }
+
+  function openConnectionSettings() {
+    setSettingsMounted(true);
+    setSettingsInitialCategory("factory");
+    setRoute("settings");
   }
 
   function openCommittedCodexHandoff(result: CodexHandoffResult) {
@@ -73,7 +94,9 @@ function App({ commands = unavailableCommands }: { commands?: QizhiCommands }) {
                   ? "workspace codex-workspace-shell"
                   : route === "factory"
                     ? "workspace factory-workspace"
-                    : "workspace"
+                    : route === "assembly"
+                      ? "workspace assembly-workspace-shell"
+                      : "workspace"
           }
         >
           {route === "today" && (
@@ -96,13 +119,26 @@ function App({ commands = unavailableCommands }: { commands?: QizhiCommands }) {
           )}
           <FactoryWorkspace
             active={route === "factory"}
+            initialTarget={factoryTarget}
             onOpenKnowledge={() => navigate("knowledge")}
-            onOpenSettings={() => {
-              setSettingsMounted(true);
-              setSettingsInitialCategory("factory");
-              setRoute("settings");
+            onOpenSettings={openConnectionSettings}
+            onOpenDraft={(endpoint, draftId) => {
+              setAssemblyEntry({ endpoint, draftId });
+              navigate("assembly");
             }}
           />
+          {assemblyMounted && (
+            <AssemblyPage
+              key={assemblyEntry?.draftId}
+              active={route === "assembly"}
+              entry={assemblyEntry}
+              onSettings={openConnectionSettings}
+              onTask={(id, title, tab = "plan") =>
+                openFactory({ kind: "task", link: { id, title, tab } })
+              }
+              onNewTask={(scope) => openFactory({ kind: "new", scope })}
+            />
+          )}
           {knowledgeMounted ? (
             <KnowledgePage
               commands={commands}

@@ -284,6 +284,11 @@ export function Pagination({
   total: number;
   onChange: (offset: number) => void;
 }) {
+  useEffect(() => {
+    if (limit > 0 && offset > 0 && offset >= total) {
+      onChange(Math.max(0, Math.floor((total - 1) / limit) * limit));
+    }
+  }, [offset, limit, total, onChange]);
   if (total <= limit && !offset) return null;
   return (
     <nav className="live-pagination" aria-label="列表分页">

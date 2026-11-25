@@ -35,7 +35,7 @@ function mergeEvents(previous: Activity[], additions: Activity[]) {
 }
 
 // One cursor belongs to one visible connection. Snapshot refreshes must never move a live cursor past unread changes.
-export function useFactoryFeed() {
+export function useFactoryFeed(active = true) {
   const [feed, setFeed] = useState<Feed>(initialFeed);
   const [visible, setVisible] = useState(!document.hidden);
   const refreshRef = useRef<() => void>(() => {});
@@ -45,7 +45,12 @@ export function useFactoryFeed() {
     return () => document.removeEventListener("visibilitychange", sync);
   }, []);
   useEffect(() => {
-    if (!visible) return;
+    if (!visible || !active) {
+      setFeed((old) =>
+        old.state === "loading" ? old : { ...old, state: "loading" },
+      );
+      return;
+    }
     const controller = new AbortController();
     const { signal } = controller;
     let cursor: string | null = null;
@@ -150,7 +155,7 @@ export function useFactoryFeed() {
       window.clearTimeout(refreshTimer);
       refreshRef.current = () => {};
     };
-  }, [visible]);
+  }, [visible, active]);
   const refresh = useCallback(() => refreshRef.current(), []);
   return { ...feed, refresh };
 }

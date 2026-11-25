@@ -111,6 +111,7 @@ export async function installAssemblyFixture(page: Page) {
       }[],
     };
     const resources: Record<string, unknown>[] = [resource];
+    let derived: typeof draft | undefined;
     let removedVersion = false;
     let generationAttempts = 0;
     (window as unknown as { amendFactoryDraft: () => void }).amendFactoryDraft =
@@ -235,13 +236,28 @@ export async function installAssemblyFixture(page: Page) {
         return { state: body.state };
       }
       if (path === base + "/options") return options;
-      if (path === base && args.method === "GET") return { items: [draft] };
+      if (path === base && args.method === "GET")
+        return { items: derived ? [derived, draft] : [draft] };
       if (path === base && args.method === "POST") {
+        if (body.baseRelease) {
+          derived = {
+            ...structuredClone(draft),
+            id: "derived-draft",
+            revision: 1,
+            config: { ...structuredClone(candidate.config), version: "1.0.1" },
+            candidates: [],
+            runs: [],
+            operations: [],
+          };
+          return structuredClone(derived);
+        }
         draft.description = String(body.description);
         Object.assign(draft.config, body.config);
         draft.revision++;
         return draft;
       }
+      if (derived && path === base + "/" + derived.id)
+        return structuredClone(derived);
       if (path === base + "/quote-draft") {
         if (window.factoryLiveFixture.readyCandidate)
           return {
@@ -390,6 +406,18 @@ export async function installAssemblyFixture(page: Page) {
       if (path.endsWith("/publish")) {
         candidate.releaseStatus = "pending_review";
         candidate.publishedRunId = "run-one";
+        window.factoryLiveFixture.release = {
+          agentId: candidate.agentId,
+          displayName: candidate.config.displayName,
+          version: candidate.version,
+          status: candidate.releaseStatus,
+          assembly: {
+            draftId: draft.id,
+            candidateId: candidate.id,
+            runId: candidate.publishedRunId,
+            packageDigest: candidate.packageDigest,
+          },
+        };
         return {
           agentId: "quote-desk",
           version: "1.0.0",

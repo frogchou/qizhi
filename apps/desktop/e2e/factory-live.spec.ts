@@ -27,6 +27,11 @@ type Fixture = {
     occurredAt: string;
   }[];
   disconnect: boolean;
+  lineLoading?: boolean;
+  lineError?: boolean;
+  oldRuntimeApi?: boolean;
+  lineCount?: number;
+  idleVersion?: boolean;
   readyCandidate?: boolean;
   failNextAmend?: boolean;
   deleted?: boolean;
@@ -39,6 +44,12 @@ type Fixture = {
     version: string;
     displayName: string;
     status: string;
+    assembly?: {
+      draftId: string;
+      candidateId: string;
+      runId: string;
+      packageDigest: string;
+    };
   };
 };
 declare global {
@@ -54,7 +65,7 @@ async function install(page: Page) {
     const names = {
       intake: "已接单 2 张",
       control: "已编排 1 张",
-      line: "1 个在册智能体，1 个工作中",
+      line: "1 个运行实例",
       quality: "1 张待人工验收",
       runtime: "1 个运行实例",
       assets: "配置了 1 个知识库",
@@ -67,6 +78,8 @@ async function install(page: Page) {
       line: {
         agents: 1,
         runningAgents: 1,
+        runningInstances: 1,
+        readyVersions: 1,
         runningNodes: 1,
         activeTasks: 1,
         retrievingNodes: 1,
@@ -133,6 +146,9 @@ async function install(page: Page) {
         ...(state.deleted
           ? []
           : [demoAgent, { ...demoAgent, version: "0.9.0", status: "offline" }]),
+        ...(state.idleVersion
+          ? [{ ...demoAgent, agentId: "indexer", displayName: "索引助理" }]
+          : []),
         ...(state.release ? [state.release] : []),
       ].map((a) => ({
         ...a,
@@ -144,7 +160,12 @@ async function install(page: Page) {
         runtime: "codex",
         createdAt: now(),
         approvedAt: now(),
-        runningCount: 1,
+        runningCount:
+          a.agentId === demoAgent.agentId &&
+          a.version === demoAgent.version &&
+          !state.stopped?.includes("task-running")
+            ? 1
+            : 0,
         capabilities: [
           { name: "knowledge.retrieve", description: "检索机构档案" },
         ],
@@ -291,15 +312,6 @@ async function install(page: Page) {
           reviewed = true;
           return { state: "accepted" };
         }
-        if (path.endsWith("/releases")) {
-          state.release = {
-            agentId: String(args.body!.agentId ?? "installed-agent"),
-            version: String(args.body!.version ?? "3.0.0"),
-            displayName: String(args.body!.displayName ?? "现有安装包"),
-            status: "pending_review",
-          };
-          return state.release;
-        }
         if (path.endsWith("/approve") && state.release) {
           state.release.status = "ready";
           return state.release;
@@ -309,7 +321,11 @@ async function install(page: Page) {
           return state.release;
         }
       }
-      if (path.endsWith("/overview"))
+      if (path.endsWith("/overview")) {
+        const runningInstances = state.stopped?.includes("task-running")
+          ? 0
+          : (state.lineCount ?? 1);
+        const versions = agents();
         return {
           cursor: String(state.events.length),
           observedAt: now(),
@@ -318,14 +334,28 @@ async function install(page: Page) {
             Object.entries(names).map(([key, summary]) => [
               key,
               {
-                count: 1,
-                summary,
-                metrics: areaMetrics[key as keyof typeof areaMetrics],
+                count: key === "line" ? runningInstances : 1,
+                summary:
+                  key === "line" ? runningInstances + " 个运行实例" : summary,
+                metrics:
+                  key === "line"
+                    ? {
+                        ...areaMetrics.line,
+                        runningInstances,
+                        readyVersions: versions.filter(
+                          (version) => version.status === "ready",
+                        ).length,
+                        pendingReviewVersions: versions.filter(
+                          (version) => version.status === "pending_review",
+                        ).length,
+                      }
+                    : areaMetrics[key as keyof typeof areaMetrics],
                 ...(key === "assets" ? { connection } : {}),
               },
             ]),
           ),
         };
+      }
       if (path.endsWith("/changes")) {
         await new Promise((r) => setTimeout(r, 250));
         if (state.disconnect) throw new Error("中台暂时不可用");
@@ -447,18 +477,44 @@ async function install(page: Page) {
                 a.version === url.searchParams.get("version")),
           ),
         );
-      if (path === "/v1/factory/packages")
-        return readPage([
-          {
-            packageName: "installed-assistant",
-            displayName: "尚未登记的包",
-            agentId: "installed-agent",
-            version: "3.0.0",
-            status: null,
-            declared: true,
-          },
-        ]);
       if (path === "/v1/factory/monitor") return readPage([event]);
+      if (
+        path === "/v1/factory/runtimes" &&
+        url.searchParams.get("area") === "line" &&
+        !state.oldRuntimeApi
+      ) {
+        if (url.searchParams.get("state") !== "active")
+          throw Error("生产线应查询正在运行的实例");
+        while (state.lineLoading)
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        if (state.lineError) throw Error("运行实例暂时不可用");
+        const count = state.stopped?.includes("task-running")
+          ? 0
+          : (state.lineCount ?? 1);
+        const instances = Array.from({ length: count }, (_, index) => ({
+          id: "attempt-" + index,
+          instanceId: "worker-" + (42 + index),
+          taskId: index % 2 ? "trial-order" : "task-running",
+          goal: index % 2 ? "试跑五月报价" : "正在执行的资料检索",
+          nodeKey: "retrieve",
+          capability: "knowledge.retrieve",
+          agentId: index % 2 ? "quote-desk" : "audit-assistant",
+          displayName: index % 2 ? "报价核对" : "审计助理",
+          agentVersion: index % 2 ? "2.0.0" : "1.0.0",
+          state: index % 2 ? "stopping" : "leased",
+          testRun: index % 2 === 1,
+          lastHeartbeatAt: index % 2 ? null : now(),
+          createdAt: now(),
+        }));
+        const limit = Number(url.searchParams.get("limit") || 20);
+        const offset = Number(url.searchParams.get("offset") || 0);
+        return {
+          ...readPage(instances),
+          limit,
+          offset,
+          items: instances.slice(offset, offset + limit),
+        };
+      }
       if (path === "/v1/factory/runtimes")
         return {
           ...readPage([
@@ -583,6 +639,13 @@ async function install(page: Page) {
     });
   });
 }
+async function openStudio(page: Page) {
+  await page
+    .getByRole("navigation", { name: "主导航" })
+    .getByRole("button", { name: "智能体装配", exact: true })
+    .click();
+  return page.locator(".assembly-studio");
+}
 test.beforeEach(async ({ page }) => {
   await install(page);
   await page.emulateMedia({ reducedMotion: "reduce" });
@@ -602,11 +665,11 @@ test("八栋楼读取真实接口，抽屉覆盖河谷并保留导航", async ({
   await expect(page).toHaveTitle(/栖知|Qizhi/i);
   await expect(page.locator("vite-error-overlay")).toHaveCount(0);
   await page.locator('[data-area="line"]').hover();
-  await expect(page.getByRole("tooltip")).toContainText("1 个工作中");
+  await expect(page.getByRole("tooltip")).toContainText("1 个运行实例");
   for (const [area, expected] of [
     ["intake", "所有渠道的需求"],
     ["control", "采购文件审核"],
-    ["line", "装配智能体"],
+    ["line", "实例 worker-42"],
     ["quality", "采购文件审核"],
     ["runtime", "1.0 MiB"],
     ["monitor", "已收到审核实例心跳"],
@@ -631,7 +694,7 @@ test("导入 Skill 文件夹可核对相对路径，复制新版本保留附件�
   await mkdir(join(fixture, "examples"), { recursive: true });
   await writeFile(join(fixture, "SKILL.md"), "# 比较报价");
   await writeFile(join(fixture, "examples", "币种.csv"), "currency\nCNY");
-  await page.locator('[data-area="line"]').click();
+  await openStudio(page);
   await page.getByRole("button", { name: "精选资源管理" }).click();
   const library = page.getByRole("dialog", { name: "精选资源管理" });
   await library.getByRole("button", { name: "登记资源", exact: true }).click();
@@ -705,26 +768,25 @@ test("导入 Skill 文件夹可核对相对路径，复制新版本保留附件�
     ],
   });
 });
-test("生产线草稿保留手工输入，明确选用建议与多个真实知识库", async ({
-  page,
-}) => {
-  await page.locator('[data-area="line"]').click();
-  const panel = page.locator(".live-inspector");
-  await expect(
-    panel.getByRole("heading", { name: "装配智能体" }),
-  ).toBeVisible();
-  await panel.getByLabel("装配草稿").selectOption("quote-draft");
+test("装配编辑保留手工输入，明确选用建议与多个真实知识库", async ({ page }) => {
+  const panel = await openStudio(page);
+  await expect(panel.getByRole("heading", { name: "基本信息" })).toBeVisible();
+  await panel.getByLabel("智能体与版本").selectOption("quote-draft");
   await panel
     .getByLabel("工作委托", { exact: true })
     .fill("保留人工调整的结算日期");
   await panel.getByRole("button", { name: "管理智能体", exact: true }).click();
-  const manager = page.getByRole("dialog", { name: "管理智能体" });
-  await expect(manager.getByRole("button", { name: /审计助理/ })).toBeVisible();
-  await manager.getByRole("button", { name: "关闭窗口" }).click();
+  const manager = panel.getByRole("region", { name: "管理智能体" });
+  await expect(
+    manager.getByRole("button", { name: /审计助理.*v1\.0\.0/ }),
+  ).toBeVisible();
+  await panel.getByRole("button", { name: "创建智能体", exact: true }).click();
   await expect(panel.getByLabel("工作委托", { exact: true })).toHaveValue(
     "保留人工调整的结算日期",
   );
-  await panel.getByRole("button", { name: "资源与权限", exact: true }).click();
+  await expect(
+    panel.getByRole("heading", { name: "资源与权限" }),
+  ).toBeVisible();
   await expect(
     panel.getByText("RAGFlow 已连接", { exact: false }),
   ).toBeVisible();
@@ -733,7 +795,7 @@ test("生产线草稿保留手工输入，明确选用建议与多个真实知�
   await suggested.check();
   await panel.getByRole("checkbox", { name: /产品资料/ }).check();
   await panel.getByRole("checkbox", { name: /采购报价/ }).check();
-  await panel.getByRole("button", { name: "保存草稿", exact: true }).click();
+  await panel.getByRole("button", { name: "保存修改", exact: true }).click();
   await expect
     .poll(() =>
       page.evaluate(
@@ -752,29 +814,29 @@ test("生产线草稿保留手工输入，明确选用建议与多个真实知�
         mcpTools: [],
       },
     });
-  await panel.getByRole("button", { name: "工作说明", exact: true }).click();
   await panel.getByLabel("给装配助手的消息").fill("按最近生效日");
   await panel.getByRole("button", { name: "发送给装配助手" }).click();
   await expect(
     panel.getByText("遇到同币种的两份有效报价，应选哪份？"),
   ).toBeVisible();
 });
-test("用指定候选和附件试跑，答复后人工认可并按同一快照发布", async ({
+test("用指定生成版本和附件测试，答复后人工认可并按同一快照发布", async ({
   page,
 }, testInfo) => {
-  await page.locator('[data-area="line"]').click();
-  const panel = page.locator(".live-inspector");
-  await panel.getByLabel("装配草稿").selectOption("quote-draft");
-  await panel.getByRole("button", { name: "候选与试跑", exact: true }).click();
+  const panel = await openStudio(page);
+  await panel.getByLabel("智能体与版本").selectOption("quote-draft");
+  await panel
+    .getByLabel("生成记录", { exact: true })
+    .selectOption("sealed-one");
   await panel.getByRole("button", { name: "查看源码与差异" }).click();
-  const source = page.getByRole("dialog", { name: "候选源码与差异" });
+  const source = page.getByRole("dialog", { name: "生成源码与差异" });
   await expect(source).toContainText("return amount * rate;");
   await source.getByRole("button", { name: "版本差异" }).click();
   await expect(source).toContainText("return amount;");
   await source.getByRole("button", { name: "关闭窗口" }).click();
   await panel.getByLabel("样例需求").fill("试跑五月报价");
   await panel.getByRole("button", { name: "上传本地文件" }).click();
-  await panel.getByRole("button", { name: "启动试跑" }).click();
+  await panel.getByRole("button", { name: "测试智能体" }).click();
   await expect
     .poll(() =>
       page.evaluate(
@@ -789,9 +851,10 @@ test("用指定候选和附件试跑，答复后人工认可并按同一快照�
       inputIds: ["local-upload"],
       goal: "试跑五月报价",
     });
-  await panel.getByRole("button", { name: /打开试跑工单/ }).click();
-  await panel.getByLabel("currency").fill("CNY");
-  await panel.getByRole("button", { name: "提交答复并继续" }).click();
+  await panel.getByRole("button", { name: /打开测试工单/ }).click();
+  const inspector = page.locator(".live-inspector");
+  await inspector.getByLabel("currency").fill("CNY");
+  await inspector.getByRole("button", { name: "提交答复并继续" }).click();
   await expect
     .poll(() =>
       page.evaluate(
@@ -802,8 +865,8 @@ test("用指定候选和附件试跑，答复后人工认可并按同一快照�
       ),
     )
     .toMatchObject({ response: { currency: "CNY" } });
-  await panel.getByRole("button", { name: "交付成果" }).click();
-  const artifact = panel.getByRole("button", { name: "下载 核对结果.txt" });
+  await inspector.getByRole("button", { name: "交付成果" }).click();
+  const artifact = inspector.getByRole("button", { name: "下载 核对结果.txt" });
   await artifact.click();
   await expect
     .poll(() =>
@@ -817,13 +880,13 @@ test("用指定候选和附件试跑，答复后人工认可并按同一快照�
     .toBe("actual-artifact");
   await artifact.scrollIntoViewIfNeeded();
   await page.screenshot({ path: testInfo.outputPath("trial-delivery.png") });
-  await panel.getByRole("button", { name: "返回上一级" }).click();
+  await openStudio(page);
   await expect(panel.getByText("生效日边界", { exact: false })).toBeVisible();
-  await panel.getByText("试跑工具回执", { exact: true }).click();
+  await panel.getByText("测试工具回执", { exact: true }).click();
   await expect(
     panel.getByText("preview-adapter", { exact: true }),
   ).toBeVisible();
-  await panel.getByRole("button", { name: "认可此次试跑" }).click();
+  await panel.getByRole("button", { name: "认可测试结果" }).click();
   await panel.getByRole("button", { name: "提交发布审核" }).click();
   await expect
     .poll(() =>
@@ -835,17 +898,42 @@ test("用指定候选和附件试跑，答复后人工认可并按同一快照�
       ),
     )
     .toMatchObject({ candidateId: "sealed-one", runId: "run-one" });
+  await page
+    .getByRole("navigation", { name: "主导航" })
+    .getByRole("button", { name: "智能工厂" })
+    .click();
+  await page.locator('[data-area="line"]').click();
+  await inspector.getByRole("tab", { name: "待审核" }).click();
+  await inspector.getByRole("button", { name: /报价核对.*v1\.0\.0/ }).click();
+  await expect(
+    inspector.getByRole("heading", { name: "发布依据" }),
+  ).toBeVisible();
+  await expect(inspector.getByText("样例已获用户认可")).toBeVisible();
+  await inspector.getByRole("button", { name: "基于此版本创建" }).click();
+  await expect(panel.getByLabel("智能体与版本")).toHaveValue("derived-draft");
+  await expect(panel.getByLabel("目标发布版本")).toHaveValue("1.0.1");
+  expect(
+    await page.evaluate(
+      () =>
+        window.factoryLiveFixture.calls
+          .filter(
+            (c) => c.path === "/v1/factory/assemblies" && c.method === "POST",
+          )
+          .at(-1)?.body?.baseRelease,
+    ),
+  ).toEqual({ agentId: "quote-desk", version: "1.0.0" });
 });
-test("从已上线候选新建正式工单，带入主能力和知识库并保留写入授权选择", async ({
+test("从已上线版本新建正式工单，带入主能力和知识库并保留写入授权选择", async ({
   page,
 }) => {
   await page.evaluate(() => {
     window.factoryLiveFixture.readyCandidate = true;
   });
-  await page.locator('[data-area="line"]').click();
-  const panel = page.locator(".live-inspector");
-  await panel.getByLabel("装配草稿").selectOption("quote-draft");
-  await panel.getByRole("button", { name: "候选与试跑", exact: true }).click();
+  const panel = await openStudio(page);
+  await panel.getByLabel("智能体与版本").selectOption("quote-draft");
+  await panel
+    .getByLabel("生成记录", { exact: true })
+    .selectOption("sealed-one");
   await panel.getByRole("button", { name: "用此版本新建需求" }).click();
   const form = page.getByRole("dialog", { name: "新建需求" });
   await expect(
@@ -905,9 +993,8 @@ test("正式工单只有勾选后才授权外部效果，并记录目的地", as
 test("中台重连带来新修订时，合并保留人工改动及服务器新字段", async ({
   page,
 }) => {
-  const panel = page.locator(".live-inspector");
-  await page.locator('[data-area="line"]').click();
-  await panel.getByLabel("装配草稿").selectOption("quote-draft");
+  const panel = await openStudio(page);
+  await panel.getByLabel("智能体与版本").selectOption("quote-draft");
   await panel
     .getByRole("textbox", { name: "工作委托", exact: true })
     .fill("人工增加月底核验");
@@ -915,7 +1002,7 @@ test("中台重连带来新修订时，合并保留人工改动及服务器新�
     window.factoryLiveFixture.disconnect = true;
   });
   await expect(panel.getByText(/中台连接已中断/)).toBeVisible();
-  await expect(panel.getByRole("button", { name: "保存草稿" })).toBeDisabled();
+  await expect(panel.getByRole("button", { name: "保存修改" })).toBeDisabled();
   await page.evaluate(() => {
     (
       window as unknown as { amendFactoryDraft: () => void }
@@ -923,7 +1010,7 @@ test("中台重连带来新修订时，合并保留人工改动及服务器新�
     window.factoryLiveFixture.disconnect = false;
   });
   await panel.getByRole("button", { name: "合并我的改动" }).click();
-  await panel.getByRole("button", { name: "保存草稿" }).click();
+  await panel.getByRole("button", { name: "保存修改" }).click();
   await expect
     .poll(() =>
       page.evaluate(
@@ -941,8 +1028,7 @@ test("中台重连带来新修订时，合并保留人工改动及服务器新�
 test("资源登记与下架使用精确版本，删除一个智能体版本保留另一版", async ({
   page,
 }) => {
-  await page.locator('[data-area="line"]').click();
-  const panel = page.locator(".live-inspector");
+  const panel = await openStudio(page);
   await panel.getByRole("button", { name: "精选资源管理" }).click();
   const library = page.getByRole("dialog", { name: "精选资源管理" });
   await library.getByRole("button", { name: "登记资源", exact: true }).click();
@@ -967,7 +1053,7 @@ test("资源登记与下架使用精确版本，删除一个智能体版本保�
   await expect(row).toHaveCount(2);
   await library.getByRole("button", { name: "关闭窗口" }).click();
   await panel.getByRole("button", { name: "管理智能体" }).click();
-  const manager = page.getByRole("dialog", { name: "管理智能体" });
+  const manager = panel.getByRole("region", { name: "管理智能体" });
   await manager.getByLabel("版本状态").selectOption("");
   await manager.getByRole("button", { name: /v0.9.0/ }).click();
   await manager
@@ -979,12 +1065,12 @@ test("资源登记与下架使用精确版本，删除一个智能体版本保�
   await expect(
     manager.getByText(/已删除 audit-assistant v0.9.0/),
   ).toBeVisible();
-  await manager.getByRole("button", { name: "返回上一级" }).click();
+  await manager.getByRole("button", { name: "返回版本列表" }).click();
   await manager.getByLabel("版本状态").selectOption("");
   await expect(manager.getByRole("button", { name: /v1.0.0/ })).toBeVisible();
   await expect(manager.getByRole("button", { name: /v0.9.0/ })).toHaveCount(0);
 });
-test("桌面与窄屏装配窗口可读取资源、独立滚动并保持正常布局", async ({
+test("桌面与窄屏的装配页可选资源并切换到版本管理", async ({
   page,
 }, testInfo) => {
   const errors: string[] = [];
@@ -993,10 +1079,11 @@ test("桌面与窄屏装配窗口可读取资源、独立滚动并保持正常�
     if (["error", "warning"].includes(entry.type())) errors.push(entry.text());
   });
   await page.setViewportSize({ width: 1280, height: 820 });
-  await page.locator('[data-area="line"]').click();
-  const panel = page.locator(".live-inspector");
-  await panel.getByLabel("装配草稿").selectOption("quote-draft");
-  await panel.getByRole("button", { name: "资源与权限", exact: true }).click();
+  const panel = await openStudio(page);
+  await panel.getByLabel("智能体与版本").selectOption("quote-draft");
+  await expect(
+    panel.getByRole("heading", { name: "资源与权限" }),
+  ).toBeVisible();
   await expect(panel.getByRole("checkbox", { name: /采购报价/ })).toBeVisible();
   for (const width of [1280, 412]) {
     await page.setViewportSize({ width, height: 820 });
@@ -1029,14 +1116,16 @@ test("桌面与窄屏装配窗口可读取资源、独立滚动并保持正常�
       path: testInfo.outputPath("assembly-selection-" + width + ".png"),
     });
     await panel.getByRole("button", { name: "管理智能体" }).click();
-    const manager = page.getByRole("dialog", { name: "管理智能体" });
+    const manager = panel.getByRole("region", { name: "管理智能体" });
     await expect(
-      manager.getByRole("button", { name: /审计助理/ }),
+      manager.getByRole("button", { name: /审计助理.*v1\.0\.0/ }),
     ).toBeVisible();
     await page.screenshot({
       path: testInfo.outputPath("version-manager-" + width + ".png"),
     });
-    await manager.getByRole("button", { name: "关闭窗口" }).click();
+    await panel
+      .getByRole("button", { name: "创建智能体", exact: true })
+      .click();
     await expect(
       panel.getByRole("checkbox", { name: /采购报价/ }),
     ).toBeChecked();
@@ -1047,32 +1136,25 @@ test("桌面与窄屏装配窗口可读取资源、独立滚动并保持正常�
   expect(errors).toEqual([]);
 });
 test("处理连接设置后继续未保存的手工委托", async ({ page }) => {
-  const panel = page.locator(".live-inspector");
-  await page.locator('[data-area="line"]').click();
-  await panel.getByLabel("装配草稿").selectOption("quote-draft");
+  const panel = await openStudio(page);
+  await panel.getByLabel("智能体与版本").selectOption("quote-draft");
   await panel
     .getByRole("textbox", { name: "工作委托", exact: true })
     .fill("继续在原草稿编辑的业务规则");
-  await page.getByRole("button", { name: "中台实况" }).click();
-  await page
-    .getByRole("navigation", { name: "主导航" })
-    .getByRole("button", { name: "智能工厂" })
-    .click();
-  await page.locator('[data-area="line"]').click();
+  await panel.getByRole("button", { name: "连接设置" }).click();
+  await openStudio(page);
   await expect(
     panel.getByRole("textbox", { name: "工作委托", exact: true }),
   ).toHaveValue("继续在原草稿编辑的业务规则");
 });
 test("从新委托生成时保护重复请求并能停止服务端操作", async ({ page }) => {
-  const panel = page.locator(".live-inspector");
-  await page.locator('[data-area="line"]').click();
+  const panel = await openStudio(page);
   await panel
     .getByRole("textbox", { name: "工作委托", exact: true })
     .fill("生成供应商报价核对流程");
   await panel.getByRole("button", { name: "发送给装配助手" }).click();
   await expect(panel.getByText(/两份有效报价/)).toBeVisible();
-  await panel.getByRole("button", { name: "候选与试跑", exact: true }).click();
-  const generate = panel.getByRole("button", { name: "生成候选包" });
+  const generate = panel.getByRole("button", { name: "生成智能体" });
   await generate.click();
   await expect(panel.getByRole("alert")).toContainText("请重试");
   await generate.click();
@@ -1137,70 +1219,189 @@ test("验收传真实轮次，交付按任务和制品编号下载，新需求�
     acceptanceMode: "human_review",
   });
 });
-test("生产线托管新建、审核上线、下线和版本升级", async ({ page }) => {
-  const panel = page.locator(".live-inspector"),
-    dialog = page.getByRole("dialog", {
-      name: /^(新建智能体|升级智能体版本)$/,
-    });
-  await page.locator('[data-area="line"]').click();
-  await panel.getByRole("button", { name: "管理智能体" }).click();
-  await panel.getByRole("button", { name: "新建智能体" }).click();
-  await dialog.getByLabel("智能体标识").fill("test-writer");
-  await dialog.getByLabel("版本号").fill("1.0.0");
-  await dialog.getByLabel("显示名称").fill("测试写作助理");
-  await dialog.getByLabel("能力说明").fill("撰写简报");
-  await dialog.getByLabel("执行指令").fill("依据资料撰写文本");
-  await dialog.getByRole("button", { name: "创建并登记" }).click();
-  await dialog.getByRole("button", { name: "查看版本详情" }).click();
+test("生产线按实例与版本分类，支持键盘切换、工单追踪与返回原列表", async ({
+  page,
+}) => {
+  await page.evaluate(() => {
+    window.factoryLiveFixture.lineCount = 2;
+    window.factoryLiveFixture.idleVersion = true;
+    window.factoryLiveFixture.release = {
+      agentId: "invoice-desk",
+      displayName: "票据核对",
+      version: "2.1.0",
+      status: "pending_review",
+    };
+  });
+  await page.getByRole("button", { name: /^智能体生产线，/ }).click();
+  const panel = page.locator(".live-inspector");
+  const tabs = panel.getByRole("tablist", { name: "智能体生产线" });
+  const running = tabs.getByRole("tab", { name: "正在运行" });
+  const ready = tabs.getByRole("tab", { name: "已上线" });
+  const pending = tabs.getByRole("tab", { name: "待审核" });
+  await expect(tabs.getByRole("tab")).toHaveText([
+    "正在运行",
+    "已上线",
+    "待审核",
+  ]);
+  await expect(running).toHaveAttribute("aria-selected", "true");
+  await expect(panel.getByRole("combobox")).toHaveCount(0);
+  await expect(
+    panel.getByRole("button", { name: /新建智能体|管理智能体|装配/ }),
+  ).toHaveCount(0);
+  await expect(panel.getByText("共 2 个运行实例")).toBeVisible();
+  await expect(
+    panel.getByRole("button", { name: /报价核对 · v2.0.0/ }),
+  ).toContainText("测试工单 · 试跑五月报价");
+  await expect(
+    panel.getByRole("button", { name: /报价核对 · v2.0.0/ }),
+  ).toContainText("停止中");
+  await expect(
+    panel.getByRole("button", { name: /索引助理|票据核对/ }),
+  ).toHaveCount(0);
+  await panel.getByRole("button", { name: /实例 worker-42/ }).click();
+  await expect(
+    panel.getByRole("heading", { name: "正在执行的资料检索" }),
+  ).toBeVisible();
+  await expect(panel.getByRole("button", { name: "执行记录" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await panel.getByRole("button", { name: "返回上一级" }).click();
+  await running.focus();
+  await running.press("ArrowRight");
+  await expect(ready).toBeFocused();
+  await expect(panel.getByText("共 2 个版本")).toBeVisible();
+  await expect(panel.getByRole("button", { name: /索引助理/ })).toContainText(
+    "0 个运行实例",
+  );
+  await expect(panel.getByRole("button", { name: /审计助理/ })).toContainText(
+    "v1.0.0",
+  );
+  await expect(panel.getByText(/v0.9.0/)).toHaveCount(0);
+  await ready.press("End");
+  await expect(pending).toBeFocused();
+  await expect(panel.getByText("共 1 个版本")).toBeVisible();
+  await panel.getByRole("button", { name: /票据核对/ }).click();
+  await expect(
+    panel.getByRole("heading", { name: "使用此版本的工单" }),
+  ).toBeVisible();
   await panel.getByRole("button", { name: "审核并上线" }).click();
+  await expect(panel.getByRole("button", { name: "下线版本" })).toBeVisible();
+  await panel.getByRole("button", { name: "返回上一级" }).click();
+  await expect(pending).toHaveAttribute("aria-selected", "true");
+  await expect(panel.getByText("共 0 个版本")).toBeVisible();
+  await ready.click();
+  await panel.getByRole("button", { name: /票据核对/ }).click();
   await panel.getByRole("button", { name: "下线版本" }).click();
   await panel.getByRole("button", { name: "确认下线" }).click();
   await expect(
     panel.getByRole("button", { name: "重新审核上线" }),
   ).toBeVisible();
-  await panel.getByRole("button", { name: "升级版本" }).click();
-  await dialog.getByLabel("版本号").fill("1.1.0");
-  await dialog.getByLabel("能力说明").fill("撰写与校对简报");
-  await dialog.getByLabel("执行指令").fill("依据资料撰写并校对文本");
-  await dialog.getByRole("button", { name: "登记升级版本" }).click();
-  await expect(dialog).toContainText("v1.1.0");
-  const releases = await page.evaluate(() =>
-    window.factoryLiveFixture.calls
-      .filter((c) => c.path?.endsWith("/releases"))
-      .map((c) => c.body),
-  );
-  expect(releases).toMatchObject([
-    { intent: "create", template: "codex-text", agentId: "test-writer" },
-    { intent: "upgrade", version: "1.1.0", agentId: "test-writer" },
+  expect(
+    await page.evaluate(() =>
+      window.factoryLiveFixture.calls
+        .filter((c) => c.method === "POST")
+        .map((c) => c.path),
+    ),
+  ).toEqual([
+    "/v1/agents/invoice-desk/versions/2.1.0/approve",
+    "/v1/factory/agents/invoice-desk/versions/2.1.0/offline",
   ]);
 });
-test("手机宽度的实况抽屉可滚动，登记已安装的包使用服务器包名", async ({
+
+test("生产线读取失败可重试，切换页签时不会沿用另一类的结果", async ({
   page,
 }) => {
-  await page.setViewportSize({ width: 412, height: 820 });
-  const map = page.locator(".fc-plate"),
-    panel = page.locator(".live-inspector"),
-    before = await map.boundingBox();
+  await page.evaluate(() => {
+    window.factoryLiveFixture.lineLoading = true;
+  });
   await page.locator('[data-area="line"]').click();
-  await panel.getByRole("button", { name: "管理智能体" }).click();
-  await expect(panel.getByRole("button", { name: /审计助理/ })).toBeVisible();
-  expect(await map.boundingBox()).toEqual(before);
-  await panel.getByRole("button", { name: "新建智能体" }).click();
-  const dialog = page.getByRole("dialog", { name: "新建智能体" });
-  await dialog.getByLabel("登记方式").selectOption("package");
-  await dialog
-    .getByLabel("已安装但尚未登记的包")
-    .selectOption("installed-assistant");
-  await dialog.getByRole("button", { name: "创建并登记" }).click();
-  await expect(dialog).toContainText("installed-agent");
-  expect(
-    await page.evaluate(
-      () =>
-        window.factoryLiveFixture.calls.find((c) =>
-          c.path?.endsWith("/releases"),
-        )?.body,
-    ),
-  ).toEqual({ packageName: "installed-assistant", intent: "create" });
+  const panel = page.locator(".live-inspector");
+  await expect(panel.getByText("正在读取…")).toBeVisible();
+  await expect(panel.getByText(/共 0 个运行实例/)).toHaveCount(0);
+  await panel.getByRole("tab", { name: "已上线" }).click();
+  await expect(panel.getByText("共 1 个版本")).toBeVisible();
+  await page.evaluate(() => {
+    window.factoryLiveFixture.lineLoading = false;
+    window.factoryLiveFixture.lineError = true;
+  });
+  await panel.getByRole("tab", { name: "正在运行" }).click();
+  await expect(panel.getByRole("alert")).toContainText("运行实例暂时不可用");
+  await expect(panel.getByText("共 1 个版本")).toHaveCount(0);
+  await page.evaluate(() => {
+    window.factoryLiveFixture.lineError = false;
+    window.factoryLiveFixture.oldRuntimeApi = true;
+  });
+  await panel.getByRole("button", { name: "重新读取" }).click();
+  await expect(panel.getByRole("alert")).toContainText(
+    "当前中台未提供生产线运行实例清单",
+  );
+  await page.evaluate(() => {
+    window.factoryLiveFixture.oldRuntimeApi = false;
+    window.factoryLiveFixture.lineCount = 0;
+  });
+  await panel.getByRole("button", { name: "重新读取" }).click();
+  await expect(panel.getByText("当前没有正在运行的实例")).toBeVisible();
+  await expect(panel.getByText("共 0 个运行实例")).toBeVisible();
+});
+
+test("桌面与窄屏生产线标签保持一行，运行实例可翻页", async ({
+  page,
+}, testInfo) => {
+  await page.evaluate(() => {
+    window.factoryLiveFixture.lineCount = 21;
+  });
+  await page.locator('[data-area="line"]').click();
+  const panel = page.locator(".live-inspector");
+  await expect(panel.getByText("共 21 个运行实例")).toBeVisible();
+  await expect(
+    panel.getByRole("button", { name: /实例 worker-62/ }),
+  ).toHaveCount(0);
+  await panel.getByRole("button", { name: "下一页" }).click();
+  await expect(
+    panel.getByRole("button", { name: /实例 worker-62/ }),
+  ).toBeVisible();
+  await expect(panel.getByRole("button", { name: "下一页" })).toBeDisabled();
+  await panel.getByRole("button", { name: /实例 worker-62/ }).click();
+  await panel.getByRole("button", { name: "返回上一级" }).click();
+  await expect(
+    panel.getByRole("button", { name: /实例 worker-62/ }),
+  ).toBeVisible();
+  await page.evaluate(() => {
+    window.factoryLiveFixture.lineCount = 2;
+  });
+  await page.getByRole("button", { name: "刷新", exact: true }).click();
+  await expect(panel.getByText("共 2 个运行实例")).toBeVisible();
+  await expect(
+    panel.getByRole("button", { name: /实例 worker-42/ }),
+  ).toBeVisible();
+  await expect(
+    panel.getByRole("button", { name: /实例 worker-43/ }),
+  ).toContainText("测试工单");
+  for (const width of [1280, 412]) {
+    await page.setViewportSize({ width, height: 820 });
+    const boxes = await panel.getByRole("tab").evaluateAll((buttons) =>
+      buttons.map((button) => {
+        const { x, y, right, width } = button.getBoundingClientRect();
+        return { x, y, right, width };
+      }),
+    );
+    expect(boxes).toHaveLength(3);
+    expect(new Set(boxes.map((box) => box.y)).size).toBe(1);
+    expect(boxes[0].x).toBeGreaterThanOrEqual(0);
+    expect(boxes[2].right).toBeLessThanOrEqual(width);
+    expect(boxes[0].right).toBeLessThanOrEqual(boxes[1].x);
+    expect(boxes[1].right).toBeLessThanOrEqual(boxes[2].x);
+    await expect(panel.getByRole("combobox")).toHaveCount(0);
+    await page.screenshot({
+      path: testInfo.outputPath("factory-line-" + width + ".png"),
+    });
+  }
+  await panel.getByRole("tab", { name: "待审核" }).click();
+  await panel.getByRole("tab", { name: "正在运行" }).click();
+  await expect(
+    panel.getByRole("button", { name: /实例 worker-42/ }),
+  ).toBeVisible();
 });
 test("实况连接直达设置，保留其他分类和尚未保存的连接草稿", async ({ page }) => {
   const nav = page.getByRole("navigation", { name: "主导航" }),
@@ -1314,15 +1515,6 @@ test("接待页按渠道浏览，键盘可切换；中台与质检默认展示�
   await panel.getByLabel("工单状态").selectOption("");
   await expect(panel.getByText("采购文件审核", { exact: true })).toBeVisible();
   await page.keyboard.press("Escape");
-  await page.locator('[data-area="line"]').click();
-  await panel.getByRole("button", { name: "管理智能体" }).click();
-  await expect(panel.getByLabel("版本状态")).toHaveValue("ready");
-  await expect(panel.getByText(/v1.0.0/)).toBeVisible();
-  await expect(panel.getByText(/v0.9.0/)).toHaveCount(0);
-  await panel.getByLabel("版本状态").selectOption("");
-  await expect(panel.getByText(/v0.9.0/)).toBeVisible();
-  await page.keyboard.press("Escape");
-  await page.keyboard.press("Escape");
   await page.locator('[data-area="quality"]').click();
   await expect(panel.getByLabel("质检结果")).toHaveValue("pending_quality");
   await expect(
@@ -1369,6 +1561,9 @@ test("停止只作用于选中工单，可取消，重复确认只提交一次",
     panel.getByRole("button", { name: "停止工单", exact: true }),
   ).toHaveCount(0);
   await page.keyboard.press("Escape");
+  await page.locator('[data-area="line"]').click();
+  await expect(panel.getByText("当前没有正在运行的实例")).toBeVisible();
+  await page.keyboard.press("Escape");
   await page.locator('[data-area="delivery"]').click();
   await panel.getByRole("button", { name: /采购文件审核/ }).click();
   await expect(panel.locator(".fc-badge").first()).toHaveText("已验收");
@@ -1384,7 +1579,7 @@ test("删除全部版本用智能体标识，可刷新在用冲突，撤销失�
     window.factoryLiveFixture.blockDeletion = true;
   });
   await page.locator('[data-area="line"]').click();
-  await panel.getByRole("button", { name: "管理智能体" }).click();
+  await panel.getByRole("tab", { name: "已上线" }).click();
   await panel.getByRole("button", { name: /审计助理/ }).click();
   await panel
     .getByRole("button", { name: "删除智能体（全部版本）", exact: true })
@@ -1431,7 +1626,9 @@ test("删除全部版本用智能体标识，可刷新在用冲突，撤销失�
   await expect(
     panel.getByText(/已删除智能体 audit-assistant 的全部 2 个登记版本/),
   ).toBeVisible();
-  await expect(panel.getByRole("button", { name: "升级版本" })).toHaveCount(0);
+  await expect(panel.getByRole("button", { name: "删除此版本" })).toHaveCount(
+    0,
+  );
   expect(
     await page.evaluate(() =>
       window.factoryLiveFixture.calls
@@ -1440,9 +1637,11 @@ test("删除全部版本用智能体标识，可刷新在用冲突，撤销失�
     ),
   ).toEqual(Array(3).fill("/v1/factory/agents/audit-assistant/delete"));
   await panel.getByRole("button", { name: "返回上一级" }).click();
-  await panel.getByLabel("版本状态").selectOption("");
+  await expect(panel.getByRole("tab", { name: "已上线" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
   await expect(panel.getByText("没有符合条件的智能体版本")).toBeVisible();
-  await page.keyboard.press("Escape");
   await page.keyboard.press("Escape");
   await page.locator('[data-area="delivery"]').click();
   await expect(

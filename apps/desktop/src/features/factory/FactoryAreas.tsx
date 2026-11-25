@@ -291,31 +291,20 @@ export function Intake({
 export function AgentCatalog({
   revision,
   onAgent,
-  onRelease,
   initialFilter = "ready",
 }: {
   revision: number;
   onAgent: OpenAgent;
-  onRelease: () => void;
   initialFilter?: string;
 }) {
   const [status, setStatus] = useState(initialFilter);
-  const list = useList();
-  const read = useFactoryRead<Page<Agent>>(
-    readPath("agents", { ...list.params, status }),
-    revision,
-  );
+  const [offset, setOffset] = useState(0);
   return (
     <>
-      <div className="live-bar">
-        <h3>
-          智能体版本
-          <ContextHelp id="agent-version" />
-        </h3>
-        <button className="ui-action ui-primary" onClick={onRelease}>
-          新建智能体
-        </button>
-      </div>
+      <h3>
+        智能体版本
+        <ContextHelp id="agent-version" />
+      </h3>
       <Filter
         label="版本状态"
         value={status}
@@ -329,10 +318,39 @@ export function AgentCatalog({
           ["deleting", "删除中"],
         ]}
         onChange={(v) => {
-          list.setOffset(0);
+          setOffset(0);
           setStatus(v);
         }}
       />
+      <AgentVersions
+        status={status}
+        revision={revision}
+        onAgent={onAgent}
+        offset={offset}
+        onPage={setOffset}
+      />
+    </>
+  );
+}
+export function AgentVersions({
+  status,
+  revision,
+  onAgent,
+  offset,
+  onPage,
+}: {
+  status: string;
+  revision: number;
+  onAgent: OpenAgent;
+  offset: number;
+  onPage: (offset: number) => void;
+}) {
+  const read = useFactoryRead<Page<Agent>>(
+    readPath("agents", { status, limit: pageSize, offset }),
+    revision,
+  );
+  return (
+    <>
       <ReadNotice read={read} />
       {read.data && (
         <>
@@ -359,10 +377,10 @@ export function AgentCatalog({
             {!read.data.items.length && <Empty>没有符合条件的智能体版本</Empty>}
           </div>
           <Pagination
-            {...list}
-            limit={pageSize}
+            offset={read.data.offset}
+            limit={read.data.limit}
             total={read.data.total}
-            onChange={list.setOffset}
+            onChange={onPage}
           />
         </>
       )}
@@ -374,7 +392,6 @@ export function AgentDetail({
   version,
   revision,
   onTask,
-  onRelease,
   onChange,
   stale,
   onBased,
@@ -383,7 +400,6 @@ export function AgentDetail({
   version: string;
   revision: number;
   onTask: OpenTask;
-  onRelease: (agent: Agent) => void;
   onChange: () => void;
   stale: boolean;
   onBased?: (agent: Agent) => Promise<void>;
@@ -475,7 +491,7 @@ export function AgentDetail({
           </ul>
           {agent.integrityIssue === "assembly_digest_mismatch" && (
             <p className="live-notice error" role="alert">
-              节点包内容与发布摘要不一致。请保存新候选并重新试跑。
+              节点包内容与发布摘要不一致。请重新生成并测试智能体。
             </p>
           )}
           {agent.assembly && (
@@ -489,16 +505,9 @@ export function AgentDetail({
                 disabled={disabled || Boolean(confirm)}
                 onClick={() => void action.run(() => onBased(agent))}
               >
-                基于此版本装配
+                基于此版本创建
               </button>
             )}
-            <button
-              className="ui-action ui-small"
-              disabled={disabled || deleting || confirm !== null}
-              onClick={() => onRelease(agent)}
-            >
-              升级版本
-            </button>
             {canApprove && (
               <button
                 className="ui-action ui-primary"

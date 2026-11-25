@@ -3183,6 +3183,7 @@ h2 {
   }
   .workspace:not(
     .factory-workspace,
+    .assembly-workspace-shell,
     .codex-workspace-shell,
     .knowledge-workspace-shell
   ) {
