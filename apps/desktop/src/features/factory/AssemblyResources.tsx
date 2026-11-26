@@ -98,7 +98,7 @@ export function AssemblyResources({
   }
   return (
     <Modal
-      title="精选资源管理"
+      title="智能体可调用资源管理"
       onClose={onClose}
       closeDisabled={action.busy || localImport.busy}
       wide

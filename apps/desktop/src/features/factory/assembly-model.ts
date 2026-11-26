@@ -108,6 +108,7 @@ export type AssemblyOperation = {
   updatedAt?: string;
 };
 export type AssemblyDraft = DraftSummary & {
+  baseRelease?: { agentId: string; version: string } | null;
   deletedAt?: string | null;
   messages: { role: string; content: string }[];
   operations: AssemblyOperation[];
@@ -115,14 +116,19 @@ export type AssemblyDraft = DraftSummary & {
   runs: AssemblyRun[];
   suggestions?: Partial<ResourceSelection>;
 };
-export async function createDraftFromVersion(agent: Agent): Promise<string> {
+export type UpgradeEntry =
+  | { kind: "assembly"; draftId: string }
+  | { kind: "package"; agentId: string; version: string };
+
+export async function prepareAgentUpgrade(agent: Agent): Promise<UpgradeEntry> {
+  if (!agent.assembly)
+    return { kind: "package", agentId: agent.agentId, version: agent.version };
   const draft = await factoryApi.post<DraftSummary>(assemblies, {
-    description: agent.description?.trim() || agent.displayName,
     baseRelease: { agentId: agent.agentId, version: agent.version },
   });
   if (!draft?.id)
     throw Error("尚未确认已建立新版本，请重新读取智能体与版本列表。");
-  return draft.id;
+  return { kind: "assembly", draftId: draft.id };
 }
 
 export function editingVersionLabel(config: AssemblyConfig, state = "编辑中") {

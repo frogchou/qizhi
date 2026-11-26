@@ -19,6 +19,7 @@ export type FactoryReadPath =
   | `${Resources}/${"mcp" | "skill"}/${string}/${string}`
   | "/v1/factory/overview"
   | `/v1/factory/agents/${string}/status`
+  | `/v1/factory/agents/${string}/versions/${string}/upgrade`
   | `/v1/factory/${Collection | "changes"}${"" | `?${string}`}`
   | "/v1/tasks"
   | "/v1/agents"
@@ -76,6 +77,8 @@ function validQuery(name: string, query: string): boolean {
     }
     if (key === "limit" || key === "offset") {
       if (!/^\d+$/.test(value) || Number(value) > 4294967295) return false;
+    } else if (key === "search") {
+      if (name !== "agents" || value.length > 160) return false;
     } else if (!filters.has(key)) return false;
   }
   return true;
@@ -143,7 +146,13 @@ export function validFactoryRoute(
   if (method === "GET") {
     if (group === "factory")
       return (
-        length === 4 && a === "agents" && safeFactoryId(b) && c === "status"
+        a === "agents" &&
+        safeFactoryId(b) &&
+        ((length === 4 && c === "status") ||
+          (length === 6 &&
+            c === "versions" &&
+            safeFactoryId(d) &&
+            e === "upgrade"))
       );
     if (length === 1) return group === "tasks" || group === "agents";
     if (group !== "tasks" || !safeFactoryId(a)) return false;

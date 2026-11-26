@@ -1,17 +1,25 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { ControlIcon } from "../../components/ControlIcon";
 import { factoryApi } from "./factory-client";
 import { useFactoryRead } from "./factory-feed";
-import { ActionNotice, Badge, ReadNotice, useAction } from "./FactoryControls";
+import {
+  ActionNotice,
+  Badge,
+  Modal,
+  ReadNotice,
+  useAction,
+} from "./FactoryControls";
 import { AgentCatalog, AgentDetail } from "./FactoryAreas";
 import { ResourceChoices } from "./AssemblyChoices";
 import { AssemblyResources } from "./AssemblyResources";
 import { AssemblyNavigation, type StudioTab } from "./AssemblyNavigation";
+import { PackageUpgrade, type PackageTarget } from "./PackageUpgrade";
 import { AssemblyBrief } from "./AssemblyBrief";
 import { AssemblyTrials } from "./AssemblyTrials";
 import {
   assemblies,
-  createDraftFromVersion,
+  prepareAgentUpgrade,
+  type UpgradeEntry,
   draftPath,
   emptyConfig,
   generationOptions,
@@ -82,7 +90,7 @@ export function AssemblyWorkspace({
   endpoint,
   revision,
   connection,
-  initialDraftId,
+  entry,
   onSettings,
   onChange,
   onTask,
@@ -92,7 +100,7 @@ export function AssemblyWorkspace({
   endpoint: string;
   revision: number;
   connection: "loading" | "live" | "reconnecting";
-  initialDraftId?: string;
+  entry?: UpgradeEntry;
   onSettings: () => void;
   onChange: () => void;
   onTask: OpenTask;
@@ -100,14 +108,15 @@ export function AssemblyWorkspace({
 }) {
   const stale = connection !== "live";
   const storageKey = "qizhi.factory.assembly." + endpoint;
-  const [id, setId] = useState(
-      () => initialDraftId ?? readSelection(storageKey),
+  const [id, setId] = useState(() =>
+      entry?.kind === "assembly" ? entry.draftId : readSelection(storageKey),
     ),
     [edits, setEdits] = useState<Record<string, Edit>>(
       () => sessionEdits.get(endpoint)?.edits ?? {},
     );
   const paneId = useId();
   const studio = useRef<HTMLElement>(null);
+  const detailBack = useRef<HTMLButtonElement>(null);
   const [tab, setTab] = useState<StudioTab>("assemble"),
     [visited, setVisited] = useState({ manage: false, test: false }),
     [selectedBuild, setSelectedBuild] = useState<string>(),
@@ -115,6 +124,9 @@ export function AssemblyWorkspace({
     [historyOpen, setHistoryOpen] = useState(false),
     [version, setVersion] = useState<{ id: string; version: string } | null>(
       null,
+    ),
+    [packageUpgrade, setPackageUpgrade] = useState<PackageTarget | null>(() =>
+      entry?.kind === "package" ? entry : null,
     ),
     [library, setLibrary] = useState(false),
     [confirmDelete, setConfirmDelete] = useState(false);
@@ -153,6 +165,12 @@ export function AssemblyWorkspace({
     edit.description.trim() || edit.config.description.trim(),
   );
   const message = messages[id] ?? "";
+  useLayoutEffect(() => {
+    if (tab === "manage" && version && studio.current) {
+      studio.current.scrollTop = 0;
+      detailBack.current?.focus({ preventScroll: true });
+    }
+  }, [tab, version]);
   useEffect(() => {
     if (Object.keys(edits).length || Object.values(messages).some(Boolean))
       sessionEdits.set(endpoint, { edits, messages });
@@ -191,6 +209,7 @@ export function AssemblyWorkspace({
     };
   }
   function select(next: string, keepConversation = false) {
+    setPackageUpgrade(null);
     if (next === id) return;
     setId(next);
     setSelectedBuild(undefined);
@@ -324,6 +343,13 @@ export function AssemblyWorkspace({
   );
   const editChanged =
     Boolean(buffer) || (latest && latest.revision !== current.revision);
+  function openVersion(agentId: string, targetVersion: string) {
+    setVersion({ id: agentId, version: targetVersion });
+    navigate("manage");
+  }
+  const packageOption = packageUpgrade
+    ? "package:" + packageUpgrade.agentId + "@" + packageUpgrade.version
+    : "";
   return (
     <section
       ref={studio}
@@ -340,7 +366,7 @@ export function AssemblyWorkspace({
               className="ui-action"
               onClick={() => setLibrary(true)}
             >
-              <ControlIcon name="layers" /> 精选资源管理
+              <ControlIcon name="layers" /> 智能体可调用资源管理
             </button>
             <button
               type="button"
@@ -371,10 +397,16 @@ export function AssemblyWorkspace({
               智能体与版本
               <select
                 aria-label="智能体与版本"
-                value={id}
+                value={packageUpgrade ? packageOption : id}
                 disabled={action.busy}
                 onChange={(e) => select(e.target.value)}
               >
+                {packageUpgrade && (
+                  <option value={packageOption}>
+                    {packageUpgrade.agentId} · v{packageUpgrade.version} ·
+                    程序包升级
+                  </option>
+                )}
                 <option value="">
                   {tab === "test"
                     ? "选择要测试的智能体"
@@ -401,259 +433,320 @@ export function AssemblyWorkspace({
             </label>
             <span className="studio-save-state">
               {tab === "assemble" &&
+                !packageUpgrade &&
                 (buffer
                   ? "有未保存修改"
                   : id && detail.data
                     ? "修改已保存"
                     : "")}
             </span>
+            {tab === "assemble" && !packageUpgrade && id && !archived && (
+              <button
+                type="button"
+                className="ui-action ui-quiet ui-small studio-archive"
+                disabled={!writable || waiting}
+                onClick={() => setConfirmDelete(true)}
+              >
+                删除编辑记录
+              </button>
+            )}
           </div>
         )}
         {tab !== "test" && <ActionNotice action={action} />}
         <ReadNotice read={list} />
-        {id && tab !== "manage" && <ReadNotice read={detail} />}
+        {id && !packageUpgrade && tab !== "manage" && (
+          <ReadNotice read={detail} />
+        )}
         <section {...panelProps("assemble")}>
-          {archived && (
-            <p className="live-notice">
-              此编辑记录已删除，仍可查看已生成的版本和测试记录。
-            </p>
-          )}
-          {conflict && detail.data && buffer && (
-            <section className="live-confirm" role="alert">
-              <p>
-                当前版本的编辑内容已在其他地方更新。你可以合并本地修改，也可以使用中台已保存的内容。
-              </p>
-              <div className="fc-actions">
-                <button
-                  className="ui-action ui-small"
-                  onClick={() =>
-                    setEdits({
-                      ...edits,
-                      [id]: mergeManual(buffer, detail.data!),
-                    })
-                  }
-                >
-                  合并我的改动
-                </button>
-                <button
-                  className="ui-action ui-small"
-                  onClick={() =>
-                    setEdits((old) => {
-                      const next = { ...old };
-                      delete next[id];
-                      return next;
-                    })
-                  }
-                >
-                  使用中台已保存的内容
-                </button>
-              </div>
-            </section>
-          )}
-          {id && !detail.data ? null : (
+          {packageUpgrade ? (
+            <PackageUpgrade
+              key={packageOption}
+              target={packageUpgrade}
+              offline={stale}
+              onPublished={(agentId, targetVersion) => {
+                setPackageUpgrade(null);
+                changed();
+                openVersion(agentId, targetVersion);
+              }}
+            />
+          ) : (
             <>
-              <AssemblyBrief
-                description={edit.description}
-                reply={message}
-                messages={detail.data?.messages ?? []}
-                canSuggest={canGenerate}
-                locked={actionsLocked}
-                open={conversationOpen}
-                onOpen={setConversationOpen}
-                onDescription={(description) => update({ description })}
-                onReply={(text) =>
-                  setMessages((old) => ({ ...old, [id]: text }))
-                }
-                onSuggest={(text) => submit("suggest", text)}
-              />
-              <div className="studio-columns">
-                <section
-                  className="studio-card studio-basics"
-                  aria-labelledby="studio-basic-title"
-                >
-                  <header className="studio-card-title">
-                    <ControlIcon name="file" size={19} />
-                    <h2 id="studio-basic-title">基本信息</h2>
-                  </header>
-                  <fieldset
-                    className="assembly-editable"
-                    disabled={actionsLocked}
-                  >
-                    <div className="assembly-grid">
-                      {fields.map(([key, label, placeholder]) => (
-                        <label className="assembly-field" key={key}>
-                          {label}
-                          <input
-                            value={edit.config[key]}
-                            placeholder={placeholder}
-                            onChange={(e) => config(key, e.target.value)}
+              {detail.data?.baseRelease && (
+                <div className="studio-upgrade-origin">
+                  <ControlIcon name="layers" size={17} />
+                  <span>
+                    升级来源{" "}
+                    <strong>
+                      {detail.data.baseRelease.agentId} · v
+                      {detail.data.baseRelease.version}
+                    </strong>
+                  </span>
+                </div>
+              )}
+              {archived && (
+                <p className="live-notice">
+                  此编辑记录已删除，仍可查看已生成的版本和测试记录。
+                </p>
+              )}
+              {conflict && detail.data && buffer && (
+                <section className="live-confirm" role="alert">
+                  <p>
+                    当前版本的编辑内容已在其他地方更新。你可以合并本地修改，也可以使用中台已保存的内容。
+                  </p>
+                  <div className="fc-actions">
+                    <button
+                      className="ui-action ui-small"
+                      onClick={() =>
+                        setEdits({
+                          ...edits,
+                          [id]: mergeManual(buffer, detail.data!),
+                        })
+                      }
+                    >
+                      合并我的改动
+                    </button>
+                    <button
+                      className="ui-action ui-small"
+                      onClick={() =>
+                        setEdits((old) => {
+                          const next = { ...old };
+                          delete next[id];
+                          return next;
+                        })
+                      }
+                    >
+                      使用中台已保存的内容
+                    </button>
+                  </div>
+                </section>
+              )}
+              {id && !detail.data ? null : (
+                <>
+                  <AssemblyBrief
+                    description={edit.description}
+                    reply={message}
+                    messages={detail.data?.messages ?? []}
+                    canSuggest={canGenerate}
+                    locked={actionsLocked}
+                    open={conversationOpen}
+                    onOpen={setConversationOpen}
+                    onDescription={(description) => update({ description })}
+                    onReply={(text) =>
+                      setMessages((old) => ({ ...old, [id]: text }))
+                    }
+                    onSuggest={(text) => submit("suggest", text)}
+                  />
+                  <div className="studio-columns">
+                    <section
+                      className="studio-card studio-basics"
+                      aria-labelledby="studio-basic-title"
+                    >
+                      <header className="studio-card-title">
+                        <ControlIcon name="file" size={19} />
+                        <h2 id="studio-basic-title">基本信息</h2>
+                      </header>
+                      <fieldset
+                        className="assembly-editable"
+                        disabled={actionsLocked}
+                      >
+                        <div className="assembly-grid">
+                          {fields.map(([key, label, placeholder]) => (
+                            <label className="assembly-field" key={key}>
+                              {label}
+                              <input
+                                value={edit.config[key]}
+                                readOnly={
+                                  key === "agentId" &&
+                                  !!detail.data?.baseRelease
+                                }
+                                placeholder={placeholder}
+                                onChange={(e) => config(key, e.target.value)}
+                              />
+                            </label>
+                          ))}
+                        </div>
+                        <label className="assembly-field">
+                          智能体职责
+                          <textarea
+                            value={edit.config.description}
+                            rows={2}
+                            onChange={(e) =>
+                              config("description", e.target.value)
+                            }
                           />
                         </label>
-                      ))}
-                    </div>
-                    <label className="assembly-field">
-                      智能体职责
-                      <textarea
-                        value={edit.config.description}
-                        rows={2}
-                        onChange={(e) => config("description", e.target.value)}
-                      />
-                    </label>
-                    <label className="assembly-field">
-                      业务流程与交付物
-                      <textarea
-                        value={edit.config.workflow}
-                        rows={3}
-                        onChange={(e) => config("workflow", e.target.value)}
-                      />
-                    </label>
-                    <label className="assembly-field">
-                      验收条件（每行一项）
-                      <textarea
-                        value={edit.config.criteria.join("\n")}
-                        rows={2}
-                        onChange={(e) =>
-                          config("criteria", e.target.value.split("\n"))
-                        }
-                      />
-                    </label>
-                  </fieldset>
-                </section>
-                <section
-                  className="studio-card studio-resources"
-                  aria-labelledby="studio-resource-title"
-                >
-                  <header className="studio-card-title">
-                    <ControlIcon name="sliders" size={19} />
-                    <h2 id="studio-resource-title">资源与权限</h2>
-                    <span className="studio-count">
-                      已选 {resourceCount} 项
-                    </span>
-                  </header>
-                  <ReadNotice read={options} />
-                  {options.data && (
-                    <ResourceChoices
-                      collapsible
-                      options={options.data}
-                      selection={edit.config}
-                      suggestions={detail.data?.suggestions}
-                      onEdit={config}
-                      disabled={actionsLocked}
-                    />
-                  )}
-                </section>
-              </div>
-              <div className="studio-build-footer">
-                <div className="studio-build-state">
-                  {generating
-                    ? "正在生成智能体…"
-                    : latest
-                      ? editChanged
-                        ? "当前修改尚未生成"
-                        : "最近生成于 " + when(latest.createdAt)
-                      : id
-                        ? "此版本尚未生成"
-                        : "首次生成时将保存此版本"}
-                </div>
-                <div className="studio-actions">
-                  <button
-                    type="button"
-                    className="ui-action"
-                    disabled={
-                      !writable ||
-                      !hasDescription ||
-                      conflict ||
-                      Boolean(id && !buffer)
-                    }
-                    onClick={() =>
-                      void action.run(async () => {
-                        try {
-                          await save();
-                          return "修改已保存。";
-                        } finally {
-                          setTick((n) => n + 1);
-                        }
-                      })
-                    }
-                  >
-                    保存修改
-                  </button>
-                  <button
-                    type="button"
-                    className="ui-action ui-primary"
-                    disabled={!canGenerate}
-                    onClick={() => submit("generate")}
-                  >
-                    <ControlIcon name="layers" /> 生成智能体
-                  </button>
-                  {latest && !generating && (
-                    <button
-                      type="button"
-                      className="ui-action ui-quiet"
-                      onClick={() => {
-                        setSelectedBuild(latest.id);
-                        navigate("test");
-                      }}
-                    >
-                      {editChanged ? "测试上次生成" : "去测试此版本"} →
-                    </button>
-                  )}
-                </div>
-              </div>
-              {operations.length > 0 && (
-                <details
-                  key={id}
-                  className="studio-card studio-operations"
-                  open={historyOpen || waiting}
-                  onToggle={(event) => setHistoryOpen(event.currentTarget.open)}
-                >
-                  <summary>
-                    生成与助手记录
-                    <span>
-                      {operations.length} 条{waiting ? " · 进行中" : ""}
-                    </span>
-                  </summary>
-                  {[...operations]
-                    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-                    .map((op) => (
-                      <div className="studio-operation" key={op.id}>
-                        <div>
-                          <strong>
-                            {op.kind === "suggest"
-                              ? "整理工作委托"
-                              : "生成智能体"}
-                          </strong>
-                          <Badge value={op.state} />
-                          <time>{when(op.updatedAt || op.createdAt)}</time>
-                          {op.message && <p>{factoryMessage(op.message)}</p>}
-                        </div>
-                        {pendingOperation(op) && (
-                          <button
-                            className="ui-action ui-small"
-                            disabled={!writable}
-                            onClick={() =>
-                              void action.run(async () => {
-                                await factoryApi.post(
-                                  `${draftPath(id)}/operations/${encodeURIComponent(op.id)}/stop`,
-                                  {},
-                                );
-                                changed();
-                                return "已请求停止操作。";
-                              })
+                        <label className="assembly-field">
+                          业务流程与交付物
+                          <textarea
+                            value={edit.config.workflow}
+                            rows={3}
+                            onChange={(e) => config("workflow", e.target.value)}
+                          />
+                        </label>
+                        <label className="assembly-field">
+                          验收条件（每行一项）
+                          <textarea
+                            value={edit.config.criteria.join("\n")}
+                            rows={2}
+                            onChange={(e) =>
+                              config("criteria", e.target.value.split("\n"))
                             }
-                          >
-                            停止操作
-                          </button>
-                        )}
-                      </div>
-                    ))}
-                </details>
+                          />
+                        </label>
+                      </fieldset>
+                    </section>
+                    <section
+                      className="studio-card studio-resources"
+                      aria-labelledby="studio-resource-title"
+                    >
+                      <header className="studio-card-title">
+                        <ControlIcon name="sliders" size={19} />
+                        <h2 id="studio-resource-title">资源与权限</h2>
+                        <span className="studio-count">
+                          已选 {resourceCount} 项
+                        </span>
+                      </header>
+                      <ReadNotice read={options} />
+                      {options.data && (
+                        <ResourceChoices
+                          collapsible
+                          options={options.data}
+                          selection={edit.config}
+                          suggestions={detail.data?.suggestions}
+                          onEdit={config}
+                          disabled={actionsLocked}
+                        />
+                      )}
+                    </section>
+                  </div>
+                  <div className="studio-build-footer">
+                    <div className="studio-build-state">
+                      {generating
+                        ? "正在生成智能体…"
+                        : latest
+                          ? editChanged
+                            ? "当前修改尚未生成"
+                            : "最近生成于 " + when(latest.createdAt)
+                          : id
+                            ? "此版本尚未生成"
+                            : "首次生成时将保存此版本"}
+                    </div>
+                    <div className="studio-actions">
+                      <button
+                        type="button"
+                        className="ui-action"
+                        disabled={
+                          !writable ||
+                          !hasDescription ||
+                          conflict ||
+                          Boolean(id && !buffer)
+                        }
+                        onClick={() =>
+                          void action.run(async () => {
+                            try {
+                              await save();
+                              return "修改已保存。";
+                            } finally {
+                              setTick((n) => n + 1);
+                            }
+                          })
+                        }
+                      >
+                        保存修改
+                      </button>
+                      <button
+                        type="button"
+                        className="ui-action ui-primary"
+                        disabled={!canGenerate}
+                        onClick={() => submit("generate")}
+                      >
+                        <ControlIcon name="layers" /> 生成智能体
+                      </button>
+                      {latest && !generating && (
+                        <button
+                          type="button"
+                          className="ui-action ui-quiet"
+                          onClick={() => {
+                            setSelectedBuild(latest.id);
+                            navigate("test");
+                          }}
+                        >
+                          {editChanged ? "测试上次生成" : "去测试此版本"} →
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  {operations.length > 0 && (
+                    <details
+                      key={id}
+                      className="studio-card studio-operations"
+                      open={historyOpen || waiting}
+                      onToggle={(event) =>
+                        setHistoryOpen(event.currentTarget.open)
+                      }
+                    >
+                      <summary>
+                        生成与助手记录
+                        <span>
+                          {operations.length} 条{waiting ? " · 进行中" : ""}
+                        </span>
+                      </summary>
+                      {[...operations]
+                        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+                        .map((op) => (
+                          <div className="studio-operation" key={op.id}>
+                            <div>
+                              <strong>
+                                {op.kind === "suggest"
+                                  ? "整理工作委托"
+                                  : "生成智能体"}
+                              </strong>
+                              <Badge value={op.state} />
+                              <time>{when(op.updatedAt || op.createdAt)}</time>
+                              {op.message && (
+                                <p>{factoryMessage(op.message)}</p>
+                              )}
+                            </div>
+                            {pendingOperation(op) && (
+                              <button
+                                className="ui-action ui-small"
+                                disabled={!writable}
+                                onClick={() =>
+                                  void action.run(async () => {
+                                    await factoryApi.post(
+                                      `${draftPath(id)}/operations/${encodeURIComponent(op.id)}/stop`,
+                                      {},
+                                    );
+                                    changed();
+                                    return "已请求停止操作。";
+                                  })
+                                }
+                              >
+                                停止操作
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                    </details>
+                  )}
+                </>
               )}
             </>
           )}
         </section>
         <section {...panelProps("test")}>
-          {!visited.test || (id && !detail.data) ? null : latest &&
+          {packageUpgrade ? (
+            <div className="studio-card studio-no-tests">
+              <h2>程序包版本自检</h2>
+              <p>新版本提交发布并获得批准后，可在版本详情查看中台自检状态。</p>
+              <button
+                className="ui-action"
+                onClick={() => navigate("assemble")}
+              >
+                返回组装
+              </button>
+            </div>
+          ) : !visited.test || (id && !detail.data) ? null : latest &&
             detail.data ? (
             <div className="studio-card studio-testing">
               {generating && (
@@ -705,93 +798,13 @@ export function AssemblyWorkspace({
           )}
         </section>
         <section {...panelProps("manage")}>
-          {visited.manage && !version && versions.length > 0 && (
-            <details className="studio-card studio-saved">
-              <summary>
-                已保存的组装<span>{versions.length} 个版本</span>
-              </summary>
-              <label className="assembly-field">
-                选择编辑记录
-                <select
-                  value={id}
-                  onChange={(e) => select(e.target.value)}
-                  disabled={action.busy}
-                >
-                  <option value="">选择智能体与版本</option>
-                  {versions.map((v) => (
-                    <option key={v.id} value={v.id}>
-                      {v.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {id && <ReadNotice read={detail} />}
-              <div className="studio-actions">
-                <button
-                  type="button"
-                  className="ui-action"
-                  disabled={!id || !detail.data}
-                  onClick={() => navigate("assemble")}
-                >
-                  继续组装
-                </button>
-                {id && !archived && !confirmDelete && (
-                  <button
-                    type="button"
-                    className="ui-action ui-quiet ui-danger"
-                    disabled={!writable || waiting}
-                    onClick={() => setConfirmDelete(true)}
-                  >
-                    <ControlIcon name="trash" size={14} /> 删除编辑记录
-                  </button>
-                )}
-                {confirmDelete && (
-                  <section className="live-confirm">
-                    <p>
-                      删除「
-                      {current.config.displayName || current.description}
-                      」的编辑记录？已生成的版本、测试和发布记录仍可查看。
-                    </p>
-                    <div className="fc-actions">
-                      <button
-                        className="ui-action ui-danger ui-small"
-                        disabled={!writable}
-                        onClick={() =>
-                          void action.run(async () => {
-                            await factoryApi.post(`${draftPath(id)}/delete`, {
-                              revision: current.revision,
-                            });
-                            setEdits((old) => {
-                              const next = { ...old };
-                              delete next[id];
-                              return next;
-                            });
-                            select("");
-                            changed();
-                            return "编辑记录已删除。";
-                          })
-                        }
-                      >
-                        确认删除编辑记录
-                      </button>
-                      <button
-                        className="ui-action ui-small"
-                        onClick={() => setConfirmDelete(false)}
-                      >
-                        取消
-                      </button>
-                    </div>
-                  </section>
-                )}
-              </div>
-            </details>
-          )}
           {visited.manage && (
             <div className="studio-card studio-manager">
-              {version ? (
+              {version && (
                 <>
                   <button
                     className="ui-action ui-quiet ui-small studio-back"
+                    ref={detailBack}
                     onClick={() => setVersion(null)}
                   >
                     ← 返回版本列表
@@ -816,39 +829,91 @@ export function AssemblyWorkspace({
                       action.busy
                         ? undefined
                         : async (agent) => {
-                            select(await createDraftFromVersion(agent));
+                            const next = await prepareAgentUpgrade(agent);
+                            if (next.kind === "package")
+                              setPackageUpgrade(next);
+                            else {
+                              select(next.draftId);
+                              changed();
+                            }
                             navigate("assemble");
-                            changed();
                           }
                     }
                   />
                 </>
-              ) : (
-                <div className="studio-catalog">
-                  <div className="studio-manager-actions">
-                    <button
-                      type="button"
-                      className="ui-action ui-primary"
-                      disabled={action.busy}
-                      onClick={() => {
-                        select("");
-                        navigate("assemble");
-                      }}
-                    >
-                      <ControlIcon name="plus" /> 组装新智能体
-                    </button>
-                  </div>
-                  <AgentCatalog
-                    initialFilter=""
-                    revision={revision + listTick}
-                    onAgent={(id, version) => setVersion({ id, version })}
-                  />
-                </div>
               )}
+              <div className="studio-catalog" hidden={!!version}>
+                <div className="studio-manager-actions">
+                  <button
+                    type="button"
+                    className="ui-action ui-primary"
+                    disabled={action.busy}
+                    onClick={() => {
+                      select("");
+                      navigate("assemble");
+                    }}
+                  >
+                    <ControlIcon name="plus" /> 组装新智能体
+                  </button>
+                </div>
+                <AgentCatalog
+                  initialFilter=""
+                  active={active && tab === "manage" && !version}
+                  revision={revision + listTick}
+                  onAgent={(id, version) => setVersion({ id, version })}
+                />
+              </div>
             </div>
           )}
         </section>
       </div>
+      {confirmDelete &&
+        tab === "assemble" &&
+        active &&
+        id &&
+        !packageUpgrade && (
+          <Modal
+            title="删除编辑记录"
+            onClose={() => setConfirmDelete(false)}
+            closeDisabled={action.busy}
+          >
+            <p>
+              删除「{current.config.displayName || current.description}
+              」的编辑记录？已生成的版本、测试和发布记录仍可查看。
+            </p>
+            <ActionNotice action={action} />
+            <div className="fc-actions">
+              <button
+                className="ui-action ui-danger"
+                disabled={!writable || waiting}
+                onClick={() =>
+                  void action.run(async () => {
+                    await factoryApi.post(`${draftPath(id)}/delete`, {
+                      revision: current.revision,
+                    });
+                    setEdits((old) => {
+                      const next = { ...old };
+                      delete next[id];
+                      return next;
+                    });
+                    select("");
+                    changed();
+                    return "编辑记录已删除。";
+                  })
+                }
+              >
+                确认删除编辑记录
+              </button>
+              <button
+                className="ui-action"
+                disabled={action.busy}
+                onClick={() => setConfirmDelete(false)}
+              >
+                取消
+              </button>
+            </div>
+          </Modal>
+        )}
       {library && active && (
         <AssemblyResources
           disabled={stale}

@@ -136,8 +136,7 @@
 }
 .studio-tabs button:focus-visible,
 .studio-resource-toggle:focus-visible,
-.studio-conversation summary:focus-visible,
-.studio-saved summary:focus-visible {
+.studio-conversation summary:focus-visible {
   outline: 2px solid var(--q-accent);
   outline-offset: 3px;
 }
@@ -168,20 +167,17 @@
 .studio-conversation {
   margin-top: 12px;
 }
-.studio-conversation > summary,
-.studio-saved > summary {
+.studio-conversation > summary {
   width: fit-content;
   max-width: 100%;
   cursor: pointer;
   color: var(--q-accent);
   font-weight: 600;
 }
-.studio-conversation[open] > summary,
-.studio-saved[open] > summary {
+.studio-conversation[open] > summary {
   margin-bottom: 14px;
 }
-.studio-conversation summary span,
-.studio-saved summary span {
+.studio-conversation summary span {
   font-weight: 400;
   margin-left: 8px;
   color: var(--muted);
@@ -210,12 +206,8 @@
 .studio-manager .live-list {
   clear: both;
 }
-.studio-manager .studio-actions,
-.studio-saved .studio-actions {
+.studio-manager .studio-actions {
   flex-wrap: wrap;
-}
-.studio-saved .assembly-field {
-  max-width: 32rem;
 }
 .studio-no-tests {
   padding: clamp(24px, 4vw, 56px);
@@ -632,4 +624,29 @@
     grid-column: 1 / -1;
     grid-row: 2;
   }
+}
+
+.studio-upgrade-origin {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 0 2px 14px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.studio-upgrade-origin strong {
+  color: var(--q-ink, var(--q-accent));
+  margin-inline-start: 8px;
+}
+.studio-package .assembly-field {
+  min-width: 0;
+}
+.studio-package-context .live-facts {
+  overflow-wrap: anywhere;
+}
+.studio-package .assembly-grid {
+  margin-bottom: 12px;
+}
+.assembly-studio .studio-command .studio-archive {
+  margin-inline-start: auto;
 }

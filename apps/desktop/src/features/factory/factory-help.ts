@@ -144,6 +144,7 @@ export function runtimeName(runtime: string | null | undefined): string {
     case "codex":
     case "codex_exec":
       return "Codex 推理运行时";
+    case "unknown":
     case "":
     case undefined:
     case null:

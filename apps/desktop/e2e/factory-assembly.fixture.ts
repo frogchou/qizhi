@@ -134,6 +134,49 @@ export async function installAssemblyFixture(page: Page) {
         body = args.body ?? {};
       if (
         cmd === "factory_request" &&
+        path === "/v1/factory/agents/audit-assistant/versions/0.9.0/upgrade"
+      ) {
+        window.factoryLiveFixture.calls.push(args);
+        return {
+          kind: "package",
+          agentId: "audit-assistant",
+          version: "0.9.0",
+          nextVersion: "1.0.1",
+          displayName: "审计助理旧版",
+          runtime: "codex",
+          capabilities: [
+            {
+              name: "knowledge.retrieve",
+              description: "按旧版规则查询档案",
+              effect: "read",
+            },
+          ],
+          resources: { connections: ["archive"] },
+          inputFields: ["query"],
+          outputFields: ["answer"],
+          availablePackages: [],
+        };
+      }
+      if (
+        cmd === "factory_request" &&
+        path === "/v1/factory/releases" &&
+        body.baseVersion === "0.9.0"
+      ) {
+        window.factoryLiveFixture.calls.push(args);
+        window.factoryLiveFixture.release = {
+          agentId: String(body.agentId),
+          version: String(body.version),
+          displayName: String(body.displayName),
+          status: "pending_review",
+        };
+        return {
+          agentId: body.agentId,
+          version: body.version,
+          status: "pending_review",
+        };
+      }
+      if (
+        cmd === "factory_request" &&
         removedVersion &&
         path.split("?")[0] === "/v1/factory/agents"
       ) {

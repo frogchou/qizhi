@@ -3,7 +3,7 @@ import { AssemblyWorkspace } from "./AssemblyWorkspace";
 import { useFactoryMode } from "./factory-client";
 import { useFactoryFeed } from "./factory-feed";
 import type { OpenTask } from "./factory-model";
-import type { TaskScope } from "./assembly-model";
+import type { TaskScope, UpgradeEntry } from "./assembly-model";
 
 type PageProps = {
   active: boolean;
@@ -15,7 +15,7 @@ type PageProps = {
 export function AssemblyPage({
   entry,
   ...props
-}: PageProps & { entry?: { endpoint: string; draftId: string } }) {
+}: PageProps & { entry?: { endpoint: string; target: UpgradeEntry } }) {
   const connection = useFactoryMode();
   if (connection.mode === "live")
     return (
@@ -23,8 +23,8 @@ export function AssemblyPage({
         key={connection.endpoint}
         {...props}
         endpoint={connection.endpoint}
-        initialDraftId={
-          entry?.endpoint === connection.endpoint ? entry.draftId : undefined
+        entry={
+          entry?.endpoint === connection.endpoint ? entry.target : undefined
         }
       />
     );
@@ -61,7 +61,7 @@ export function AssemblyPage({
 function ConnectedAssembly({
   active,
   ...props
-}: PageProps & { endpoint: string; initialDraftId?: string }) {
+}: PageProps & { endpoint: string; entry?: UpgradeEntry }) {
   const feed = useFactoryFeed(active);
   return (
     <AssemblyWorkspace

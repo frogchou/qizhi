@@ -50,6 +50,7 @@ fn valid_query(name: &str, query: &str) -> bool {
                 }
                 ("changes", "waitMs") => value.parse::<u32>().is_ok_and(|v| v <= 25_000),
                 ("changes", _) => false,
+                ("agents", "search") => value.encode_utf16().count() <= 160,
                 (_, "limit" | "offset") => {
                     value.bytes().all(|c| c.is_ascii_digit()) && value.parse::<u32>().is_ok()
                 }
@@ -157,6 +158,20 @@ pub(super) fn validate(method: &str, path: &str) -> Result<(), String> {
         ) => valid_id(resource) && valid_id(version),
         ("GET", ["", "v1", "factory", "agents", agent, "status"], None)
         | ("POST", ["", "v1", "factory", "agents", agent, "delete"], None) => valid_id(agent),
+        (
+            "GET",
+            [
+                "",
+                "v1",
+                "factory",
+                "agents",
+                agent,
+                "versions",
+                version,
+                "upgrade",
+            ],
+            None,
+        ) => valid_id(agent) && valid_id(version),
         ("GET", ["", "v1", "tasks" | "agents"], None) => true,
         ("GET", ["", "v1", "tasks", task] | ["", "v1", "tasks", task, "interactions"], None) => {
             valid_id(task)
@@ -219,8 +234,10 @@ mod tests {
         for path in [
             "/v1/factory/changes?after=ab.x-_2&waitMs=25000",
             "/v1/factory/quality?state=awaiting_review&offset=20&limit=5",
+            "/v1/factory/agents?search=%E7%A8%8E%25_%2B&runtime=native&status=offline&offset=20",
             "/v1/tasks/abc-A/interactions",
             "/v1/factory/agents/alpha/status",
+            "/v1/factory/agents/alpha/versions/1.2.3%2Bbuild/upgrade",
             "/v1/factory/assemblies",
             "/v1/factory/assemblies/options",
             "/v1/factory/assemblies/draft",
@@ -258,6 +275,9 @@ mod tests {
             "/v1/factory/changes?after=a&after=b",
             "/v1/factory/changes?waitMs=25001",
             "/v1/factory/agents?redirect=http://host",
+            "/v1/factory/tasks?search=unrelated",
+            "/v1/factory/agents/alpha/versions/1.2.3/upgrade?file=extra",
+            "/v1/factory/agents?search=first&search=second",
             "/v1/factory/%2e%2e",
             "/v1/tasks/..",
             "/v1/tasks/a%2Fb",
@@ -290,6 +310,8 @@ mod tests {
             assert!(validate(method, path).is_err(), "{method} {path}");
         }
         assert!(validate("PUT", "/v1/tasks").is_err());
+        let long_search = format!("/v1/factory/agents?search={}", "a".repeat(161));
+        assert!(validate("GET", &long_search).is_err());
         assert!(artifact("t", "../a").is_err());
     }
 }

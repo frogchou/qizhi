@@ -170,7 +170,9 @@ async function operationFailure(
   const review = path.startsWith("/v1/tasks/") && path.endsWith("/review");
   const assembly =
     path.startsWith("/v1/factory/assemblies") ||
-    path.startsWith("/v1/factory/assembly-resources");
+    path.startsWith("/v1/factory/assembly-resources") ||
+    path === "/v1/factory/releases" ||
+    path.endsWith("/upgrade");
   const { status } = response;
   const limit = 16 * 1024;
   if (
@@ -196,8 +198,20 @@ async function operationFailure(
       text += decoder.decode(value, { stream: true });
     }
     const payload = JSON.parse(text + decoder.decode());
-    if (assembly)
+    if (assembly) {
+      if (
+        status === 409 &&
+        payload?.code === "assembly_version_too_low" &&
+        typeof payload.nextVersion === "string" &&
+        /^\d{1,9}\.\d{1,9}\.\d{1,9}$/.test(payload.nextVersion)
+      )
+        return (
+          "目标版本必须高于所有历史和待登记版本，可使用 " +
+          payload.nextVersion +
+          "。"
+        );
       return assemblyErrors.find((message) => message === payload?.message);
+    }
     if (review && status === 409) {
       if (payload?.code === "stale_review")
         return "验收轮次已变化，请刷新工单后再提交。";
@@ -266,7 +280,9 @@ async function httpError(
 ): Promise<Error> {
   const status = response.status;
   const reason =
-    method === "POST" ? await operationFailure(path, response) : undefined;
+    method === "POST" || path.endsWith("/upgrade")
+      ? await operationFailure(path, response)
+      : undefined;
   let message: string;
   if (reason) message = reason;
   else if (status === 401 || status === 403)

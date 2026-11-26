@@ -415,6 +415,7 @@ const states: Record<string, string> = {
   completed: "已完成",
   ready: "已上线",
   offline: "已下线",
+  draining: "下线中",
   deleting: "删除中",
   self_check_failed: "自检失败",
   self_checking: "自检中",

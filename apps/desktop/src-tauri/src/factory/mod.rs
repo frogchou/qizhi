@@ -72,7 +72,21 @@ fn operation_failure(path: &str, status: StatusCode, payload: &Value) -> Option<
     let legacy = payload.get("message").and_then(Value::as_str).unwrap_or("");
     if path.starts_with("/v1/factory/assemblies")
         || path.starts_with("/v1/factory/assembly-resources")
+        || path == "/v1/factory/releases"
+        || path.ends_with("/upgrade")
     {
+        if status == StatusCode::CONFLICT && code == "assembly_version_too_low" {
+            let version = payload["nextVersion"].as_str()?;
+            if version.split('.').count() == 3
+                && version
+                    .split('.')
+                    .all(|p| !p.is_empty() && p.len() <= 9 && p.bytes().all(|b| b.is_ascii_digit()))
+            {
+                return Some(format!(
+                    "目标版本必须高于所有历史和待登记版本，可使用 {version}。（HTTP 409）"
+                ));
+            }
+        }
         let reasons: Vec<&str> = serde_json::from_str(include_str!(
             "../../../src/features/factory/assembly-errors.json"
         ))
@@ -209,12 +223,14 @@ async fn json_request(
     let mut response = request.send().await.map_err(transport_error)?;
     let status = response.status();
     if let Err(fallback) = public_status(status) {
-        if method == Method::POST
+        if (method == Method::POST || path.ends_with("/upgrade"))
             && matches!(status.as_u16(), 400 | 403 | 409 | 422 | 503)
             && (path.ends_with("/delete")
                 || path.ends_with("/stop")
                 || path.starts_with("/v1/factory/assemblies")
-                || path.starts_with("/v1/factory/assembly-resources"))
+                || path.starts_with("/v1/factory/assembly-resources")
+                || path == "/v1/factory/releases"
+                || path.ends_with("/upgrade"))
         {
             let payload = bounded_json(&mut response, 16 * 1024)
                 .await
@@ -390,6 +406,25 @@ mod tests {
         assert!(found(delete, StatusCode::CONFLICT, "private", private).is_none());
         assert!(found(delete, StatusCode::UNAUTHORIZED, "agent_protected", private).is_none());
         assert!(found(stop, StatusCode::CONFLICT, "agent_in_use", private).is_none());
+        let release = "/v1/factory/releases";
+        assert!(found(release, StatusCode::CONFLICT, "", private).is_none());
+        assert!(
+            found(
+                release,
+                StatusCode::CONFLICT,
+                "",
+                "该版本号已由其他发布或历史版本占用。"
+            )
+            .is_some()
+        );
+        for (next, accepted) in [("1.2.3", true), ("1.2.3 secret", false)] {
+            let payload = serde_json::json!({"code":"assembly_version_too_low","nextVersion":next});
+            assert_eq!(
+                operation_failure("/v1/factory/assemblies", StatusCode::CONFLICT, &payload)
+                    .is_some(),
+                accepted
+            );
+        }
         assert!(
             found(stop, StatusCode::CONFLICT, "", "任务已经结束。")
                 .unwrap()

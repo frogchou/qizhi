@@ -47,6 +47,7 @@ describe("factory desktop transport", () => {
       ["POST", root + "/draft/runs/trial/accept"],
       ["POST", root + "/draft/publish"],
       ["GET", "/v1/tasks/capability-options"],
+      ["GET", "/v1/factory/agents/qa/versions/1.2.0%2Bnotes/upgrade"],
       ["GET", "/v1/factory/assembly-resources"],
       ["POST", "/v1/factory/assembly-resources"],
       ["GET", "/v1/factory/assembly-resources/skill/rules/1.2.0"],
@@ -56,6 +57,8 @@ describe("factory desktop transport", () => {
       expect(validFactoryRoute(method, path), path).toBe(true);
     for (const [method, path] of [
       ["POST", root + "/options"],
+      ["POST", "/v1/factory/agents/qa/versions/1.2.0/upgrade"],
+      ["GET", "/v1/factory/agents/qa/versions/1.2.0/upgrade?file=extra"],
       ["GET", root + "/draft/save"],
       ["POST", root + "/draft/publish?force=1"],
       ["POST", root + "/../save"],
@@ -134,6 +137,12 @@ describe("factory desktop transport", () => {
   });
   it("protects methods, paths, opaque cursors and proxy targets", () => {
     expect(
+      validFactoryRoute(
+        "GET",
+        "/v1/factory/agents?search=%E7%A8%8E%25_%2B&runtime=native&status=offline&offset=20",
+      ),
+    ).toBe(true);
+    expect(
       validFactoryRoute("POST", "/v1/agents/a/versions/1.0.0%2Bbuild/approve"),
     ).toBe(true);
     expect(
@@ -148,6 +157,9 @@ describe("factory desktop transport", () => {
       "/v1/factory/changes?after=0&after=2",
       "/v1/factory/changes?waitMs=25001",
       "/v1/factory/tasks?url=http://bad",
+      "/v1/factory/tasks?search=unrelated",
+      "/v1/factory/agents?search=first&search=second",
+      "/v1/factory/agents?search=" + "a".repeat(161),
     ])
       expect(validFactoryRoute("GET", path)).toBe(false);
     expect(validFactoryRoute("POST", "/v1/agents/discover")).toBe(false);

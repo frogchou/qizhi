@@ -32,6 +32,7 @@ type Fixture = {
   oldRuntimeApi?: boolean;
   lineCount?: number;
   idleVersion?: boolean;
+  catalogCount?: number;
   readyCandidate?: boolean;
   failNextAmend?: boolean;
   deleted?: boolean;
@@ -150,6 +151,17 @@ async function install(page: Page) {
           ? [{ ...demoAgent, agentId: "indexer", displayName: "索引助理" }]
           : []),
         ...(state.release ? [state.release] : []),
+        ...Array.from({ length: state.catalogCount ?? 0 }, (_, index) => ({
+          agentId: "catalog-" + index,
+          displayName: "资料核对 " + index,
+          version: "4.2." + index,
+          status:
+            index === 0
+              ? "self_check_failed"
+              : index >= 180
+                ? "offline"
+                : "pending_review",
+        })),
       ].map((a) => ({
         ...a,
         status:
@@ -157,7 +169,11 @@ async function install(page: Page) {
             ? "deleting"
             : a.status,
         id: a.agentId + "@" + a.version,
-        runtime: "codex",
+        runtime:
+          a.agentId.startsWith("catalog-") &&
+          Number(a.agentId.slice("catalog-".length)) % 2 === 0
+            ? "native"
+            : "codex",
         createdAt: now(),
         approvedAt: now(),
         runningCount:
@@ -166,9 +182,9 @@ async function install(page: Page) {
           !state.stopped?.includes("task-running")
             ? 1
             : 0,
-        capabilities: [
-          { name: "knowledge.retrieve", description: "检索机构档案" },
-        ],
+        capabilities: a.agentId.startsWith("catalog-")
+          ? [{ name: "ledger.Review", description: "核对%_Review" }]
+          : [{ name: "knowledge.retrieve", description: "检索机构档案" }],
       }));
     const readPage = (items: unknown[]) => ({
       items,
@@ -465,18 +481,36 @@ async function install(page: Page) {
           status: state.deleting ? "deleting" : "active",
           versionCount: 2,
         };
-      if (path === "/v1/factory/agents")
-        return readPage(
-          agents().filter(
-            (a) =>
-              (!url.searchParams.get("status") ||
-                a.status === url.searchParams.get("status")) &&
-              (!url.searchParams.get("agentId") ||
-                a.agentId === url.searchParams.get("agentId")) &&
-              (!url.searchParams.get("version") ||
-                a.version === url.searchParams.get("version")),
-          ),
+      if (path === "/v1/factory/agents") {
+        const get = (key: string) => url.searchParams.get(key);
+        const status = get("status");
+        const search = get("search")?.trim().toLowerCase();
+        const matches = agents().filter(
+          (a) =>
+            (!status ||
+              (status === "working"
+                ? a.runningCount > 0
+                : a.status === status)) &&
+            (!get("runtime") || a.runtime === get("runtime")) &&
+            (!get("agentId") || a.agentId === get("agentId")) &&
+            (!get("version") || a.version === get("version")) &&
+            (!search ||
+              [
+                a.id,
+                a.displayName,
+                "v" + a.version,
+                ...a.capabilities.flatMap((c) => [c.name, c.description]),
+              ].some((field) => field.toLowerCase().includes(search))),
         );
+        const limit = Number(get("limit") || 20);
+        const offset = Number(get("offset") || 0);
+        return {
+          ...readPage(matches),
+          limit,
+          offset,
+          items: matches.slice(offset, offset + limit),
+        };
+      }
       if (path === "/v1/factory/monitor") return readPage([event]);
       if (
         path === "/v1/factory/runtimes" &&
@@ -695,8 +729,8 @@ test("导入 Skill 文件夹可核对相对路径，复制新版本保留附件�
   await writeFile(join(fixture, "SKILL.md"), "# 比较报价");
   await writeFile(join(fixture, "examples", "币种.csv"), "currency\nCNY");
   await openStudio(page);
-  await page.getByRole("button", { name: "精选资源管理" }).click();
-  const library = page.getByRole("dialog", { name: "精选资源管理" });
+  await page.getByRole("button", { name: "智能体可调用资源管理" }).click();
+  const library = page.getByRole("dialog", { name: "智能体可调用资源管理" });
   await library.getByRole("button", { name: "登记资源", exact: true }).click();
   await library.getByLabel("资源名称").fill("比价规则");
   await library.getByLabel("资源标识").fill("compare-quotes");
@@ -887,6 +921,53 @@ test("三页签保留未提交内容，并把指定生成记录交给测试", as
   await expect(studio.getByLabel("样例需求")).toHaveValue("");
   await page.screenshot({ path: testInfo.outputPath("testing.png") });
 });
+test("从管理页升级独立程序包，回显所选历史版本并提交新版本审核", async ({
+  page,
+}) => {
+  const studio = await openStudio(page);
+  const manage = studio.getByRole("tab", { name: "智能体管理", exact: true });
+  const assemble = studio.getByRole("tab", { name: "智能体组装", exact: true });
+  await manage.click();
+  await expect(studio.getByText(/已保存的组装/)).toHaveCount(0);
+  await studio.getByRole("button", { name: /审计助理.*v0\.9\.0/ }).click();
+  await studio.getByRole("button", { name: "升级智能体" }).click();
+  await expect(assemble).toHaveAttribute("aria-selected", "true");
+  const editor = studio.getByRole("tabpanel", { name: "智能体组装" });
+  await expect(editor.getByLabel("智能体名称")).toHaveValue("审计助理旧版");
+  await expect(editor.getByLabel("目标发布版本")).toHaveValue("1.0.1");
+  await expect(editor.getByLabel("knowledge.retrieve 能力说明")).toHaveValue(
+    "按旧版规则查询档案",
+  );
+  await editor.getByLabel("智能体名称").fill("机构档案审计");
+  await editor
+    .getByLabel("knowledge.retrieve 能力说明")
+    .fill("核对机构档案中的审核资料");
+  await manage.click();
+  await assemble.click();
+  await expect(editor.getByLabel("智能体名称")).toHaveValue("机构档案审计");
+  await editor.getByRole("button", { name: "发布新版本" }).click();
+  await expect(manage).toHaveAttribute("aria-selected", "true");
+  await expect(
+    studio.getByRole("heading", { name: "机构档案审计" }),
+  ).toBeVisible();
+  const payload = await page.evaluate(
+    () =>
+      window.factoryLiveFixture.calls.find(
+        (c) =>
+          c.path === "/v1/factory/releases" && c.body?.baseVersion === "0.9.0",
+      )?.body,
+  );
+  expect(payload).toMatchObject({
+    intent: "upgrade",
+    baseVersion: "0.9.0",
+    agentId: "audit-assistant",
+    version: "1.0.1",
+    displayName: "机构档案审计",
+    capabilities: [
+      { name: "knowledge.retrieve", description: "核对机构档案中的审核资料" },
+    ],
+  });
+});
 test("用指定生成版本和附件测试，答复后人工认可并按同一快照发布", async ({
   page,
 }, testInfo) => {
@@ -990,7 +1071,7 @@ test("用指定生成版本和附件测试，答复后人工认可并按同一�
     inspector.getByRole("heading", { name: "发布依据" }),
   ).toBeVisible();
   await expect(inspector.getByText("样例已获用户认可")).toBeVisible();
-  await inspector.getByRole("button", { name: "基于此版本创建" }).click();
+  await inspector.getByRole("button", { name: "升级智能体" }).click();
   await expect(panel.getByLabel("智能体与版本")).toHaveValue("derived-draft");
   await expect(panel.getByLabel("目标发布版本")).toHaveValue("1.0.1");
   expect(
@@ -1107,12 +1188,114 @@ test("中台重连带来新修订时，合并保留人工改动及服务器新�
       config: { workflow: "中台新增汇率校验" },
     });
 });
+test("版本目录在全库搜索并保留筛选、页码和返回位置", async ({
+  page,
+}, testInfo) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (entry) => {
+    if (entry.type() === "error") errors.push(entry.text());
+  });
+  await page.evaluate(() => {
+    window.factoryLiveFixture.catalogCount = 320;
+  });
+  const studio = await openStudio(page);
+  await studio.getByRole("tab", { name: "智能体管理" }).click();
+  const manager = studio.getByRole("tabpanel", { name: "智能体管理" });
+  const tabs = manager.getByRole("tablist", { name: "版本状态" });
+  const all = tabs.getByRole("tab", { name: "全部版本" });
+  const ready = tabs.getByRole("tab", { name: "已上线" });
+  const offline = tabs.getByRole("tab", { name: "已下线" });
+  const deleting = tabs.getByRole("tab", { name: "删除中" });
+  const search = manager.getByRole("searchbox", { name: "搜索智能体版本" });
+  const runtime = manager.getByRole("combobox", { name: "运行环境" });
+  await expect(manager.getByText("共 322 个版本")).toBeVisible();
+  for (const [name, label, tone] of [
+    [/v1\.0\.0\b/, "已上线", "green"],
+    [/v0\.9\.0\b/, "已下线", "orange"],
+    [/v4\.2\.1\b/, "待审核", "amber"],
+    [/v4\.2\.0\b/, "自检失败", "red"],
+  ] as const) {
+    const pill = manager
+      .getByRole("button", { name })
+      .getByText(label, { exact: true });
+    await expect(pill).toBeVisible();
+    const [red, green, blue] = await pill.evaluate((el) =>
+      getComputedStyle(el).color.match(/\d+/g)!.map(Number),
+    );
+    if (tone === "green") expect(green).toBeGreaterThan(Math.max(red, blue));
+    else if (tone === "amber" || tone === "orange") {
+      expect(red).toBeGreaterThan(green);
+      expect(green).toBeGreaterThan(blue);
+      const hue = (60 * (green - blue)) / (red - blue);
+      if (tone === "amber") expect(hue).toBeGreaterThan(36);
+      else expect(hue).toBeLessThan(30);
+    } else expect(red).toBeGreaterThan(Math.max(green, blue) * 2);
+  }
+  await all.focus();
+  await all.press("ArrowRight");
+  await expect(ready).toBeFocused();
+  await expect(ready).toHaveAttribute("aria-selected", "true");
+  await ready.press("End");
+  await expect(deleting).toBeFocused();
+  await deleting.press("Home");
+  await expect(all).toBeFocused();
+  await search.fill("核对%_reVIew");
+  await expect(manager.getByText("共 320 个版本")).toBeVisible();
+  await offline.click();
+  await runtime.selectOption("native");
+  await expect(manager.getByText("共 70 个版本")).toBeVisible();
+  for (const width of [1280, 412]) {
+    await page.setViewportSize({ width, height: 820 });
+    expect(
+      await tabs.evaluate((el) => el.scrollWidth <= el.clientWidth + 1),
+    ).toBe(true);
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+    await expect(page.locator("vite-error-overlay")).toHaveCount(0);
+    await expect(offline).toBeVisible();
+    await page.screenshot({
+      path: testInfo.outputPath("version-catalog-" + width + ".png"),
+    });
+  }
+  await manager.getByRole("button", { name: "下一页" }).click();
+  await expect(manager.getByText("21–40 / 70")).toBeVisible();
+  const row = manager.getByRole("button", { name: /v4\.2\.258\b/ });
+  await row.scrollIntoViewIfNeeded();
+  const top = await studio.evaluate((el) => el.scrollTop);
+  await row.click();
+  await expect(
+    manager.getByRole("heading", { name: "资料核对 258" }),
+  ).toBeVisible();
+  await manager.getByRole("button", { name: "返回版本列表" }).click();
+  await expect(search).toHaveValue("核对%_reVIew");
+  await expect(runtime).toHaveValue("native");
+  await expect(offline).toHaveAttribute("aria-selected", "true");
+  await expect(manager.getByText("21–40 / 70")).toBeVisible();
+  await expect(row).toBeFocused();
+  await expect
+    .poll(() => studio.evaluate((el) => el.scrollTop))
+    .toBeCloseTo(top, 0);
+  await search.fill("没有这种能力");
+  await expect(manager.getByText("没有符合条件的智能体版本")).toBeVisible();
+  await manager.getByRole("button", { name: "重置筛选" }).click();
+  await expect(search).toHaveValue("");
+  await expect(search).toBeFocused();
+  await expect(runtime).toHaveValue("");
+  await expect(all).toHaveAttribute("aria-selected", "true");
+  await expect(manager.getByText("1–20 / 322")).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
 test("资源登记与下架使用精确版本，删除一个智能体版本保留另一版", async ({
   page,
 }) => {
   const panel = await openStudio(page);
-  await panel.getByRole("button", { name: "精选资源管理" }).click();
-  const library = page.getByRole("dialog", { name: "精选资源管理" });
+  await panel.getByRole("button", { name: "智能体可调用资源管理" }).click();
+  const library = page.getByRole("dialog", { name: "智能体可调用资源管理" });
   await library.getByRole("button", { name: "登记资源", exact: true }).click();
   await library.getByLabel("资源名称").fill("税率规范");
   await library.getByLabel("资源标识").fill("tax-rules");
@@ -1136,7 +1319,7 @@ test("资源登记与下架使用精确版本，删除一个智能体版本保�
   await library.getByRole("button", { name: "关闭窗口" }).click();
   await panel.getByRole("tab", { name: "智能体管理" }).click();
   const manager = panel.getByRole("tabpanel", { name: "智能体管理" });
-  await manager.getByLabel("版本状态").selectOption("");
+  await manager.getByRole("tab", { name: "全部版本" }).click();
   await manager.getByRole("button", { name: /v0.9.0/ }).click();
   await manager
     .getByRole("button", { name: "删除此版本", exact: true })
@@ -1148,7 +1331,10 @@ test("资源登记与下架使用精确版本，删除一个智能体版本保�
     manager.getByText(/已删除 audit-assistant v0.9.0/),
   ).toBeVisible();
   await manager.getByRole("button", { name: "返回版本列表" }).click();
-  await manager.getByLabel("版本状态").selectOption("");
+  await expect(manager.getByRole("tab", { name: "全部版本" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
   await expect(manager.getByRole("button", { name: /v1.0.0/ })).toBeVisible();
   await expect(manager.getByRole("button", { name: /v0.9.0/ })).toHaveCount(0);
 });

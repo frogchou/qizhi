@@ -3,10 +3,21 @@ import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { factoryHelpGroups, helpFor, type FactoryHelpId } from "./factory-help";
 import { errorText, stateName, statusTone } from "./factory-model";
 
-export function Badge({ value, label }: { value: string; label?: string }) {
+export function Badge({
+  value,
+  label,
+  version = false,
+}: {
+  value: string;
+  label?: string;
+  version?: boolean;
+}) {
   return (
-    <span className={"fc-badge " + statusTone(value)}>
-      <i />
+    <span
+      className={"fc-badge " + statusTone(value)}
+      data-version-state={version ? value : undefined}
+    >
+      <i aria-hidden="true" />
       {label ?? stateName(value)}
     </span>
   );

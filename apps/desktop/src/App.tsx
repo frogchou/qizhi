@@ -7,6 +7,7 @@ import {
 } from "./features/materials/MaterialBasket";
 import { FactoryWorkspace } from "./features/factory/FactoryWorkspace";
 import { AssemblyPage } from "./features/factory/AssemblyPage";
+import type { UpgradeEntry } from "./features/factory/assembly-model";
 import type { FactoryNavigationTarget } from "./features/factory/factory-model";
 import { AppSidebar, type AppRoute } from "./components/AppSidebar";
 import { SettingsPage } from "./features/settings/SettingsPage";
@@ -32,7 +33,8 @@ function App({ commands = unavailableCommands }: { commands?: QizhiCommands }) {
   const [assemblyMounted, setAssemblyMounted] = useState(false);
   const [assemblyEntry, setAssemblyEntry] = useState<{
     endpoint: string;
-    draftId: string;
+    target: UpgradeEntry;
+    visit: number;
   }>();
   const [factoryTarget, setFactoryTarget] = useState<FactoryNavigationTarget>();
   const [settingsMounted, setSettingsMounted] = useState(false);
@@ -122,14 +124,18 @@ function App({ commands = unavailableCommands }: { commands?: QizhiCommands }) {
             initialTarget={factoryTarget}
             onOpenKnowledge={() => navigate("knowledge")}
             onOpenSettings={openConnectionSettings}
-            onOpenDraft={(endpoint, draftId) => {
-              setAssemblyEntry({ endpoint, draftId });
+            onOpenDraft={(endpoint, target) => {
+              setAssemblyEntry((old) => ({
+                endpoint,
+                target,
+                visit: (old?.visit ?? 0) + 1,
+              }));
               navigate("assembly");
             }}
           />
           {assemblyMounted && (
             <AssemblyPage
-              key={assemblyEntry?.draftId}
+              key={assemblyEntry?.visit}
               active={route === "assembly"}
               entry={assemblyEntry}
               onSettings={openConnectionSettings}

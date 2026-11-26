@@ -1,0 +1,189 @@
+.version-catalog-tools,
+.version-catalog-tools form,
+.version-search,
+.version-runtime,
+.version-status-tabs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.version-catalog-tools {
+  clear: both;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  padding-block: 12px;
+}
+
+.version-catalog-tools form {
+  flex: 1 1 300px;
+  min-width: 0;
+  max-width: 42rem;
+}
+
+.version-search {
+  flex: 1;
+  min-width: 0;
+  padding-inline: 10px;
+  border: 1px solid #b6c7bd;
+  border-radius: 7px;
+  background: #fff;
+  color: #52675c;
+}
+
+.version-search .ui-glyph,
+.version-catalog-tools button {
+  flex-shrink: 0;
+}
+
+.version-search input {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  padding: 8px 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+}
+
+.version-runtime {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.version-runtime select {
+  max-width: 100%;
+  padding: 7px 8px;
+  border: 1px solid #b6c7bd;
+  border-radius: 7px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+}
+
+[data-version-state] {
+  --version-ink: #47574f;
+  --version-fill: #eef2ef;
+  --version-line: #c7d1ca;
+}
+
+[data-version-state="ready"] {
+  --version-ink: #216041;
+  --version-fill: #e7f3eb;
+  --version-line: #bad8c3;
+}
+
+[data-version-state="offline"],
+[data-version-state="draining"] {
+  --version-ink: #8c451c;
+  --version-fill: #fff0e5;
+  --version-line: #e4b995;
+}
+
+[data-version-state="pending_review"] {
+  --version-ink: #795900;
+  --version-fill: #fff4cf;
+  --version-line: #dcc984;
+}
+
+[data-version-state="self_check_failed"] {
+  --version-ink: #993832;
+  --version-fill: #fcebe8;
+  --version-line: #e4c1bb;
+}
+
+[data-version-state="working"],
+[data-version-state="self_checking"] {
+  --version-ink: #315e87;
+  --version-fill: #eaf1f8;
+  --version-line: #bfd0e3;
+}
+
+.fc .fc-badge[data-version-state],
+.fc .version-status-tabs button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.fc .fc-badge[data-version-state] {
+  justify-self: end;
+  padding: 2px 8px;
+  border: 1px solid var(--version-line);
+  border-radius: 100px;
+  background: var(--version-fill);
+  color: var(--version-ink);
+}
+
+.fc .version-status-tabs i,
+.fc .fc-badge[data-version-state] i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--version-ink);
+}
+
+.version-status-tabs {
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-bottom: 10px;
+}
+
+.fc .version-status-tabs button {
+  min-height: 32px;
+  padding: 4px 11px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.fc .version-status-tabs button:hover {
+  border-color: var(--version-ink);
+}
+
+.fc .version-status-tabs button[aria-selected="true"] {
+  border-color: var(--version-ink);
+  background: var(--version-fill);
+  box-shadow: inset 0 0 0 1px var(--version-ink);
+  color: var(--version-ink);
+  font-weight: 650;
+}
+
+.version-catalog button:focus-visible,
+.version-runtime select:focus-visible,
+.version-search:focus-within {
+  outline: 2px solid var(--q-ring, #298477);
+  outline-offset: 2px;
+}
+
+.version-search input:focus {
+  outline: none;
+}
+
+.version-match {
+  display: block;
+  margin-top: 3px;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 540px) {
+  .version-catalog-tools {
+    gap: 8px 14px;
+  }
+
+  .version-catalog-tools form {
+    flex-basis: 100%;
+  }
+
+  .fc .version-status-tabs button {
+    padding-inline: 9px;
+  }
+}

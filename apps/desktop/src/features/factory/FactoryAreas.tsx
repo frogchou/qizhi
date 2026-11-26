@@ -288,105 +288,7 @@ export function Intake({
   );
 }
 
-export function AgentCatalog({
-  revision,
-  onAgent,
-  initialFilter = "ready",
-}: {
-  revision: number;
-  onAgent: OpenAgent;
-  initialFilter?: string;
-}) {
-  const [status, setStatus] = useState(initialFilter);
-  const [offset, setOffset] = useState(0);
-  return (
-    <>
-      <h3>
-        智能体版本
-        <ContextHelp id="agent-version" />
-      </h3>
-      <Filter
-        label="版本状态"
-        value={status}
-        options={[
-          ["", "全部版本"],
-          ["working", "工作中"],
-          ["ready", "已上线"],
-          ["pending_review", "待审核"],
-          ["self_check_failed", "自检失败"],
-          ["offline", "已下线"],
-          ["deleting", "删除中"],
-        ]}
-        onChange={(v) => {
-          setOffset(0);
-          setStatus(v);
-        }}
-      />
-      <AgentVersions
-        status={status}
-        revision={revision}
-        onAgent={onAgent}
-        offset={offset}
-        onPage={setOffset}
-      />
-    </>
-  );
-}
-export function AgentVersions({
-  status,
-  revision,
-  onAgent,
-  offset,
-  onPage,
-}: {
-  status: string;
-  revision: number;
-  onAgent: OpenAgent;
-  offset: number;
-  onPage: (offset: number) => void;
-}) {
-  const read = useFactoryRead<Page<Agent>>(
-    readPath("agents", { status, limit: pageSize, offset }),
-    revision,
-  );
-  return (
-    <>
-      <ReadNotice read={read} />
-      {read.data && (
-        <>
-          <div className="live-count">共 {read.data.total} 个版本</div>
-          <div className="live-list">
-            {read.data.items.map((a) => (
-              <EntryButton
-                key={a.id}
-                title={a.displayName}
-                badge={a.status}
-                onClick={() => onAgent(a.agentId, a.version)}
-                meta={
-                  a.agentId +
-                  " · v" +
-                  a.version +
-                  " · " +
-                  runtimeName(a.runtime) +
-                  " · " +
-                  a.runningCount +
-                  " 个运行实例"
-                }
-              />
-            ))}
-            {!read.data.items.length && <Empty>没有符合条件的智能体版本</Empty>}
-          </div>
-          <Pagination
-            offset={read.data.offset}
-            limit={read.data.limit}
-            total={read.data.total}
-            onChange={onPage}
-          />
-        </>
-      )}
-    </>
-  );
-}
+export { AgentCatalog, AgentVersions } from "./AgentCatalog";
 export function AgentDetail({
   id,
   version,
@@ -464,7 +366,17 @@ export function AgentDetail({
         <>
           <div className="live-summary">
             <h3>{agent.displayName}</h3>
-            <Badge value={agent.status} />
+            {onBased && !deleting && (
+              <button
+                className="ui-action ui-primary ui-small"
+                type="button"
+                disabled={disabled || confirm !== null}
+                onClick={() => void action.run(() => onBased(agent))}
+              >
+                升级智能体
+              </button>
+            )}
+            <Badge value={agent.status} version />
             {agent.description && <p>{agent.description}</p>}
             <Facts
               rows={[
@@ -497,6 +409,11 @@ export function AgentDetail({
               节点包内容与发布摘要不一致。请重新生成并测试智能体。
             </p>
           )}
+          {agent.integrityIssue === "package_digest_mismatch" && (
+            <p className="live-notice error" role="alert">
+              当前程序包与发布时的内容不一致。请恢复已登记的程序包，或从完整的原版本发布新版。
+            </p>
+          )}
           {agent.assembly && (
             <AssemblyReview record={agent.assembly} onTask={onTask} />
           )}
@@ -508,16 +425,6 @@ export function AgentDetail({
                 onClick={() => onTest(assembly)}
               >
                 打开版本测试
-              </button>
-            )}
-            {onBased && agent.assembly && !deleting && (
-              <button
-                type="button"
-                className="ui-action ui-small"
-                disabled={disabled || Boolean(confirm)}
-                onClick={() => void action.run(() => onBased(agent))}
-              >
-                基于此版本创建
               </button>
             )}
             {canApprove && (
