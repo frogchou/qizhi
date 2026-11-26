@@ -368,7 +368,10 @@ export function AssemblyTrials({
         </p>
       )}
       {Boolean(candidate.trialConcerns?.length) && (
-        <details className="assembly-disclosure" key={candidate.id}>
+        <details
+          className="assembly-disclosure"
+          key={`trial-concerns:${candidate.id}`}
+        >
           <summary>
             建议在本版测试中核对（{candidate.trialConcerns?.length}）
           </summary>

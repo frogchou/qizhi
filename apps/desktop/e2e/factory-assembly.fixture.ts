@@ -70,6 +70,24 @@ export async function installAssemblyFixture(page: Page) {
       revision: 1,
       packageDigest: "a".repeat(64),
       buildEnvironment: "node22-sandbox",
+      trialConcerns: [
+        {
+          line: 12,
+          reason: "小额报价",
+          verification: "输入一笔一分钱的报价。",
+        },
+        {
+          line: 23,
+          reason: "缺少币种",
+          verification: "检查缺少币种时的提示。",
+        },
+        {
+          line: 45,
+          reason: "有效期边界",
+          verification: "使用生效当天的报价。",
+        },
+        { line: 67, reason: "文件交付", verification: "下载并打开差异清单。" },
+      ],
       createdAt: now,
       config: { ...config },
       releaseStatus: null as string | null,
@@ -106,6 +124,7 @@ export async function installAssemblyFixture(page: Page) {
         {
           ...candidate,
           id: "sealed-older",
+          trialConcerns: [],
           createdAt: new Date(Date.parse(now) - 60000).toISOString(),
         },
       ],

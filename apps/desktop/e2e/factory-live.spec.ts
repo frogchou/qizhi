@@ -930,6 +930,54 @@ test("装配编辑保留手工输入，明确选用建议与多个真实知识�
   );
   expect(errors).toEqual([]);
 });
+test("测试页自动刷新时只保留一组核对建议，切换生成记录时更新内容", async ({
+  page,
+}, testInfo) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  page.on("console", (entry) => {
+    if (entry.type() === "error") errors.push(entry.text());
+  });
+  const studio = await openStudio(page);
+  await studio.getByLabel("智能体与版本").selectOption("quote-draft");
+  await studio.getByRole("tab", { name: "智能体测试" }).click();
+  const record = studio.getByLabel("生成记录", { exact: true });
+  await expect(record).toHaveValue("sealed-one");
+  const suggestions = studio.locator("details").filter({
+    has: page.locator("summary", { hasText: "建议在本版测试中核对" }),
+  });
+  await suggestions.first().locator("summary").click();
+  const goal = studio.getByLabel("样例需求");
+  await goal.fill("保留正在输入的测试需求");
+
+  const reads = () =>
+    page.evaluate(
+      () =>
+        window.factoryLiveFixture.calls.filter(
+          (c) => c.path === "/v1/factory/assemblies/quote-draft",
+        ).length,
+    );
+  const initialReads = await reads();
+  await expect
+    .poll(reads, { timeout: 18000 })
+    .toBeGreaterThanOrEqual(initialReads + 3);
+  await expect(suggestions).toHaveCount(1);
+  await expect(suggestions).toHaveJSProperty("open", true);
+  await expect(suggestions.locator("li")).toHaveCount(4);
+  await expect(goal).toHaveValue("保留正在输入的测试需求");
+  await studio
+    .getByRole("tab", { name: "智能体测试" })
+    .scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath("trial-suggestions.png") });
+
+  await record.selectOption("sealed-older");
+  await expect(suggestions).toHaveCount(0);
+  await record.selectOption("sealed-one");
+  await expect(suggestions).toHaveCount(1);
+  await expect(suggestions).toHaveJSProperty("open", false);
+  await expect(goal).toHaveValue("保留正在输入的测试需求");
+  expect(errors).toEqual([]);
+});
 test("三页签保留未提交内容，并把指定生成记录交给测试", async ({
   page,
 }, testInfo) => {
