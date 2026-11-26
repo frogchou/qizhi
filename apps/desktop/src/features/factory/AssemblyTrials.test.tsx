@@ -47,6 +47,13 @@ it("keeps the selected build and sample when another build has the same release 
     id: "quote-build-b",
     revision: 18,
     packageDigest: "digest-b",
+    trialConcerns: [
+      {
+        line: 23,
+        reason: "复核极小金额",
+        verification: "输入一笔一分钱的报价。",
+      },
+    ],
     createdAt: "2026-11-24T08:00:00.775Z",
   };
   const draft: AssemblyDraft = {
@@ -94,6 +101,7 @@ it("keeps the selected build and sample when another build has the same release 
   });
   view.rerender(<Harness draft={{ ...draft, candidates: [first, second] }} />);
   expect(selector).toHaveValue(first.id);
+  expect(screen.queryByText(/建议在本版测试中核对/)).toBeNull();
   expect(within(selector).getAllByRole("option")).toHaveLength(2);
   expect(
     within(selector).getByRole("option", { name: /quote-build-b/ }),
@@ -114,6 +122,9 @@ it("keeps the selected build and sample when another build has the same release 
     },
   );
   fireEvent.change(selector, { target: { value: second.id } });
+  fireEvent.click(screen.getByText("建议在本版测试中核对（1）"));
+  expect(screen.getByText("输入一笔一分钱的报价。")).toBeVisible();
+  expect(screen.getByText("业务源码第 23 行")).toBeVisible();
   fireEvent.change(screen.getByRole("textbox", { name: "样例需求" }), {
     target: { value: "检查第二份报价" },
   });

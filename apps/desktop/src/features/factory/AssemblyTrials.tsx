@@ -367,6 +367,22 @@ export function AssemblyTrials({
           此次测试使用已生成的内容。当前编辑有更新，可先生成智能体再测试最新配置。
         </p>
       )}
+      {Boolean(candidate.trialConcerns?.length) && (
+        <details className="assembly-disclosure" key={candidate.id}>
+          <summary>
+            建议在本版测试中核对（{candidate.trialConcerns?.length}）
+          </summary>
+          <ul>
+            {candidate.trialConcerns?.map((item, index) => (
+              <li key={index}>
+                <strong>{item.reason}</strong>
+                <p>{item.verification}</p>
+                {item.line > 0 && <small>业务源码第 {item.line} 行</small>}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
       <details className="assembly-disclosure">
         <summary>工作流程与授权范围</summary>
         <p>{candidate.config.workflow}</p>

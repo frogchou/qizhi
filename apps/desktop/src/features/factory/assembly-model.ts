@@ -79,6 +79,7 @@ export type Candidate = {
   releaseStatus?: string | null;
   publishedRunId?: string | null;
   buildEnvironment?: string;
+  trialConcerns?: { line: number; reason: string; verification: string }[];
 };
 export type AssemblyRun = {
   id: string;
