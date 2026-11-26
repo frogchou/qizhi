@@ -555,18 +555,12 @@
 }
 
 .summary-error {
-  background: #fff4f2;
-  border-radius: 8px;
   margin: 12px 22px 0;
-  padding: 10px 12px;
 }
 
-.summary-warning {
+.summary-detail {
   margin: 12px 22px 0;
-  padding: 10px 12px;
-  border-radius: 8px;
-  color: #8a5711;
-  background: #fff6df;
+  color: #72531d;
 }
 
 .summary-upload-fields {
@@ -808,24 +802,9 @@ h2 {
   flex: 1;
   min-height: 0;
 }
-.workspace-toast {
-  background: #173f36;
-  border-radius: 9px;
-  bottom: 28px;
-  box-shadow: 0 12px 30px rgb(9 38 29 / 22%);
-  color: #fff;
-  font-size: 13px;
-  left: 50%;
-  max-width: min(560px, calc(100vw - 48px));
-  padding: 11px 15px;
-  position: fixed;
-  transform: translateX(-50%);
-  z-index: 50;
-}
 .file-panel,
 .detail-panel,
-.timeline,
-.status-notice {
+.timeline {
   background: #fff;
   border: 1px solid #e1e7e1;
   border-radius: 12px;
@@ -1319,13 +1298,6 @@ h2 {
   font-size: 13px;
   margin: 4px 0;
 }
-.status-notice {
-  background: #fffaf0;
-  border-color: #ebddbc;
-  color: #715c31;
-  margin-bottom: 18px;
-  padding: 13px 16px;
-}
 .loading {
   color: #68786f;
   padding-top: 120px;
@@ -1663,21 +1635,13 @@ h2 {
   min-height: 42px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 16px;
   margin: 18px -22px -20px;
   padding: 16px 22px;
   border-top: 1px solid #e6ece8;
   border-radius: 0 0 12px 12px;
   background: #fbfdfc;
-}
-.settings-block-actions .settings-success {
-  display: grid;
-  gap: 2px;
-  margin: 0;
-}
-.settings-block-actions .settings-success p {
-  margin: 0;
 }
 .settings-block-actions .button {
   flex: 0 0 auto;
@@ -1722,8 +1686,7 @@ h2 {
   height: 34px;
   justify-content: center;
 }
-.service-state,
-.connection-result {
+.service-state {
   color: #a77a16;
   font-size: 13px;
   margin: 8px 0;
@@ -1895,15 +1858,6 @@ h2 {
   grid-template-columns: 1fr;
   opacity: 0.72;
 }
-.settings-error {
-  color: #a24737;
-  margin: 12px 0;
-}
-.settings-success {
-  color: #0a855a;
-  font-size: 13px;
-  margin: 12px 0 0;
-}
 .knowledge-layout {
   display: grid;
   gap: 18px;
@@ -2064,9 +2018,6 @@ h2 {
 }
 .knowledge-reload {
   margin-top: 4px;
-}
-.knowledge-page > .status-notice {
-  margin-bottom: 16px;
 }
 .knowledge-layout-v2 {
   display: grid;
@@ -2411,14 +2362,6 @@ h2 {
   background: linear-gradient(to bottom, rgb(247 250 248 / 0%), #f7faf8 20%);
   flex: 0 0 auto;
   padding: 24px 16px 0 0;
-}
-.conversation-feedback {
-  color: #46665a;
-  font-size: 12px;
-  margin: 0 0 7px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 /* Knowledge conversation message system */
 .conversation-turns {

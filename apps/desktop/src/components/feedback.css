@@ -1,0 +1,65 @@
+.desktop-feedback {
+  position: fixed;
+  z-index: 200;
+  inset: max(16px, env(safe-area-inset-top)) 16px auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.desktop-feedback .workspace-toast {
+  display: flex;
+  width: fit-content;
+  max-width: min(100%, 540px);
+  align-items: center;
+  gap: 9px;
+  padding: 8px 8px 8px 13px;
+  border: 1px solid rgb(255 255 255 / 20%);
+  border-radius: 14px;
+  background: #173f36;
+  box-shadow: 0 5px 22px rgb(9 38 29 / 23%);
+  color: #fff;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.55;
+  text-align: left;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+}
+
+.workspace-toast[data-tone="error"] {
+  background: #663c34;
+}
+.workspace-toast-message[tabindex] {
+  max-height: min(22vh, 12em);
+  overflow: auto;
+  pointer-events: auto;
+}
+.workspace-toast > svg {
+  flex: none;
+}
+.desktop-feedback .workspace-toast-close {
+  pointer-events: auto;
+  display: inline-grid;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.desktop-feedback .workspace-toast-close:hover,
+.desktop-feedback .workspace-toast-close:focus-visible {
+  background: rgb(255 255 255 / 18%);
+}
+.desktop-feedback .workspace-toast-close:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: -2px;
+}

@@ -163,7 +163,7 @@ export function TaskAuthorization({
             />
           )}
           {auth.missing && (
-            <p className="live-notice" role="alert">
+            <p className="live-subtle">
               所选资源已不可用，请核对当前目录并调整范围。
             </p>
           )}

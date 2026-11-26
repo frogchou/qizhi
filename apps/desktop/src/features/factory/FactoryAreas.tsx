@@ -1,7 +1,6 @@
 import { useId, useRef, useState, type KeyboardEvent } from "react";
 import { useFactoryRead, readPath } from "./factory-feed";
 import {
-  ActionNotice,
   Badge,
   ContextHelp,
   Empty,
@@ -405,12 +404,12 @@ export function AgentDetail({
             ))}
           </ul>
           {agent.integrityIssue === "assembly_digest_mismatch" && (
-            <p className="live-notice error" role="alert">
+            <p className="live-subtle">
               节点包内容与发布摘要不一致。请重新生成并测试智能体。
             </p>
           )}
           {agent.integrityIssue === "package_digest_mismatch" && (
-            <p className="live-notice error" role="alert">
+            <p className="live-subtle">
               当前程序包与发布时的内容不一致。请恢复已登记的程序包，或从完整的原版本发布新版。
             </p>
           )}
@@ -612,7 +611,6 @@ export function AgentDetail({
           </div>
         </section>
       )}
-      <ActionNotice action={action} />
       {action.error && (
         <button
           type="button"

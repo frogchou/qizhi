@@ -1,3 +1,4 @@
+import { useFeedback } from "../../components/FeedbackNotice";
 import { useState } from "react";
 import { factoryApi } from "./factory-client";
 import { FactoryDelivery } from "./FactoryDelivery";
@@ -5,7 +6,6 @@ import { FactoryInteraction } from "./FactoryInteraction";
 import { ReceiptDetails } from "./AssemblyReceipts";
 import { RevisionForm, type RevisionDecision } from "./FactoryRevisionForm";
 import {
-  ActionNotice,
   Badge,
   ContextHelp,
   Empty,
@@ -120,7 +120,7 @@ function Plan({ detail, onAgent }: { detail: TaskDetail; onAgent: OpenAgent }) {
             )}
             {answer && <p className="live-prose">{answer}</p>}
             {err && (
-              <p className="live-notice error">
+              <p className="live-subtle">
                 {typeof err === "string" ? err : err.message}
               </p>
             )}
@@ -200,7 +200,7 @@ function Quality({
   const action = useAction(onChange),
     [submitted, setSubmitted] = useState<string | null>(null);
   const [editor, setEditor] = useState<RevisionDecision | null>(null);
-  const [receipt, setReceipt] = useState("");
+  const notify = useFeedback("success");
   const id = detail.task.id;
   const canReview =
     detail.task.state === "awaiting_review" && !latest?.decision;
@@ -262,7 +262,6 @@ function Quality({
               className="ui-action ui-small"
               disabled={action.busy || stale || submitted === stamp}
               onClick={() => {
-                setReceipt("");
                 setEditor("revise");
               }}
             >
@@ -272,7 +271,6 @@ function Quality({
               className="ui-action ui-small"
               disabled={action.busy || stale || submitted === stamp}
               onClick={() => {
-                setReceipt("");
                 setEditor("amend");
               }}
             >
@@ -291,17 +289,11 @@ function Quality({
           onClose={() => setEditor(null)}
           onSubmitted={(number) => {
             setSubmitted(stamp);
-            setReceipt("已接收第 " + number + " 次修订，中台正在重新规划。");
+            notify("已接收第 " + number + " 次修订，中台正在重新规划。");
             setEditor(null);
             onChange();
           }}
         />
-      )}
-      <ActionNotice action={action} />
-      {receipt && (
-        <p className="live-notice" role="status">
-          {receipt}
-        </p>
       )}
       {!!detail.revisions?.length && (
         <section className="live-section">
@@ -344,7 +336,7 @@ function Quality({
             ]}
           />
           {r.assessment?.error && (
-            <p className="live-notice error">{r.assessment.error}</p>
+            <p className="live-subtle">{r.assessment.error}</p>
           )}
           {r.assessment?.items?.map((item) => (
             <div key={item.id} className="live-finding">
@@ -614,7 +606,6 @@ function StopTask({
           </div>
         </section>
       )}
-      <ActionNotice action={action} />
       {action.error && (
         <button className="ui-action ui-small" type="button" onClick={refresh}>
           刷新工单状态

@@ -1,4 +1,9 @@
 import {
+  FeedbackNotice,
+  useFeedback,
+  type FeedbackTone,
+} from "../../components/FeedbackNotice";
+import {
   createContext,
   useCallback,
   useContext,
@@ -137,17 +142,26 @@ export function MaterialBasketProvider({
   );
 }
 
+function basketResultTone(items: BasketResult[]): FeedbackTone {
+  return items.some((item) => item.status === "failed") ? "error" : "success";
+}
+
 function Availability({ basket }: { basket: BasketState }) {
+  const [attempt, setAttempt] = useState(0);
   if (!basket.supported)
     return <p className="basket-note">{basketUnavailable}</p>;
   if (basket.error)
     return (
-      <div role="alert" className="basket-note basket-error">
-        <span>{basket.error}</span>
+      <div className="basket-note">
+        <FeedbackNotice tone="error" message={basket.error} attempt={attempt} />
+        <span title={basket.error}>资料筐读取失败</span>
         <button
           type="button"
           className="ui-action ui-quiet ui-small"
-          onClick={() => void basket.refresh()}
+          disabled={basket.loading}
+          onClick={() =>
+            void basket.refresh().then(() => setAttempt((value) => value + 1))
+          }
         >
           重新读取
         </button>
@@ -395,9 +409,8 @@ export function MaterialBasketDialog({ close }: { close: () => void }) {
   const basket = useMaterialBasket(),
     ref = useRef<HTMLDialogElement>(null);
   const [ids, setIds] = useState<string[]>([]),
-    [confirm, setConfirm] = useState(false),
-    [feedback, setFeedback] = useState(""),
-    [failure, setFailure] = useState(false);
+    [confirm, setConfirm] = useState(false);
+  const notify = useFeedback("success");
   useEffect(() => {
     const el = ref.current;
     const opener =
@@ -419,14 +432,15 @@ export function MaterialBasketDialog({ close }: { close: () => void }) {
     selected = ids.filter((id) => inBasket.has(id));
   const all =
     basket.items.length > 0 && selected.length === basket.items.length;
-  async function act(operation: () => Promise<string>) {
-    setFeedback("");
-    setFailure(false);
+  async function act(operation: () => Promise<string | BasketResult[]>) {
+    notify(null);
     try {
-      setFeedback(await operation());
+      const result = await operation();
+      if (typeof result === "string") notify(result);
+      else if (result.length)
+        notify(basketResultMessage(result), basketResultTone(result));
     } catch (reason) {
-      setFeedback(basketError(reason));
-      setFailure(true);
+      notify(basketError(reason), "error");
     }
   }
 
@@ -467,7 +481,7 @@ export function MaterialBasketDialog({ close }: { close: () => void }) {
           <ControlIcon name="x" size={18} />
         </button>
       </header>
-      <div className="basket-dialog-body">
+      <div className="basket-dialog-body" aria-busy={basket.busy}>
         <Availability basket={basket} />
         {basket.supported && (
           <>
@@ -476,15 +490,10 @@ export function MaterialBasketDialog({ close }: { close: () => void }) {
                 type="button"
                 className="ui-action ui-primary"
                 disabled={basket.busy}
-                onClick={() =>
-                  void act(async () => {
-                    const results = await basket.pick();
-                    return results.length ? basketResultMessage(results) : "";
-                  })
-                }
+                onClick={() => void act(basket.pick)}
               >
                 <ControlIcon name="upload" size={16} />
-                添加本地文件
+                {basket.busy ? "正在更新资料筐…" : "添加本地文件"}
               </button>
               {basket.items.length > 0 && (
                 <button
@@ -617,15 +626,6 @@ export function MaterialBasketDialog({ close }: { close: () => void }) {
             )}
           </>
         )}
-        {(basket.busy || feedback) && (
-          <div
-            className={"basket-feedback" + (failure ? " basket-error" : "")}
-            role={failure ? "alert" : "status"}
-          >
-            {!basket.busy && !failure && <ControlIcon name="check" size={15} />}
-            <span>{basket.busy ? "正在更新资料筐…" : feedback}</span>
-          </div>
-        )}
       </div>
     </dialog>
   );
@@ -644,7 +644,7 @@ export function AddToBasketButton({
   disabled?: boolean;
   className?: string;
   role?: "menuitem";
-  onResult: (message: string) => void;
+  onResult: (message: string, tone?: FeedbackTone) => void;
 }) {
   const basket = useMaterialBasket();
   return (
@@ -657,13 +657,15 @@ export function AddToBasketButton({
       onClick={() => {
         const selection = source();
         if (!selection) {
-          onResult("此轮的资料标识不可用，请重新查询");
+          onResult("此轮的资料标识不可用，请重新查询", "error");
           return;
         }
         void basket
           .add(selection)
-          .then((results) => onResult(basketResultMessage(results)))
-          .catch((error) => onResult(basketError(error)));
+          .then((results) =>
+            onResult(basketResultMessage(results), basketResultTone(results)),
+          )
+          .catch((error) => onResult(basketError(error), "error"));
       }}
     >
       <ControlIcon name="basket" size={15} />

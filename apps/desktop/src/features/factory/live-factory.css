@@ -258,10 +258,7 @@
   border-color: #7cafab;
   font-weight: 600;
 }
-.live-confirm,
-.fc-live .live-notice,
-.live-modal .live-notice,
-.live-connection-error {
+.live-confirm {
   padding: 8px 10px;
   background: #edf6f3;
   border-left: 3px solid #3c8d80;
@@ -291,28 +288,14 @@
 .live-confirm .fc-actions {
   margin-top: 7px;
 }
-.fc-live .live-notice.error,
-.live-modal .live-notice.error,
-.live-connection-error {
-  background: #fff1e4;
-  border-color: #b36134;
-  color: #674528;
-}
-.fc-live .live-notice button,
-.live-connection-error button {
-  margin-left: 8px;
-  font-size: 12px;
-}
-.live-connection-error {
+.live-read-state {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin: 0;
-  border-radius: 0;
-  overflow-wrap: anywhere;
-}
-.live-connection-error button {
-  flex-shrink: 0;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0;
+  font-size: 12px;
+  color: #674528;
 }
 .fc-live .live-prose {
   white-space: pre-wrap;

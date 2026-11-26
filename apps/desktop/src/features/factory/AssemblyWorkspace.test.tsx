@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
+import { render } from "../../test/render";
 import { afterEach, expect, it, vi } from "vitest";
 import { AssemblyWorkspace } from "./AssemblyWorkspace";
 import {
@@ -88,14 +89,15 @@ it("shows real editable versions and keeps the editor usable after a conflict or
   ).toHaveValue(unnamed.id);
   expect(selector).not.toHaveTextContent(/草稿|修订|v37|v104/);
   fireEvent.change(selector, { target: { value: draft.id } });
-  const goal = await screen.findByDisplayValue("核对交付日");
+  expect(await screen.findByText("核对交付日")).toBeVisible();
+  const goal = screen.getByRole("textbox", { name: "智能体职责" });
   const history = screen.getByText("生成与助手记录");
   expect(history.closest("details")).not.toHaveAttribute("open");
   fireEvent.click(history);
   expect(
     screen.getByText("智能体已生成，代码、资源和测试用例已保存。"),
   ).toBeVisible();
-  expect(screen.getByRole("heading", { name: "基本信息" })).toBeVisible();
+  expect(screen.getByRole("heading", { name: "智能体基本信息" })).toBeVisible();
   const library = screen.getByRole("button", { name: /RAGFlow 知识库/ });
   expect(library).toHaveAttribute("aria-expanded", "false");
   fireEvent.click(library);
@@ -111,7 +113,7 @@ it("shows real editable versions and keeps the editor usable after a conflict or
   expect(
     screen.getByRole("tabpanel", { name: "智能体测试" }),
   ).toHaveTextContent("尚未生成");
-  expect(screen.queryByRole("heading", { name: "基本信息" })).toBeNull();
+  expect(screen.queryByRole("heading", { name: "智能体基本信息" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "返回组装" }));
   expect(goal).toHaveValue("检查五月报价");
   fireEvent.click(screen.getByRole("button", { name: "保存修改" }));

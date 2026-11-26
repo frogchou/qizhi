@@ -1,3 +1,4 @@
+import { useFeedback } from "../../components/FeedbackNotice";
 import { useCallback, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ControlIcon } from "../../components/ControlIcon";
@@ -26,9 +27,8 @@ export function CodexBasketAttachment({
 }) {
   const basket = useMaterialBasket();
   const [selected, setSelected] = useState<string[]>([]),
-    [busy, setBusy] = useState(false),
-    [notice, setNotice] = useState(""),
-    [error, setError] = useState(false);
+    [busy, setBusy] = useState(false);
+  const notify = useFeedback("success");
   const active = useRef(false),
     attempt = useRef<{ key: string; id: string } | null>(null);
   const [open, setOpen] = useState(false);
@@ -74,6 +74,9 @@ export function CodexBasketAttachment({
     const outside = (e: MouseEvent) => {
       if (
         e.target instanceof Node &&
+        !(
+          e.target instanceof Element && e.target.closest(".desktop-feedback")
+        ) &&
         !panel.current?.contains(e.target) &&
         !trigger.current?.contains(e.target)
       )
@@ -135,8 +138,7 @@ export function CodexBasketAttachment({
     active.current = true;
     setBusy(true);
     onBusy(true);
-    setNotice("");
-    setError(false);
+    notify("");
     try {
       const result = await onAttach({
         itemIds: ids,
@@ -153,13 +155,12 @@ export function CodexBasketAttachment({
       await onAttached(result);
       setSelected([]);
       close();
-      setNotice(
+      notify(
         "已添加 " + result.itemCount + " 项到当前会话，将随下一条消息发送。",
       );
       attempt.current = null;
     } catch (reason) {
-      setNotice(basketError(reason));
-      setError(true);
+      notify(basketError(reason), "error");
     } finally {
       active.current = false;
       setBusy(false);
@@ -180,7 +181,7 @@ export function CodexBasketAttachment({
         onClick={() => {
           if (open) close();
           else {
-            setNotice("");
+            notify("");
             setOpen(true);
           }
         }}
@@ -229,7 +230,6 @@ export function CodexBasketAttachment({
               {basket.supported && !onAttach && <p>{basketUnavailable}</p>}
             </div>
             <footer>
-              {error && notice && <p role="alert">{notice}</p>}
               <button
                 type="button"
                 className="ui-action ui-primary ui-small"
@@ -251,16 +251,6 @@ export function CodexBasketAttachment({
           </div>,
           document.body,
         )}
-      {notice && (!open || !error) && (
-        <p
-          className={
-            error ? "codex-attachment-error" : "codex-attachment-announcement"
-          }
-          role={error ? "alert" : "status"}
-        >
-          {notice}
-        </p>
-      )}
     </div>
   );
 }

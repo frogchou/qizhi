@@ -1,3 +1,4 @@
+import { type FeedbackTone } from "../../components/FeedbackNotice";
 import {
   useEffect,
   useMemo,
@@ -211,7 +212,7 @@ export function WorkspaceTreeTable({
   onFileContextMenu: (id: number, x: number, y: number) => void;
   onOpenFile: (id: number) => void;
   onUploadFile: (id: number) => void;
-  onNotice: (message: string) => void;
+  onNotice: (message: string, tone?: FeedbackTone) => void;
   valueMode: "automatic" | "manual";
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -327,6 +328,7 @@ export function WorkspaceTreeTable({
           ? error.message
           : "无法展开该目录，请重试。";
       setErrors((current) => new Map(current).set(directoryId, message));
+      onNotice(message, "error");
     } finally {
       setLoading((current) => {
         const next = new Set(current);
@@ -354,7 +356,7 @@ export function WorkspaceTreeTable({
     try {
       await commands.openTodayWorkspaceDirectory(page.queryId, entry.id);
     } catch {
-      onNotice("无法打开该目录，它可能已移动或刚被排除。");
+      onNotice("无法打开该目录，它可能已移动或刚被排除。", "error");
     }
   }
 
@@ -454,10 +456,11 @@ export function WorkspaceTreeTable({
                   {errors.has(entry.id) ? (
                     <button
                       className="tree-inline-error"
+                      title={errors.get(entry.id)}
                       onClick={() => void loadDirectory(entry.id)}
                       type="button"
                     >
-                      {errors.get(entry.id)} 点击重试
+                      重新读取目录
                     </button>
                   ) : null}
                 </td>

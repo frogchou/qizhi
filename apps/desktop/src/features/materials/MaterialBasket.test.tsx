@@ -1,11 +1,6 @@
+import { render } from "../../test/render";
 import { useState } from "react";
-import {
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-  within,
-} from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, it, vi, expect } from "vitest";
 import App from "../../App";
 import { unavailableCommands, type QizhiCommands } from "../../lib/tauri";

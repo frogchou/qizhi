@@ -165,6 +165,7 @@ type Read<T> = {
   data: T | null;
   error: string;
   loading: boolean;
+  attempt: number;
 };
 export function useFactoryRead<T>(
   path: FactoryReadPath | null,
@@ -175,8 +176,9 @@ export function useFactoryRead<T>(
     data: null,
     error: "",
     loading: true,
+    attempt: 0,
   });
-  const [retry, setRetry] = useState(0);
+  const manualAttempt = useRef(0);
   const reload = useRef<() => void>(() => {});
   useEffect(() => {
     if (!path) return;
@@ -191,22 +193,25 @@ export function useFactoryRead<T>(
       reading = true;
       do {
         requested = false;
+        const attempt = manualAttempt.current;
         setResult((old) => ({
           path,
           data: old.path === path ? old.data : null,
           loading: true,
-          error: "",
+          attempt: old.path === path ? old.attempt : 0,
+          error: old.path === path ? old.error : "",
         }));
         try {
           const data = await factoryApi.get<T>(path, control.signal);
           if (!control.signal.aborted)
-            setResult({ path, data, loading: false, error: "" });
+            setResult({ path, data, loading: false, error: "", attempt });
         } catch (error) {
           if (!control.signal.aborted)
             setResult((old) => ({
               path,
               data: old.path === path ? old.data : null,
               loading: false,
+              attempt,
               error: errorText(error),
             }));
         }
@@ -221,13 +226,17 @@ export function useFactoryRead<T>(
   }, [path]);
   useEffect(() => {
     reload.current();
-  }, [path, revision, retry]);
+  }, [path, revision]);
   const samePath = path === result.path;
   return {
     data: samePath ? result.data : null,
     error: samePath ? result.error : "",
     loading: Boolean(path && (!samePath || result.loading)),
-    retry: () => setRetry((n) => n + 1),
+    attempt: result.attempt,
+    retry: () => {
+      manualAttempt.current++;
+      reload.current();
+    },
   };
 }
 

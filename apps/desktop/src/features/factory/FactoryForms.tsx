@@ -1,3 +1,4 @@
+import { FeedbackNotice } from "../../components/FeedbackNotice";
 import { useState } from "react";
 import { TaskAuthorization, useTaskAuthorization } from "./TaskAuthorization";
 import type { TaskScope } from "./assembly-model";
@@ -6,7 +7,7 @@ import {
   FactoryAttachments,
   useFactoryAttachments,
 } from "./FactoryAttachments";
-import { ActionNotice, Modal, useAction } from "./FactoryControls";
+import { Modal, useAction } from "./FactoryControls";
 import type { OpenTask } from "./factory-model";
 
 export function RequirementForm({
@@ -91,8 +92,10 @@ export function RequirementForm({
           由我确认最终交付
         </label>
         <p className="live-subtle">提交来源 · 栖知桌面端</p>
-        {stale && <p role="alert">连接已中断，请在恢复后提交。</p>}
-        <ActionNotice action={action} />
+        <FeedbackNotice
+          tone="error"
+          message={stale ? "连接已中断，请在恢复后提交。" : ""}
+        />
         <footer>
           <button
             type="button"

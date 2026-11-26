@@ -1,10 +1,5 @@
-import {
-  act,
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-} from "@testing-library/react";
+import { render } from "../../test/render";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { StrictMode } from "react";
 import { describe, expect, it, vi } from "vitest";
 

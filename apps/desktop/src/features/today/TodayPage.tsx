@@ -4,7 +4,7 @@ import "./today-actions.css";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { FileTypeIcon } from "../../components/FileTypeIcon";
-import { StatusNotice } from "../../components/StatusNotice";
+import { FeedbackNotice, useFeedback } from "../../components/FeedbackNotice";
 import type {
   CodexHandoffResult,
   CodexHandoffSourceInput,
@@ -237,7 +237,7 @@ export function TodayPage({
     selection: WorkSummarySelectionInput;
   } | null>(null);
   const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
+  const notify = useFeedback();
   const [scanStatus, setScanStatus] = useState<TodayScanStatus | null>(null);
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<WorkspaceCategory>("documents");
@@ -251,7 +251,7 @@ export function TodayPage({
   const [parentPath, setParentPath] = useState("");
   const [startParsing, setStartParsing] = useState(true);
   const [uploading, setUploading] = useState(false);
-  const [uploadError, setUploadError] = useState<string | null>(null);
+  const notifyError = useFeedback("error");
   const [codexHandoff, setCodexHandoff] = useState<{
     source: CodexHandoffSourceInput;
     fileIds: number[];
@@ -274,7 +274,7 @@ export function TodayPage({
   }
   function openCodexHandoff(fileId?: number) {
     if (!workspacePage) {
-      setNotice("当前目录查询尚未准备好，请刷新列表后重试。");
+      notifyError("当前目录查询尚未准备好，请刷新列表后重试。");
       return;
     }
     const fileIds = fileId == null ? [...selectedFileIds] : [fileId];
@@ -359,14 +359,15 @@ export function TodayPage({
                 ? await commands.getRecentSnapshot(5)
                 : await commands.getTodaySnapshot();
             setSnapshot(completedSnapshot);
-            setNotice(
+            notify(
               status.state === "completed"
                 ? "扫描完成，已按当前扫描与排除规则更新列表。"
                 : (status.message ??
                     "扫描未完成，请检查扫描范围和文件访问权限。"),
+              status.state === "completed" ? "success" : "error",
             );
           } catch {
-            setNotice("扫描结束后无法读取今日文件。请稍后重新打开今日页面。");
+            notifyError("扫描结束后无法读取今日文件。请稍后重新打开今日页面。");
           } finally {
             if (active) {
               setFollowingExistingScan(false);
@@ -408,11 +409,6 @@ export function TodayPage({
       setFileMenu((current) => (current ? { ...current, x, y } : current));
     }
   }, [fileMenu]);
-  useEffect(() => {
-    if (!notice) return;
-    const timer = window.setTimeout(() => setNotice(null), 4_000);
-    return () => window.clearTimeout(timer);
-  }, [notice]);
   useEffect(() => {
     if (
       commands.queryTodayWorkspace ||
@@ -467,7 +463,9 @@ export function TodayPage({
               }
             : current,
         );
-        setNotice(readableError(error, "JEV 价值评估失败，请检查设置和日志。"));
+        notifyError(
+          readableError(error, "JEV 价值评估失败，请检查设置和日志。"),
+        );
       })
       .finally(() => {
         fileIds.forEach((id) => evaluatingIds.current.delete(id));
@@ -505,8 +503,8 @@ export function TodayPage({
               page.queryId,
               "today",
             );
-            if (evaluation?.failed) {
-              setNotice(
+            if (active && evaluation?.failed) {
+              notifyError(
                 evaluation.failureMessage ??
                   `${evaluation.failed} 个文件的 JEV 价值评估失败，请检查设置和日志。`,
               );
@@ -515,7 +513,7 @@ export function TodayPage({
             if (active && refreshed) setWorkspacePage(refreshed);
           } catch (error) {
             if (active) {
-              setNotice(
+              notifyError(
                 readableError(error, "JEV 价值评估失败，请检查设置和日志。"),
               );
             }
@@ -524,7 +522,7 @@ export function TodayPage({
       } catch (error) {
         if (active) {
           setWorkspacePage(null);
-          setNotice(readableError(error, "无法整理工作文件目录。"));
+          notifyError(readableError(error, "无法整理工作文件目录。"));
         }
       } finally {
         if (active) setWorkspaceLoading(false);
@@ -538,7 +536,7 @@ export function TodayPage({
 
   async function refresh(target = viewRef.current) {
     setBusy(true);
-    setNotice(null);
+    notify(null);
     setScanStatus(null);
     setFollowingExistingScan(false);
     let followExistingScan = false;
@@ -561,9 +559,9 @@ export function TodayPage({
       if (isExistingScan(message)) {
         followExistingScan = true;
         setFollowingExistingScan(true);
-        setNotice("另一轮扫描正在进行，完成后将自动更新。");
+        notify("另一轮扫描正在进行，完成后将自动更新。");
       } else {
-        setNotice(message);
+        notifyError(message);
       }
     } finally {
       if (!followExistingScan) setBusy(false);
@@ -584,7 +582,7 @@ export function TodayPage({
       return;
     }
     if (!commands.getRecentSnapshot) {
-      setNotice("当前桌面服务暂不支持过去文件，请更新栖知后重试。");
+      notifyError("当前桌面服务暂不支持过去文件，请更新栖知后重试。");
       return;
     }
     await refresh(next);
@@ -665,7 +663,7 @@ export function TodayPage({
   async function manuallyEvaluateSelectedFiles() {
     if (view !== "recent" || manualEvaluationBusy) return;
     if (!commands.evaluateTodayFiles) {
-      setNotice("当前桌面服务不支持手动价值评估，请更新栖知后重试。");
+      notifyError("当前桌面服务不支持手动价值评估，请更新栖知后重试。");
       return;
     }
     let fileIds = [...selectedFileIds];
@@ -678,12 +676,14 @@ export function TodayPage({
         });
         fileIds = resolved.fileIds;
       } catch (error) {
-        setNotice(readableError(error, "无法读取所选文件，请刷新列表后重试。"));
+        notifyError(
+          readableError(error, "无法读取所选文件，请刷新列表后重试。"),
+        );
         return;
       }
     }
     if (fileIds.length === 0) {
-      setNotice("请先勾选需要评估的文档或目录。");
+      notify("请先勾选需要评估的文档或目录。");
       return;
     }
     setManualEvaluationBusy(true);
@@ -712,13 +712,14 @@ export function TodayPage({
         setWorkspacePage(page);
       }
       const failures = results.filter((result) => result.status === "评估失败");
-      setNotice(
+      notify(
         failures.length > 0
           ? `${failures.length} 个文件评估失败；相同版本不会自动重复请求。`
           : `已完成 ${results.length} 个所选文件的价值评估。`,
+        failures.length ? "error" : "success",
       );
     } catch (error) {
-      setNotice(readableError(error, "JEV 价值评估失败，请检查设置和日志。"));
+      notifyError(readableError(error, "JEV 价值评估失败，请检查设置和日志。"));
     } finally {
       setManualEvaluationBusy(false);
     }
@@ -739,7 +740,7 @@ export function TodayPage({
       selectionInput.fileIds.length > 0 ||
       selectionInput.directoryIds.length > 0;
     if (!template || !commands.generateWorkSummary || !hasSelection) {
-      setNotice(
+      notify(
         !hasSelection
           ? "请先勾选需要总结的文件。"
           : "总结设置尚未就绪，请在设置中保存总结模板。",
@@ -776,7 +777,9 @@ export function TodayPage({
       } catch (error) {
         setSummaryResult(null);
         setSummaryBusy(false);
-        setNotice(readableError(error, "无法核对所选文件，请刷新列表后重试。"));
+        notifyError(
+          readableError(error, "无法核对所选文件，请刷新列表后重试。"),
+        );
         return;
       }
     } else if (workspacePage && commands.resolveTodayWorkspaceSelection) {
@@ -793,14 +796,16 @@ export function TodayPage({
       } catch (error) {
         setSummaryResult(null);
         setSummaryBusy(false);
-        setNotice(readableError(error, "无法核对所选文件，请刷新列表后重试。"));
+        notifyError(
+          readableError(error, "无法核对所选文件，请刷新列表后重试。"),
+        );
         return;
       }
     }
     if (!commands.prepareWorkSummary && fileIds.length === 0) {
       setSummaryResult(null);
       setSummaryBusy(false);
-      setNotice("所选目录中没有仍可访问的文件。");
+      notifyError("所选目录中没有仍可访问的文件。");
       return;
     }
     const updateFromEvent = (event: WorkSummaryStreamEvent) => {
@@ -875,7 +880,7 @@ export function TodayPage({
         setSelected(null);
         setSnapshot(await commands.getTodaySnapshot());
       }
-      setNotice(
+      notify(
         action === "open"
           ? "已使用系统默认程序打开文件。"
           : action === "text"
@@ -885,9 +890,10 @@ export function TodayPage({
               : action === "copy"
                 ? "文件已复制到剪贴板。"
                 : "文件已删除。",
+        "success",
       );
     } catch {
-      setNotice(
+      notifyError(
         action === "delete"
           ? "无法删除该文件，它可能已移动、被占用或不再允许访问。"
           : "无法完成文件操作，它可能已移动或不再允许访问。",
@@ -898,16 +904,16 @@ export function TodayPage({
   async function excludeDirectory(id: number) {
     setFileMenu(null);
     if (!commands.excludeFileDirectory) {
-      setNotice("当前桌面服务不支持目录屏蔽，请更新栖知后重试。");
+      notifyError("当前桌面服务不支持目录屏蔽，请更新栖知后重试。");
       return;
     }
     try {
       const filtered = await commands.excludeFileDirectory(id);
       setSnapshot(filtered);
       setSelected(null);
-      setNotice("已屏蔽该目录；该目录下的文件已从今日列表隐藏。");
+      notify("已屏蔽该目录；该目录下的文件已从今日列表隐藏。", "success");
     } catch (error) {
-      setNotice(readableError(error, "无法屏蔽该目录，请稍后重试。"));
+      notifyError(readableError(error, "无法屏蔽该目录，请稍后重试。"));
     }
   }
 
@@ -917,7 +923,7 @@ export function TodayPage({
     setDatasetId("");
     setParentPath("");
     setStartParsing(true);
-    setUploadError(null);
+    notifyError(null);
     setDatasets([]);
     try {
       if (!commands.listRagflowDatasets) {
@@ -925,18 +931,18 @@ export function TodayPage({
       }
       setDatasets(await commands.listRagflowDatasets());
     } catch (error) {
-      setUploadError(readableError(error, "无法读取可用知识库。"));
+      notifyError(readableError(error, "无法读取可用知识库。"));
     }
   }
 
   async function uploadSelectedFile() {
     if (!uploadDialog || !datasetId || uploading) return;
     if (!commands.uploadTodayFile) {
-      setUploadError("当前桌面服务不支持知识库上传，请更新栖知后重试。");
+      notifyError("当前桌面服务不支持知识库上传，请更新栖知后重试。");
       return;
     }
     setUploading(true);
-    setUploadError(null);
+    notifyError(null);
     try {
       const result = await commands.uploadTodayFile({
         fileId: uploadDialog.fileId,
@@ -945,17 +951,16 @@ export function TodayPage({
         startParsing,
       });
       setUploadDialog(null);
-      setNotice(
+      notify(
         result.parsingStarted
           ? "文件已上传并开始解析。"
           : result.parsingError
             ? `文件已上传，但未能启动解析：${result.parsingError}`
             : "文件已上传；你可在 RAGFlow 中开始解析。",
+        result.parsingError ? "error" : "success",
       );
     } catch (error) {
-      setUploadError(
-        readableError(error, "上传失败，请检查知识库连接后重试。"),
-      );
+      notifyError(readableError(error, "上传失败，请检查知识库连接后重试。"));
     } finally {
       setUploading(false);
     }
@@ -983,7 +988,7 @@ export function TodayPage({
             重新检测
           </button>
         </header>
-        <StatusNotice>{snapshot.remediation}</StatusNotice>
+        <p className="empty">{snapshot.remediation}</p>
       </section>
     );
   return (
@@ -1009,7 +1014,7 @@ export function TodayPage({
               !workspacePage ||
               (!selectedFileIds.size && !selectedDirectoryIds.size)
             }
-            onResult={setNotice}
+            onResult={notify}
           />
           <button
             className="button secondary send-codex-action"
@@ -1105,8 +1110,10 @@ export function TodayPage({
           过去
         </button>
       </div>
-      {busy ? <div className="workspace-toast">{scanNotice()}</div> : null}
-      {notice ? <div className="workspace-toast">{notice}</div> : null}
+      <FeedbackNotice
+        message={busy ? scanNotice() : null}
+        tone={scanStatus?.state === "failed" ? "error" : "info"}
+      />
       <div className="today-layout">
         <div className="file-panel">
           <div className="panel-title">
@@ -1212,7 +1219,7 @@ export function TodayPage({
                     return next;
                   })
                 }
-                onNotice={setNotice}
+                onNotice={notify}
                 onOpenFile={(id) => void fileAction("open", id)}
                 onUploadFile={(id) => void openUploadDialog(id)}
                 page={workspacePage}
@@ -1429,7 +1436,7 @@ export function TodayPage({
               setFileMenu(null);
               return selection;
             }}
-            onResult={setNotice}
+            onResult={notify}
           />
           <button role="menuitem" onClick={() => openCodexHandoff(fileMenu.id)}>
             发送到 Codex
@@ -1527,7 +1534,6 @@ export function TodayPage({
               />
               上传后立即按知识库现有设置开始解析
             </label>
-            {uploadError ? <p className="upload-error">{uploadError}</p> : null}
             <footer>
               <button
                 className="button secondary"
@@ -1608,7 +1614,7 @@ export function TodayPage({
           commands={commands}
           result={summaryResult}
           onClose={() => setSummaryResult(null)}
-          onNotice={setNotice}
+          onNotice={notify}
         />
       ) : null}
     </section>

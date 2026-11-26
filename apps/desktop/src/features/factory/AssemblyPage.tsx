@@ -1,3 +1,4 @@
+import { FeedbackNotice } from "../../components/FeedbackNotice";
 import { ControlIcon } from "../../components/ControlIcon";
 import { AssemblyWorkspace } from "./AssemblyWorkspace";
 import { useFactoryMode } from "./factory-client";
@@ -39,7 +40,7 @@ export function AssemblyPage({
         <section className="studio-connect">
           <ControlIcon name="connection" size={32} />
           <h2>{loading ? "正在读取连接设置" : "连接智能工厂中台"}</h2>
-          {connection.error && <p role="alert">{connection.error}</p>}
+          <FeedbackNotice message={connection.error} tone="error" />
           {!loading && (
             <>
               <p>在连接设置中启用实时模式，即可创建、测试和管理智能体。</p>

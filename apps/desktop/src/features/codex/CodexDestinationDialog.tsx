@@ -1,3 +1,4 @@
+import { useFeedback } from "../../components/FeedbackNotice";
 import { useEffect, useRef, useState } from "react";
 import { ControlIcon } from "../../components/ControlIcon";
 
@@ -37,7 +38,7 @@ export function CodexDestinationDialog({
   const [conversationId, setConversationId] = useState("");
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState("");
+  const notify = useFeedback("error");
   const [confirmLarge, setConfirmLarge] = useState(false);
   const [confirmOriginalOnly, setConfirmOriginalOnly] = useState(false);
   const [showOriginalOnly, setShowOriginalOnly] = useState(false);
@@ -64,7 +65,7 @@ export function CodexDestinationDialog({
         const first = availableProjects.find(isUsableProject);
         setProjectId(first?.id ?? "");
       } catch (reason) {
-        if (active) setError(message(reason));
+        if (active) notify(message(reason));
       } finally {
         if (active) setLoading(false);
       }
@@ -87,7 +88,7 @@ export function CodexDestinationDialog({
         setConversations(values);
         setConversationId(values[0]?.id ?? "");
       })
-      .catch((reason) => active && setError(message(reason)));
+      .catch((reason) => active && notify(message(reason)));
     return () => {
       active = false;
     };
@@ -101,7 +102,7 @@ export function CodexDestinationDialog({
       !commands.createCodexConversation
     )
       return;
-    setError("");
+    notify("");
     try {
       const project = await commands.createCodexProject({
         name,
@@ -123,13 +124,13 @@ export function CodexDestinationDialog({
       setProjectName("");
       setProjectGoal("");
     } catch (reason) {
-      setError(message(reason));
+      notify(message(reason));
     }
   }
 
   async function createConversation() {
     if (!projectId || !commands.createCodexConversation) return;
-    setError("");
+    notify("");
     try {
       const value = await commands.createCodexConversation({
         projectId,
@@ -138,7 +139,7 @@ export function CodexDestinationDialog({
       setConversations((current) => [value, ...current]);
       setConversationId(value.id);
     } catch (reason) {
-      setError(message(reason));
+      notify(message(reason));
     }
   }
 
@@ -153,7 +154,7 @@ export function CodexDestinationDialog({
     )
       return;
     setSubmitting(true);
-    setError("");
+    notify("");
     try {
       const result = await commands.commitCodexHandoff({
         sourceKind: preview.sourceKind,
@@ -174,7 +175,7 @@ export function CodexDestinationDialog({
     } catch (reason) {
       const text = message(reason);
       if (text.includes("仅发送原文件")) setShowOriginalOnly(true);
-      setError(text);
+      notify(text);
     } finally {
       setSubmitting(false);
     }
@@ -233,11 +234,6 @@ export function CodexDestinationDialog({
 
         {loading ? (
           <div className="codex-dialog-loading">正在核对资料…</div>
-        ) : null}
-        {error ? (
-          <div className="codex-dialog-error" role="alert">
-            {error}
-          </div>
         ) : null}
         {preview ? (
           <>

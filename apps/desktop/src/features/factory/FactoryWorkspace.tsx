@@ -1,3 +1,4 @@
+import { FeedbackNotice } from "../../components/FeedbackNotice";
 import { FactoryPage } from "./FactoryPage";
 import { useFactoryMode } from "./factory-client";
 import { LiveFactoryPage } from "./LiveFactoryPage";
@@ -45,7 +46,7 @@ export function FactoryWorkspace({
             ? "无法读取中台连接配置"
             : "正在读取工厂设置"}
         </h2>
-        {connection.error && <p role="alert">{connection.error}</p>}
+        <FeedbackNotice message={connection.error} tone="error" />
         {connection.mode === "error" && (
           <button className="fc-primary" onClick={onOpenSettings}>
             打开连接设置

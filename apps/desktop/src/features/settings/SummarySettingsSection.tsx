@@ -1,3 +1,4 @@
+import { FeedbackNotice, useFeedback } from "../../components/FeedbackNotice";
 import { useEffect, useRef, useState } from "react";
 
 import type {
@@ -25,8 +26,8 @@ export function SummarySettingsSection({ commands }: Props) {
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const notify = useFeedback("error");
 
   useEffect(() => {
     let active = true;
@@ -34,6 +35,7 @@ export function SummarySettingsSection({ commands }: Props) {
       .getSummarySettings?.()
       .then((settings) => {
         if (!active || !settings) return;
+        setLoadError(null);
         setModel(settings.model);
         setTemplates(
           settings.templates.map((template) =>
@@ -42,7 +44,7 @@ export function SummarySettingsSection({ commands }: Props) {
         );
       })
       .catch(() => {
-        if (active) setError("无法读取今日总结设置。");
+        if (active) setLoadError("无法读取今日总结设置。");
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -90,7 +92,6 @@ export function SummarySettingsSection({ commands }: Props) {
       ),
     ]);
     setExpandedKey(clientKey);
-    setNotice(null);
   }
 
   function moveTemplate(clientKey: string, offset: -1 | 1) {
@@ -134,10 +135,8 @@ export function SummarySettingsSection({ commands }: Props) {
   }
 
   async function save() {
-    setError(null);
-    setNotice(null);
     if (!commands.saveSummarySettings) {
-      setError("当前版本暂不支持今日总结设置。");
+      notify("当前版本暂不支持今日总结设置。");
       return;
     }
     const titles = templates.map((template) =>
@@ -156,7 +155,7 @@ export function SummarySettingsSection({ commands }: Props) {
       new Set(titles).size !== titles.length ||
       templates.filter((template) => template.isDefault).length !== 1
     ) {
-      setError(
+      notify(
         "标题需唯一且不超过 60 字，提示词不超过 4000 字，并设置一个默认项。",
       );
       return;
@@ -180,9 +179,10 @@ export function SummarySettingsSection({ commands }: Props) {
         ),
       );
       setExpandedKey(null);
-      setNotice(`已保存 ${saved.templates.length} 个提示词。`);
+      setLoadError(null);
+      notify(`已保存 ${saved.templates.length} 个提示词。`, "success");
     } catch {
-      setError("今日总结设置未保存，请检查模型、标题和提示词。");
+      notify("今日总结设置未保存，请检查模型、标题和提示词。");
     } finally {
       setSaving(false);
     }
@@ -193,6 +193,7 @@ export function SummarySettingsSection({ commands }: Props) {
       aria-labelledby="summary-settings-title"
       className="settings-block summary-settings-section"
     >
+      <FeedbackNotice message={loadError} tone="error" />
       <header className="summary-settings-header">
         <div>
           <p className="settings-section-kicker">AI 工作流</p>
@@ -340,12 +341,6 @@ export function SummarySettingsSection({ commands }: Props) {
           {saving ? "保存中…" : "保存今日总结设置"}
         </button>
       </footer>
-      {error ? <p className="settings-error">{error}</p> : null}
-      {notice ? (
-        <p className="settings-success" role="status">
-          {notice}
-        </p>
-      ) : null}
     </section>
   );
 }

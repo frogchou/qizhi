@@ -1,6 +1,7 @@
+import { FeedbackNotice } from "../../components/FeedbackNotice";
 import { useState } from "react";
 import { ControlIcon } from "../../components/ControlIcon";
-import { ActionNotice, Facts, ReadNotice, useAction } from "./FactoryControls";
+import { Facts, ReadNotice, useAction } from "./FactoryControls";
 import { runtimeName } from "./factory-help";
 import { factoryApi } from "./factory-client";
 import { useFactoryRead } from "./factory-feed";
@@ -50,9 +51,10 @@ export function PackageUpgrade({ target, offline, onPublished }: Props) {
     <>
       <ReadNotice read={source} />
       {record && !matches && (
-        <p role="alert" className="live-notice error">
-          返回的程序包与所选版本不一致，请重新打开版本详情。
-        </p>
+        <FeedbackNotice
+          tone="error"
+          message="返回的程序包与所选版本不一致，请重新打开版本详情。"
+        />
       )}
       {matches && (
         <PackageForm
@@ -288,7 +290,6 @@ function PackageForm({
           发布新版本
         </button>
       </div>
-      <ActionNotice action={action} />
     </form>
   );
 }

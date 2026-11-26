@@ -1,3 +1,4 @@
+import { FeedbackNotice, useFeedback } from "../../components/FeedbackNotice";
 import { useEffect, useState } from "react";
 import { ControlIcon } from "../../components/ControlIcon";
 
@@ -18,7 +19,8 @@ export function CodexSettingsSection({
     model: "",
     reasoningEffort: "medium",
   });
-  const [notice, setNotice] = useState("");
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const notify = useFeedback("error");
   const [models, setModels] = useState<CodexModelOption[]>([]);
 
   async function refresh(force = false) {
@@ -29,6 +31,7 @@ export function CodexSettingsSection({
           ? await commands.refreshCodexStatus()
           : await commands.getCodexStatus();
       setStatus(nextStatus);
+      setLoadError(null);
       if (nextStatus.installation === "ready" && commands.listCodexModels) {
         try {
           setModels(await commands.listCodexModels());
@@ -36,9 +39,10 @@ export function CodexSettingsSection({
           setModels([]);
         }
       }
-      setNotice("");
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : String(error));
+      const message = error instanceof Error ? error.message : String(error);
+      if (force) notify(message);
+      else setLoadError(message);
     }
   }
 
@@ -59,9 +63,9 @@ export function CodexSettingsSection({
           preferences.reasoningEffort,
         ),
       );
-      setNotice("Codex 默认设置已保存。");
+      notify("Codex 默认设置已保存。", "success");
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : String(error));
+      notify(error instanceof Error ? error.message : String(error));
     }
   }
   const selectedModel = models.find((model) => model.id === preferences.model);
@@ -81,6 +85,7 @@ export function CodexSettingsSection({
         </div>
       </div>
       <div className="service-form codex-diagnostics">
+        <FeedbackNotice message={loadError} tone="error" />
         <div className="codex-status-grid">
           <span>
             本机程序
@@ -175,11 +180,6 @@ export function CodexSettingsSection({
             保存 Codex 设置
           </button>
         </div>
-        {notice ? (
-          <p className="connection-result" role="status">
-            {notice}
-          </p>
-        ) : null}
       </div>
     </article>
   );

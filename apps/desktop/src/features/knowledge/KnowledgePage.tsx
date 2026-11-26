@@ -15,7 +15,11 @@ import ReactMarkdown from "react-markdown";
 
 import { AutoGrowTextarea } from "../../components/AutoGrowTextarea";
 import { BreakableText } from "../../components/BreakableText";
-import { StatusNotice } from "../../components/StatusNotice";
+import {
+  FeedbackNotice,
+  useFeedback,
+  type FeedbackTone,
+} from "../../components/FeedbackNotice";
 import type {
   CodexHandoffResult,
   CodexHandoffSourceInput,
@@ -379,7 +383,7 @@ function ConversationAnswer({
 }: {
   turn: ConversationTurn;
   agents: RagflowAgent[];
-  onBasketNotice: (message: string) => void;
+  onBasketNotice: (message: string, tone?: FeedbackTone) => void;
   downloadingChunkId: string | null;
   onDownload: (chunk: RagflowChunk) => void;
   onCopy: (content: string) => void;
@@ -892,7 +896,7 @@ export function KnowledgePage({
   const [turns, setTurns] = useState<ConversationTurn[]>([]);
   const [recentQuestions, setRecentQuestions] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [feedback, setFeedback] = useState<string | null>(null);
+  const notify = useFeedback("success", !hidden);
   const [downloadingChunkId, setDownloadingChunkId] = useState<string | null>(
     null,
   );
@@ -1034,9 +1038,9 @@ export function KnowledgePage({
   async function copyMessage(content: string) {
     try {
       await navigator.clipboard.writeText(content);
-      setFeedback("已复制到剪贴板");
+      notify("已复制到剪贴板");
     } catch {
-      setFeedback("复制失败，请手动选择文本。");
+      notify("复制失败，请手动选择文本。", "error");
     }
   }
 
@@ -1183,7 +1187,7 @@ export function KnowledgePage({
   async function downloadSource(chunk: RagflowChunk) {
     const download = commands.downloadRagflowDocument;
     if (!download || !chunk.datasetId || !chunk.documentId) {
-      setFeedback("该来源未提供可下载的原文件标识。");
+      notify("该来源未提供可下载的原文件标识。", "error");
       return;
     }
     const savePath = await save({
@@ -1192,16 +1196,16 @@ export function KnowledgePage({
     });
     if (typeof savePath !== "string" || !savePath) return;
     setDownloadingChunkId(chunk.id);
-    setFeedback(null);
+    notify(null);
     try {
       const result = await download({
         datasetId: chunk.datasetId,
         documentId: chunk.documentId,
         savePath,
       });
-      setFeedback(`已下载：${result.savedPath}`);
+      notify(`已下载：${result.savedPath}`);
     } catch (downloadError) {
-      setFeedback(errorText(downloadError));
+      notify(errorText(downloadError), "error");
     } finally {
       setDownloadingChunkId(null);
     }
@@ -1231,7 +1235,7 @@ export function KnowledgePage({
           {loading ? "正在加载…" : "重新加载资源"}
         </button>
       </header>
-      {error ? <StatusNotice>{error}</StatusNotice> : null}
+      <FeedbackNotice tone="error" message={error} />
       <div className="knowledge-layout-v2">
         <section aria-label="知识库对话" className="knowledge-conversation">
           <div
@@ -1274,7 +1278,7 @@ export function KnowledgePage({
                       onSendChunks={sendChunksToCodex}
                       onSendDocuments={sendDocumentsToCodex}
                       onSendAgent={sendAgentToCodex}
-                      onBasketNotice={setFeedback}
+                      onBasketNotice={notify}
                     />
                   </div>
                 ))}
@@ -1282,11 +1286,6 @@ export function KnowledgePage({
             )}
           </div>
           <div className="conversation-follow-up">
-            {feedback ? (
-              <p className="conversation-feedback" role="status">
-                {feedback}
-              </p>
-            ) : null}
             <Composer
               question={question}
               querying={querying}

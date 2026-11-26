@@ -1,3 +1,4 @@
+import { FeedbackNotice, useFeedback } from "../../components/FeedbackNotice";
 import { useEffect, useId, useState } from "react";
 import { ControlIcon } from "../../components/ControlIcon";
 import "./factory-settings.css";
@@ -17,9 +18,8 @@ export function FactorySettingsSection() {
   const [endpoint, setEndpoint] = useState("");
   const [token, setToken] = useState("");
   const [busy, setBusy] = useState<"load" | "test" | "save" | null>("load");
-  const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(
-    null,
-  );
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const notify = useFeedback();
   const transport = factoryTransport();
   const modeId = useId();
   useEffect(() => {
@@ -27,16 +27,13 @@ export function FactorySettingsSection() {
     getFactorySettings()
       .then((value) => {
         if (!active) return;
+        setLoadError(null);
         setSaved(value);
         setMode(value.mode);
         setEndpoint(value.endpoint);
       })
       .catch(() => {
-        if (active)
-          setNotice({
-            ok: false,
-            text: "未能读取工厂设置，请检查本机凭据管理器。",
-          });
+        if (active) setLoadError("未能读取工厂设置，请检查本机凭据管理器。");
       })
       .finally(() => {
         if (active) setBusy(null);
@@ -54,27 +51,27 @@ export function FactorySettingsSection() {
 
   async function submit(action: "test" | "save") {
     setBusy(action);
-    setNotice(null);
+    notify(null);
     try {
       const input = { mode, endpoint, token };
       if (action === "test") {
         await testFactoryConnection(input);
-        setNotice({ ok: true, text: "已通过管理员身份读取工厂总览。" });
+        notify("已通过管理员身份读取工厂总览。", "success");
       } else {
         const value = await saveFactorySettings(input);
+        setLoadError(null);
         setSaved(value);
         setEndpoint(value.endpoint);
         setToken("");
-        setNotice({
-          ok: true,
-          text:
-            value.mode === "demo"
-              ? "已保存，智能工厂将使用演示数据。"
-              : "已保存，智能工厂将读取该控制面的实时数据。",
-        });
+        notify(
+          value.mode === "demo"
+            ? "已保存，智能工厂将使用演示数据。"
+            : "已保存，智能工厂将读取该控制面的实时数据。",
+          "success",
+        );
       }
     } catch (error) {
-      setNotice({ ok: false, text: factoryErrorMessage(error) });
+      notify(factoryErrorMessage(error), "error");
     } finally {
       setBusy(null);
     }
@@ -84,6 +81,7 @@ export function FactorySettingsSection() {
       className="settings-block factory-settings"
       aria-labelledby="factory-settings-title"
     >
+      <FeedbackNotice message={loadError} tone="error" />
       <header className="factory-settings-head">
         <span className="service-icon" aria-hidden="true">
           <ControlIcon name="factory" size={21} />
@@ -116,7 +114,7 @@ export function FactorySettingsSection() {
                   }
                   onChange={() => {
                     setMode(value);
-                    setNotice(null);
+                    notify(null);
                   }}
                 />
                 <span>
@@ -163,7 +161,7 @@ export function FactorySettingsSection() {
                 }
                 onChange={(e) => {
                   setEndpoint(e.currentTarget.value);
-                  setNotice(null);
+                  notify(null);
                 }}
               />
               {endpoint.toLowerCase().startsWith("http://") && (
@@ -195,7 +193,7 @@ export function FactorySettingsSection() {
                 placeholder={hasSavedToken ? "••••••••" : "输入管理员令牌"}
                 onChange={(e) => {
                   setToken(e.currentTarget.value);
-                  setNotice(null);
+                  notify(null);
                 }}
               />
               <p className="factory-field-hint" id={modeId + "-credentials"}>
@@ -208,17 +206,6 @@ export function FactorySettingsSection() {
         </>
       )}
       <footer className="factory-settings-footer">
-        {notice && (
-          <p
-            role={notice.ok ? "status" : "alert"}
-            className={
-              notice.ok ? "factory-feedback" : "factory-feedback is-error"
-            }
-          >
-            <ControlIcon name={notice.ok ? "check" : "info"} size={15} />
-            {notice.text}
-          </p>
-        )}
         <div className="factory-settings-actions">
           {transport !== "preview" && (
             <button

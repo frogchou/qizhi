@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { ChangeEvent } from "react";
-import { ActionNotice, useAction } from "./FactoryControls";
+import { useAction } from "./FactoryControls";
 import { factoryApi } from "./factory-client";
 import { bytes } from "./factory-model";
 import {
@@ -185,7 +185,6 @@ export function SkillFileViewer({ files }: { files: SkillFile[] }) {
           <pre className="assembly-code">{preview.content}</pre>
         </>
       )}
-      <ActionNotice action={action} />
     </section>
   );
 }

@@ -69,8 +69,7 @@
   cursor: pointer;
 }
 
-.codex-dialog-loading,
-.codex-dialog-error {
+.codex-dialog-loading {
   margin: 16px 24px 0;
   padding: 11px 13px;
   border-radius: 10px;
@@ -79,10 +78,6 @@
 .codex-dialog-loading {
   background: #f2f7f5;
   color: #58716b;
-}
-.codex-dialog-error {
-  background: #fff2ef;
-  color: #a14331;
 }
 
 .codex-handoff-preview {

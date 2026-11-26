@@ -1,10 +1,5 @@
-import {
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-  within,
-} from "@testing-library/react";
+import { render } from "../../test/render";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import type { QizhiCommands, TodaySnapshot } from "../../lib/tauri";

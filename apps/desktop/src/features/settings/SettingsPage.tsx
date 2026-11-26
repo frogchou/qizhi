@@ -1,3 +1,4 @@
+import { FeedbackScope, useFeedback } from "../../components/FeedbackNotice";
 import { ControlIcon } from "../../components/ControlIcon";
 import { useEffect, useState } from "react";
 
@@ -90,10 +91,9 @@ export function SettingsPage({ commands, initialCategory }: SettingsPageProps) {
   const [jevBaseUrl, setJevBaseUrl] = useState("https://api.typesafe.ai");
   const [jevApiKey, setJevApiKey] = useState("");
   const [jevSaved, setJevSaved] = useState<MaskedServiceConfig | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [ragflowConnection, setRagflowConnection] =
-    useState<ConnectionState>(null);
-  const [jevConnection, setJevConnection] = useState<ConnectionState>(null);
+  const scanFeedback = useFeedback("error", activeCategory === "privacy");
+  const valueFeedback = useFeedback("error", activeCategory === "value");
+  const serviceFeedback = useFeedback("error", activeCategory === "services");
   const [jevInstructions, setJevInstructions] = useState(
     DEFAULT_JEV_POLICY.instructions,
   );
@@ -101,14 +101,9 @@ export function SettingsPage({ commands, initialCategory }: SettingsPageProps) {
     DEFAULT_JEV_POLICY.criteria.join("\n"),
   );
   const [jevThreshold, setJevThreshold] = useState("2.5");
-  const [jevPolicyNotice, setJevPolicyNotice] = useState<string | null>(null);
   const [ntfsIndexer, setNtfsIndexer] = useState<ConnectionState>(null);
   const [roots, setRoots] = useState<string[]>([]);
   const [exclusions, setExclusions] = useState<string[]>([]);
-  const [scanRulesNotice, setScanRulesNotice] = useState<string | null>(null);
-  const [imageSearchNotice, setImageSearchNotice] = useState<string | null>(
-    null,
-  );
   const [fileCategories, setFileCategories] = useState<FileCategory[]>([
     "documents",
     "sourceCode",
@@ -158,35 +153,45 @@ export function SettingsPage({ commands, initialCategory }: SettingsPageProps) {
       .catch(() => undefined);
   }, [commands]);
 
-  async function testJev() {
-    setJevConnection(
-      await commands.testServiceConnection({
+  async function testService(service: "ragflow" | "jev") {
+    try {
+      const result = await commands.testServiceConnection({
+        service,
+        endpoint: service === "ragflow" ? ragflowBaseUrl : jevBaseUrl,
+        apiKey: service === "ragflow" ? ragflowApiKey : jevApiKey,
+      });
+      const message =
+        service === "ragflow" && result.available && !ragflowSaved
+          ? result.message + "；请点击“保存 RAGFlow”后在知识库中使用。"
+          : result.message;
+      serviceFeedback(message, result.available ? "success" : "error");
+    } catch {
+      serviceFeedback("连接测试失败，请检查服务地址和凭据。");
+    }
+  }
+  async function saveJev() {
+    try {
+      const result = await commands.saveSettings({
         service: "jev",
         endpoint: jevBaseUrl,
         apiKey: jevApiKey,
-      }),
-    );
-  }
-  async function saveJev() {
-    const result = await commands.saveSettings({
-      service: "jev",
-      endpoint: jevBaseUrl,
-      apiKey: jevApiKey,
-    });
-    setJevSaved(result);
-    setJevApiKey("");
+      });
+      setJevSaved(result);
+      setJevApiKey("");
+      serviceFeedback("JEV 设置已保存。", "success");
+    } catch {
+      serviceFeedback("JEV 设置未保存，请检查服务地址和凭据。");
+    }
   }
 
   async function saveJevPolicy() {
-    setError(null);
-    setJevPolicyNotice(null);
     const criteria = jevCriteria
       .split(/\r?\n/)
       .map((line) => line.trim())
       .filter(Boolean);
     const valuableThreshold = Number(jevThreshold);
     if (!commands.saveJevValuePolicy) {
-      setError("当前版本暂不支持保存 JEV 评估标准，请更新栖知后重试。");
+      valueFeedback("当前版本暂不支持保存 JEV 评估标准，请更新栖知后重试。");
       return;
     }
     try {
@@ -198,18 +203,18 @@ export function SettingsPage({ commands, initialCategory }: SettingsPageProps) {
       setJevInstructions(savedPolicy.instructions);
       setJevCriteria(savedPolicy.criteria.join("\n"));
       setJevThreshold(String(savedPolicy.valuableThreshold));
-      setJevPolicyNotice(
+      valueFeedback(
         "评估标准已保存；现有文件会按新标准重新进行价值判断。",
+        "success",
       );
     } catch {
-      setError(
+      valueFeedback(
         "评估标准未保存：说明不能为空，分级需要 2—10 项，阈值需位于最低分与最高分之间。",
       );
     }
   }
 
   async function chooseFolder(target: "roots" | "exclusions") {
-    setError(null);
     try {
       const selected = await commands.pickFolder();
       if (!selected) return;
@@ -218,21 +223,18 @@ export function SettingsPage({ commands, initialCategory }: SettingsPageProps) {
         current.includes(selected) ? current : [...current, selected],
       );
     } catch {
-      setError("无法打开文件夹选择窗口，请重启栖知后重试。");
+      scanFeedback("无法打开文件夹选择窗口，请重启栖知后重试。");
     }
   }
 
   async function saveScanRules() {
-    setError(null);
-    setScanRulesNotice(null);
-    setImageSearchNotice(null);
     const parsedDirectoryGroupThreshold = Number(directoryGroupThreshold);
     if (
       !Number.isInteger(parsedDirectoryGroupThreshold) ||
       parsedDirectoryGroupThreshold < 2 ||
       parsedDirectoryGroupThreshold > 100
     ) {
-      setError("目录聚合阈值必须在 2 到 100 之间。");
+      scanFeedback("目录聚合阈值必须在 2 到 100 之间。");
       return;
     }
     try {
@@ -250,15 +252,15 @@ export function SettingsPage({ commands, initialCategory }: SettingsPageProps) {
           savedRules.directoryGroupThreshold ?? parsedDirectoryGroupThreshold,
         ),
       );
-      setScanRulesNotice(
-        `扫描规则已保存：${savedRules.allowedRoots.length} 个扫描范围，${savedRules.customExclusions.length} 个排除目录。`,
-      );
-      setImageSearchNotice(
-        `图片搜索已${savedRules.fileCategories.includes("images") ? "开启" : "关闭"}。`,
+      scanFeedback(
+        `扫描规则已保存：${savedRules.allowedRoots.length} 个扫描范围，${savedRules.customExclusions.length} 个排除目录。` +
+          "\n" +
+          `图片搜索已${savedRules.fileCategories.includes("images") ? "开启" : "关闭"}。`,
+        "success",
       );
       setNtfsIndexer((await commands.getNtfsIndexerStatus?.()) ?? null);
     } catch {
-      setError("扫描范围未保存，请检查选择的文件夹。");
+      scanFeedback("扫描范围未保存，请检查选择的文件夹。");
     }
   }
 
@@ -272,7 +274,6 @@ export function SettingsPage({ commands, initialCategory }: SettingsPageProps) {
   }
 
   async function saveRagflow() {
-    setError(null);
     try {
       const config = await commands.saveSettings({
         service: "ragflow",
@@ -281,25 +282,14 @@ export function SettingsPage({ commands, initialCategory }: SettingsPageProps) {
       });
       setRagflowSaved(config);
       setRagflowApiKey("");
-      setRagflowConnection({
-        available: true,
-        message: "RAGFlow 设置已保存，可前往知识库加载机器人。",
-      });
+      serviceFeedback(
+        "RAGFlow 设置已保存，可前往知识库加载机器人。",
+        "success",
+      );
     } catch {
-      setError("RAGFlow 设置未保存，请检查 Base URL 和本机凭据服务。");
+      serviceFeedback("RAGFlow 设置未保存，请检查 Base URL 和本机凭据服务。");
       setRagflowApiKey("");
     }
-  }
-
-  async function testRagflow() {
-    setRagflowConnection(null);
-    setRagflowConnection(
-      await commands.testServiceConnection({
-        service: "ragflow",
-        endpoint: ragflowBaseUrl,
-        apiKey: ragflowApiKey,
-      }),
-    );
   }
 
   return (
@@ -332,12 +322,6 @@ export function SettingsPage({ commands, initialCategory }: SettingsPageProps) {
         </nav>
 
         <div className="settings-category-content">
-          {error ? (
-            <p role="alert" className="settings-error">
-              {error}
-            </p>
-          ) : null}
-
           <div
             id="settings-panel-privacy"
             className="settings-category-panel"
@@ -485,14 +469,6 @@ export function SettingsPage({ commands, initialCategory }: SettingsPageProps) {
                 </label>
               </div>
               <div className="settings-block-actions">
-                {scanRulesNotice ? (
-                  <div className="settings-success" role="status">
-                    <p>{scanRulesNotice}</p>
-                    {imageSearchNotice ? <p>{imageSearchNotice}</p> : null}
-                  </div>
-                ) : (
-                  <span />
-                )}
                 <button
                   type="button"
                   className="button primary"
@@ -539,7 +515,9 @@ export function SettingsPage({ commands, initialCategory }: SettingsPageProps) {
                   {ntfsIndexer?.available ? "索引服务已连接" : "索引服务待安装"}
                 </p>
               </article>
-              <ModelProviderSettingsSection commands={commands} />
+              <FeedbackScope active={activeCategory === "services"}>
+                <ModelProviderSettingsSection commands={commands} />
+              </FeedbackScope>
               <article className="service-card openai-card">
                 <div className="service-name">
                   <span className="service-icon" aria-hidden="true">
@@ -579,7 +557,7 @@ export function SettingsPage({ commands, initialCategory }: SettingsPageProps) {
                     <button
                       type="button"
                       className="button outline"
-                      onClick={() => void testJev()}
+                      onClick={() => void testService("jev")}
                       disabled={!jevBaseUrl || !jevApiKey}
                     >
                       测试连接
@@ -593,17 +571,6 @@ export function SettingsPage({ commands, initialCategory }: SettingsPageProps) {
                       保存 JEV
                     </button>
                   </div>
-                  {jevConnection ? (
-                    <p
-                      className={
-                        jevConnection.available
-                          ? "connection-result ready"
-                          : "connection-result"
-                      }
-                    >
-                      {jevConnection.message}
-                    </p>
-                  ) : null}
                 </div>
               </article>
               <article className="service-card openai-card">
@@ -646,7 +613,7 @@ export function SettingsPage({ commands, initialCategory }: SettingsPageProps) {
                     <button
                       type="button"
                       className="button outline"
-                      onClick={testRagflow}
+                      onClick={() => void testService("ragflow")}
                       disabled={!ragflowBaseUrl || !ragflowApiKey}
                     >
                       测试连接
@@ -660,19 +627,6 @@ export function SettingsPage({ commands, initialCategory }: SettingsPageProps) {
                       保存 RAGFlow
                     </button>
                   </div>
-                  {ragflowConnection ? (
-                    <p
-                      className={
-                        ragflowConnection.available
-                          ? "connection-result ready"
-                          : "connection-result"
-                      }
-                    >
-                      {ragflowConnection.available && !ragflowSaved
-                        ? `${ragflowConnection.message}；请点击“保存 RAGFlow”后在知识库中使用。`
-                        : ragflowConnection.message}
-                    </p>
-                  ) : null}
                 </div>
               </article>
             </section>
@@ -748,11 +702,6 @@ export function SettingsPage({ commands, initialCategory }: SettingsPageProps) {
                 >
                   保存评估标准
                 </button>
-                {jevPolicyNotice ? (
-                  <p className="connection-result ready" role="status">
-                    {jevPolicyNotice}
-                  </p>
-                ) : null}
               </div>
             </section>
           </div>
@@ -763,7 +712,9 @@ export function SettingsPage({ commands, initialCategory }: SettingsPageProps) {
             aria-labelledby="settings-category-summary"
             hidden={activeCategory !== "summary"}
           >
-            <SummarySettingsSection commands={commands} />
+            <FeedbackScope active={activeCategory === "summary"}>
+              <SummarySettingsSection commands={commands} />
+            </FeedbackScope>
           </div>
 
           <div
@@ -772,7 +723,9 @@ export function SettingsPage({ commands, initialCategory }: SettingsPageProps) {
             aria-labelledby="settings-category-factory"
             hidden={activeCategory !== "factory"}
           >
-            <FactorySettingsSection />
+            <FeedbackScope active={activeCategory === "factory"}>
+              <FactorySettingsSection />
+            </FeedbackScope>
           </div>
 
           <div
@@ -789,7 +742,9 @@ export function SettingsPage({ commands, initialCategory }: SettingsPageProps) {
                 <h2 id="codex-settings-title">Codex 工作</h2>
                 <p>管理本机 Codex 检测状态、默认模型和推理强度。</p>
               </div>
-              <CodexSettingsSection commands={commands} />
+              <FeedbackScope active={activeCategory === "codex"}>
+                <CodexSettingsSection commands={commands} />
+              </FeedbackScope>
             </section>
           </div>
         </div>

@@ -389,8 +389,7 @@
   margin: 0;
   line-height: 1.6;
 }
-.basket-note,
-.basket-feedback {
+.basket-note {
   margin: 0;
   overflow-wrap: anywhere;
   font-size: 12px;
@@ -401,26 +400,6 @@
 }
 .basket-dialog-body > .basket-note {
   padding: 3px 0 8px;
-}
-.basket-feedback {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  margin: 12px 0 0;
-  padding: 7px 10px;
-  color: var(--q-accent);
-  background: var(--q-soft);
-  border-radius: 6px;
-}
-.basket-feedback > svg {
-  flex: none;
-  margin-top: 2px;
-}
-.basket-error {
-  color: #964f43;
-}
-.basket-feedback.basket-error {
-  background: #fcf1eb;
 }
 .basket-select {
   min-width: 0;

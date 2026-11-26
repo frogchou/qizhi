@@ -1,11 +1,5 @@
 import { useState } from "react";
-import {
-  ActionNotice,
-  Empty,
-  Modal,
-  ReadNotice,
-  useAction,
-} from "./FactoryControls";
+import { Empty, Modal, ReadNotice, useAction } from "./FactoryControls";
 import { factoryApi } from "./factory-client";
 import { SkillFileEditor, SkillFileViewer } from "./SkillFiles";
 import { markdownLimit, readMarkdown, type SkillFile } from "./skill-files";
@@ -373,7 +367,6 @@ export function AssemblyResources({
                 action={localImport}
                 disabled={!usable}
               />
-              <ActionNotice action={localImport} />
             </>
           ) : (
             <>
@@ -468,7 +461,6 @@ export function AssemblyResources({
           </footer>
         </form>
       )}
-      <ActionNotice action={action} />
       {preview && (
         <Modal title="资源版本内容" onClose={() => setPreview(null)} wide>
           <h3>{preview.label}</h3>

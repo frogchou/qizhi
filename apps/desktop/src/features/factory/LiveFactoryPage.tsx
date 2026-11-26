@@ -1,3 +1,4 @@
+import { FeedbackNotice } from "../../components/FeedbackNotice";
 import { ControlIcon } from "../../components/ControlIcon";
 import { useEffect, useRef, useState } from "react";
 import { areas, type Area } from "./simulation";
@@ -307,15 +308,15 @@ export function LiveFactoryPage({
           {open ? "收起面板" : "工单队列"}
         </button>
       </div>
-      {feed.error && (
-        <div className="live-connection-error" role="status">
-          <span>
-            {feed.overview ? "当前显示上次快照" : "无法读取工厂数据"} ·{" "}
-            {feed.error}
-          </span>
-          <button onClick={onSettings}>连接设置</button>
-        </div>
-      )}
+      <FeedbackNotice
+        tone="error"
+        message={
+          feed.error &&
+          (feed.overview ? "当前显示上次快照" : "无法读取工厂数据") +
+            " · " +
+            feed.error
+        }
+      />
       <div className="fc-body">
         <div
           className="fc-scene"
@@ -394,6 +395,11 @@ export function LiveFactoryPage({
               <time>快照 {when(feed.overview.observedAt, true)}</time>
             )}
           </span>
+          {feed.error && (
+            <button type="button" onClick={onSettings}>
+              连接设置
+            </button>
+          )}
           <button type="button" onClick={feed.refresh}>
             刷新
           </button>

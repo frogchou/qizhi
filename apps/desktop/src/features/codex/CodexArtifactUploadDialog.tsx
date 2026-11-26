@@ -1,3 +1,4 @@
+import { useFeedback } from "../../components/FeedbackNotice";
 import { useEffect, useState } from "react";
 
 import type {
@@ -25,24 +26,29 @@ export function CodexArtifactUploadDialog({
   const [startParsing, setStartParsing] = useState(true);
   const [duplicateConfirmation, setDuplicateConfirmation] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const notify = useFeedback("error");
 
   useEffect(() => {
+    let active = true;
     void Promise.all([
       commands.listRagflowDatasets?.() ?? [],
       commands.listCodexArtifactUploads?.(artifact.id) ?? [],
     ])
       .then(([nextDatasets, nextHistory]) => {
+        if (!active) return;
         setDatasets(nextDatasets);
         setHistory(nextHistory);
       })
-      .catch((reason) => setError(message(reason)));
-  }, [artifact.id]);
+      .catch((reason) => active && notify(message(reason)));
+    return () => {
+      active = false;
+    };
+  }, [artifact.id, commands, notify]);
 
   async function upload(confirmDuplicate: boolean) {
     if (!datasetId || !commands.uploadCodexArtifact || busy) return;
     setBusy(true);
-    setError("");
+    notify("");
     try {
       const result = await commands.uploadCodexArtifact({
         artifactId: artifact.id,
@@ -52,10 +58,14 @@ export function CodexArtifactUploadDialog({
         confirmDuplicate,
       });
       onUploaded(result);
+      notify(
+        uploadStatus(result.status),
+        result.status === "uploaded" ? "success" : "error",
+      );
       onClose();
     } catch (reason) {
       const text = message(reason);
-      setError(text);
+      notify(text);
       setDuplicateConfirmation(text.includes("已上传到此知识库"));
     } finally {
       setBusy(false);
@@ -116,7 +126,6 @@ export function CodexArtifactUploadDialog({
             最近记录：{uploadStatus(history[0].status)}
           </p>
         ) : null}
-        {error ? <div className="codex-upload-error">{error}</div> : null}
         <div className="codex-dialog-actions">
           <button type="button" onClick={onClose} disabled={busy}>
             取消

@@ -1,3 +1,4 @@
+import { FeedbackNotice, useFeedback } from "../../components/FeedbackNotice";
 import { ControlIcon } from "../../components/ControlIcon";
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { factoryHelpGroups, helpFor, type FactoryHelpId } from "./factory-help";
@@ -123,19 +124,30 @@ export function ContextHelp({
 export function ReadNotice({
   read,
 }: {
-  read: { loading: boolean; data: unknown; error: string; retry: () => void };
+  read: {
+    loading: boolean;
+    data: unknown;
+    error: string;
+    retry: () => void;
+    attempt?: number;
+  };
 }) {
   if (read.error)
     return (
-      <div role="alert" className="live-notice error">
-        <span>
-          {read.data ? "显示上次读取结果。" : ""}
-          {read.error}
+      <div className="live-read-state">
+        <FeedbackNotice
+          tone="error"
+          attempt={read.attempt}
+          message={(read.data ? "显示上次读取结果。" : "") + read.error}
+        />
+        <span title={read.error}>
+          {read.data ? "显示上次读取结果" : "读取失败"}
         </span>
         <button
           type="button"
           className="ui-action ui-quiet ui-small"
           onClick={read.retry}
+          disabled={read.loading}
         >
           重新读取
         </button>
@@ -150,42 +162,27 @@ export function ReadNotice({
   return null;
 }
 export function useAction(onSuccess?: () => void) {
-  const [feedback, setFeedback] = useState({
-    busy: false,
-    message: "",
-    error: false,
-  });
+  const notify = useFeedback();
+  const [state, setState] = useState({ busy: false, error: false });
   const lock = useRef(false);
   async function run(action: () => Promise<string | void>) {
     if (lock.current) return;
     lock.current = true;
-    setFeedback({ busy: true, message: "", error: false });
+    notify(null);
+    setState({ busy: true, error: false });
     try {
       const message = await action();
-      setFeedback({ busy: false, message: message ?? "", error: false });
+      if (message) notify(message, "success");
+      setState({ busy: false, error: false });
       onSuccess?.();
     } catch (error) {
-      setFeedback({ busy: false, message: errorText(error), error: true });
+      notify(errorText(error), "error");
+      setState({ busy: false, error: true });
     } finally {
       lock.current = false;
     }
   }
-  return { ...feedback, run };
-}
-export function ActionNotice({
-  action,
-}: {
-  action: { busy: boolean; message: string; error: boolean };
-}) {
-  if (!action.busy && !action.message) return null;
-  return (
-    <p
-      className={"live-notice" + (action.error ? " error" : "")}
-      role={action.error ? "alert" : "status"}
-    >
-      {action.busy ? "正在提交…" : action.message}
-    </p>
-  );
+  return { ...state, run };
 }
 export function Modal({
   title,

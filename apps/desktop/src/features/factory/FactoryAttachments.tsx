@@ -1,3 +1,4 @@
+import { useFeedback } from "../../components/FeedbackNotice";
 import { ControlIcon } from "../../components/ControlIcon";
 import { useRef, useState } from "react";
 import { MaterialBasketSelector } from "../materials/MaterialBasket";
@@ -24,6 +25,7 @@ export function useFactoryAttachments() {
   >([]);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState("");
+  const notify = useFeedback("error");
   const running = useRef(false);
   const cached = useRef(new Map<string, UploadReceipt>());
 
@@ -32,6 +34,7 @@ export function useFactoryAttachments() {
     running.current = true;
     setBusy(true);
     setProgress("正在选择或上传附件…");
+    const failed: string[] = [];
     function collect(results: LocalUpload[]) {
       const uploaded: UploadReceipt[] = [],
         issues: { key: string; name: string; text: string }[] = [];
@@ -53,7 +56,10 @@ export function useFactoryAttachments() {
         ...old,
         ...uploaded.filter((u) => !old.some((p) => p.id === u.id)),
       ]);
-      if (issues.length) setFailures((old) => [...old, ...issues]);
+      if (issues.length) {
+        failed.push(...issues.map((issue) => issue.text));
+        setFailures((old) => [...old, ...issues]);
+      }
     }
     function clearRetryErrors(names: Set<string>) {
       setFailures((old) => old.filter((e) => e.name && !names.has(e.name)));
@@ -93,11 +99,16 @@ export function useFactoryAttachments() {
         }
       }
     } catch (error) {
-      setFailures((old) => [
-        ...old,
-        { key: crypto.randomUUID(), text: factoryErrorMessage(error) },
-      ]);
+      const text = factoryErrorMessage(error);
+      failed.push(text);
+      setFailures((old) => [...old, { key: crypto.randomUUID(), text }]);
     } finally {
+      if (failed.length)
+        notify(
+          failed.length === 1
+            ? failed[0]
+            : failed.length + " 个附件上传失败，请查看附件列表。",
+        );
       running.current = false;
       setBusy(false);
       setProgress("");
@@ -222,7 +233,7 @@ export function FactoryAttachments({
       ))}
       {a.failures.map((e) => (
         <div className="live-upload-row" key={e.key}>
-          <span role="alert">{e.text}</span>
+          <span>{e.text}</span>
           <button
             type="button"
             className="ui-action ui-quiet ui-small"

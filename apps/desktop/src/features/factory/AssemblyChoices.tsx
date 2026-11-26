@@ -161,11 +161,12 @@ export function ChoiceGroup({
           <small title={caption}>{caption}</small>
         </span>
         <span className="studio-resource-count">
-          {selected.length
-            ? "已选 " + selected.length
-            : suggestedCount
-              ? suggestedCount + " 项建议"
-              : options.length + " 项可选"}
+          {[
+            selected.length > 0 && "已选 " + selected.length,
+            suggestedCount > 0 && suggestedCount + " 项建议",
+          ]
+            .filter(Boolean)
+            .join(" · ") || options.length + " 项可选"}
         </span>
         <ControlIcon
           name="chevron"

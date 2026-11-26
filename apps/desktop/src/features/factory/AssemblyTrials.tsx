@@ -1,11 +1,12 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { useFeedback } from "../../components/FeedbackNotice";
 import { TrialReceipts } from "./AssemblyReceipts";
+import { SampleReview, TrialAcceptance } from "./TrialAcceptance";
 import {
   FactoryAttachments,
   useFactoryAttachments,
 } from "./FactoryAttachments";
 import {
-  ActionNotice,
   Badge,
   Empty,
   Facts,
@@ -17,9 +18,7 @@ import { factoryApi } from "./factory-client";
 import { useFactoryRead } from "./factory-feed";
 import { stateName, when, type Agent, type OpenTask } from "./factory-model";
 import {
-  canAccept,
   generationOptions,
-  requiredChecksPassed,
   draftPath,
   useRequestId,
   type AssemblyDraft,
@@ -143,10 +142,15 @@ export function AssemblyReview({
   const read = useFactoryRead<AssemblyDraft>(draftPath(record.draftId), 0),
     [show, setShow] = useState(false);
   const candidate = read.data?.candidates.find(
-    (c) => c.id === record.candidateId,
+    (c) =>
+      c.id === record.candidateId && c.packageDigest === record.packageDigest,
   );
   const run = read.data?.runs.find(
-    (r) => r.id === record.runId && r.candidateId === record.candidateId,
+    (r) =>
+      r.id === record.runId &&
+      r.candidateId === record.candidateId &&
+      (r.packageDigest === undefined ||
+        r.packageDigest === record.packageDigest),
   );
   return (
     <section className="assembly-section">
@@ -159,6 +163,11 @@ export function AssemblyReview({
           ["测试记录", record.runId],
         ]}
       />
+      {read.data && (!candidate || !run) && (
+        <p className="live-subtle">
+          当前记录与这次发布登记的生成编号、测试编号或包摘要未能匹配。请刷新后核对登记信息。
+        </p>
+      )}
       {candidate && (
         <>
           <Facts
@@ -208,6 +217,7 @@ export function AssemblyReview({
               </li>
             ))}
           </ul>
+          <SampleReview run={run} />
           <TrialReceipts items={run.receipts} />
           <button
             type="button"
@@ -228,8 +238,10 @@ export function AssemblyTrials({
   draft,
   selectedBuild,
   onBuildChange,
+  onEditDraft,
   onManageVersion,
   disabled,
+  unavailableReason,
   dirty,
   onChange,
   onTask,
@@ -238,8 +250,10 @@ export function AssemblyTrials({
   draft: AssemblyDraft;
   selectedBuild?: string;
   onBuildChange: (id: string) => void;
+  onEditDraft: () => void;
   onManageVersion: (agentId: string, version: string) => void;
   disabled: boolean;
+  unavailableReason?: string;
   dirty: boolean;
   onChange: () => void;
   onTask: OpenTask;
@@ -248,12 +262,35 @@ export function AssemblyTrials({
   const builds = generationOptions(draft.candidates);
   const [firstBuild] = useState(() => builds[0]?.candidate.id),
     [source, showSource] = useState(false);
+  const selection = selectedBuild ?? firstBuild;
   const candidate = (
-    builds.find(
-      (item) => item.candidate.id === (selectedBuild ?? firstBuild),
-    ) ?? builds[0]
+    selection
+      ? builds.find((item) => item.candidate.id === selection)
+      : builds[0]
   )?.candidate;
-  if (!candidate) return <Empty>还没有可测试的版本。</Empty>;
+  if (!builds.length) return <Empty>还没有可测试的版本。</Empty>;
+  if (!candidate)
+    return (
+      <div>
+        <p>当前草稿中找不到所选生成记录。请刷新，或选择要查看的生成记录。</p>
+        <label className="assembly-field">
+          生成记录
+          <select value="" onChange={(e) => onBuildChange(e.target.value)}>
+            <option value="" disabled>
+              选择生成记录
+            </option>
+            {builds.map((b) => (
+              <option key={b.candidate.id} value={b.candidate.id}>
+                {b.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button type="button" className="ui-action" onClick={onChange}>
+          刷新测试记录
+        </button>
+      </div>
+    );
   return (
     <>
       <div className="studio-test-bar">
@@ -319,7 +356,7 @@ export function AssemblyTrials({
         </div>
       </div>
       {(dirty || draft.revision !== candidate.revision) && (
-        <p className="live-notice">
+        <p className="live-subtle">
           此次测试使用已生成的内容。当前编辑有更新，可先生成智能体再测试最新配置。
         </p>
       )}
@@ -353,6 +390,17 @@ export function AssemblyTrials({
         candidate={candidate}
         dirty={dirty}
         disabled={disabled}
+        unavailableReason={unavailableReason}
+        onEditDraft={onEditDraft}
+        onCurrentBuild={() => {
+          const current = builds.find(
+            (b) => b.candidate.revision === draft.revision,
+          );
+          if (current) onBuildChange(current.candidate.id);
+        }}
+        onManageVersion={() =>
+          onManageVersion(candidate.agentId, candidate.version)
+        }
         onChange={onChange}
         onTask={onTask}
       />
@@ -364,6 +412,10 @@ function TrialForm({
   candidate,
   dirty,
   disabled,
+  unavailableReason,
+  onEditDraft,
+  onCurrentBuild,
+  onManageVersion,
   onChange,
   onTask,
 }: {
@@ -371,20 +423,25 @@ function TrialForm({
   candidate: Candidate;
   dirty: boolean;
   disabled: boolean;
+  unavailableReason?: string;
+  onEditDraft: () => void;
+  onCurrentBuild: () => void;
+  onManageVersion: () => void;
   onChange: () => void;
   onTask: OpenTask;
 }) {
   const [goal, setGoal] = useState(""),
     [input, setInput] = useState(""),
-    [selectedRun, selectRun] = useState(""),
-    [feedback, setFeedback] = useState("");
+    [selectedRun, selectRun] = useState("");
+  const goalField = useRef<HTMLTextAreaElement>(null);
+  const notify = useFeedback();
   const attachments = useFactoryAttachments(),
     action = useAction(onChange),
     request = useRequestId();
   const runs = draft.runs
     .filter((r) => r.candidateId === candidate.id)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  const run = runs.find((r) => r.id === selectedRun) ?? runs[0];
+  const run = selectedRun ? runs.find((r) => r.id === selectedRun) : runs[0];
   const busy = disabled || action.busy || attachments.busy;
   async function start() {
     let structured: unknown;
@@ -426,6 +483,7 @@ function TrialForm({
           <label className="assembly-field">
             样例需求
             <textarea
+              ref={goalField}
               value={goal}
               onChange={(e) => setGoal(e.target.value)}
               placeholder="说明输入、期望产物和需要验证的行为"
@@ -455,29 +513,42 @@ function TrialForm({
           </button>
         </section>
         <section className="assembly-section">
-          <h3>测试记录</h3>
+          <div className="assembly-row">
+            <h3>测试记录</h3>
+            <button
+              type="button"
+              className="ui-action ui-quiet ui-small"
+              onClick={() => {
+                onChange();
+                notify("正在刷新测试记录。", "info");
+              }}
+            >
+              刷新测试记录
+            </button>
+          </div>
+          {(runs.length > 0 || selectedRun) && (
+            <label className="assembly-field">
+              选择测试记录
+              <select
+                aria-label="选择测试记录"
+                value={run?.id ?? selectedRun}
+                onChange={(e) => selectRun(e.target.value)}
+              >
+                {!run && (
+                  <option value={selectedRun}>等待读取 · {selectedRun}</option>
+                )}
+                {runs.map((r) => (
+                  <option value={r.id} key={r.id}>
+                    {when(r.createdAt)} · {stateName(r.state)} · {r.id}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           {run ? (
             <>
-              <label className="assembly-field">
-                选择测试记录
-                <select
-                  aria-label="选择测试记录"
-                  value={run.id}
-                  onChange={(e) => {
-                    selectRun(e.target.value);
-                    setFeedback("");
-                  }}
-                >
-                  {runs.map((r) => (
-                    <option value={r.id} key={r.id}>
-                      {when(r.createdAt)} · {stateName(r.state)} · {r.id}
-                    </option>
-                  ))}
-                </select>
-              </label>
               <div className="assembly-row">
                 <Badge value={run.state} />
-                {run.accepted && <strong>用户已认可</strong>}
                 <button
                   type="button"
                   className="ui-action ui-small"
@@ -514,106 +585,59 @@ function TrialForm({
               ) : (
                 <p className="live-subtle">中台尚未返回断言记录。</p>
               )}
-              <h4>样例验收条件</h4>
-              {run.candidateCompleted === false &&
-                ["awaiting_review", "accepted"].includes(run.state) && (
-                  <p className="live-notice">
-                    此工单缺少所选版本执行成功的记录，请重新测试。
-                  </p>
-                )}
-              {run.criteria?.length ? (
-                <ul className="assembly-assertions">
-                  {run.criteria.map((c) => {
-                    const f = run.findings?.find((v) => v.id === c.id);
-                    return (
-                      <li key={c.id}>
-                        <strong>{c.requirement}</strong>
-                        <span>
-                          {c.priority === "required" ? "必需" : "参考"} ·{" "}
-                          {stateName(f?.status)}
-                        </span>
-                        {f?.reason && <small>{f.reason}</small>}
-                        {Boolean(f?.evidenceIds?.length) && (
-                          <small>依据 {f!.evidenceIds!.join("、")}</small>
-                        )}
-                      </li>
-                    );
-                  })}
-                </ul>
-              ) : (
-                <p className="live-subtle">工单尚未给出逐项验收结果。</p>
-              )}
-              {(dirty || draft.revision !== candidate.revision) && (
-                <p className="live-notice">
-                  当前编辑内容已有修改。请重新生成并测试后再提交发布审核。
-                </p>
-              )}
+              <SampleReview run={run} />
               <TrialReceipts items={run.receipts} />
-              {run.feedback && <p>验收意见 · {run.feedback}</p>}
-              {!run.accepted && (
-                <label className="assembly-field">
-                  验收意见（可选）
-                  <textarea
-                    value={feedback}
-                    onChange={(e) => setFeedback(e.target.value)}
-                  />
-                </label>
-              )}
-              <div className="fc-actions">
-                {!run.accepted && (
-                  <button
-                    type="button"
-                    className="ui-action ui-primary"
-                    disabled={busy || !canAccept(run)}
-                    onClick={() =>
-                      void action.run(async () => {
-                        await factoryApi.post(
-                          `${draftPath(draft.id)}/runs/${encodeURIComponent(run.id)}/accept`,
-                          { feedback: feedback.trim() || undefined },
-                        );
-                        return "已记录对该样例的认可。";
-                      })
-                    }
-                  >
-                    认可测试结果
-                  </button>
-                )}
-                <button
-                  type="button"
-                  className="ui-action ui-primary"
-                  disabled={
-                    busy ||
-                    dirty ||
-                    draft.revision !== candidate.revision ||
-                    !run.accepted ||
-                    Boolean(candidate.releaseStatus) ||
-                    !requiredChecksPassed(run)
+              <TrialAcceptance
+                key={run.id}
+                run={run}
+                draft={draft}
+                candidate={candidate}
+                dirty={dirty}
+                unavailableReason={
+                  disabled
+                    ? (unavailableReason ??
+                      "暂时无法提交，请刷新草稿和测试记录。")
+                    : undefined
+                }
+                waiting={action.busy || attachments.busy}
+                action={action}
+                onRefresh={onChange}
+                onKeepSelection={() => selectRun(run.id)}
+                onRemedy={(remedy) => {
+                  switch (remedy) {
+                    case "edit":
+                      return onEditDraft();
+                    case "currentBuild":
+                      return onCurrentBuild();
+                    case "manage":
+                      return onManageVersion();
+                    case "sample":
+                      return goalField.current?.focus();
+                    case "review":
+                      return onTask(
+                        run.taskId,
+                        "测试工单 " + run.taskId,
+                        "quality",
+                      );
+                    case "plan":
+                      return onTask(
+                        run.taskId,
+                        "测试工单 " + run.taskId,
+                        "plan",
+                      );
                   }
-                  onClick={() =>
-                    void action.run(async () => {
-                      const payload = {
-                        candidateId: candidate.id,
-                        runId: run.id,
-                      };
-                      await factoryApi.post(`${draftPath(draft.id)}/publish`, {
-                        ...payload,
-                        requestId: request.forPayload(payload),
-                      });
-                      request.confirmed();
-                      return `已提交 ${candidate.agentId} v${candidate.version}，等待管理员审核。`;
-                    })
-                  }
-                >
-                  提交发布审核
-                </button>
-              </div>
+                }}
+              />
             </>
           ) : (
-            <p className="live-subtle">这个版本还没有测试记录。</p>
+            <p className="live-subtle">
+              {selectedRun
+                ? "正在读取刚提交的测试记录。可刷新查看最新进度。"
+                : "这个版本还没有测试记录。请先填写样例需求并测试智能体。"}
+            </p>
           )}
         </section>
       </div>
-      <ActionNotice action={action} />
     </>
   );
 }

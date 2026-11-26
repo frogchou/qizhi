@@ -1,3 +1,4 @@
+import { useFeedback } from "../../components/FeedbackNotice";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 
@@ -46,7 +47,7 @@ export function CodexConversation({
 }) {
   const [draft, setDraft] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const notify = useFeedback();
   const [resolvingApprovalId, setResolvingApprovalId] = useState<string | null>(
     null,
   );
@@ -65,10 +66,13 @@ export function CodexConversation({
     setDraft(text);
     window.setTimeout(() => composer.current?.focus(), 0);
   }
-  function copy(id: string, text: string) {
-    void navigator.clipboard?.writeText(text);
-    setCopiedId(id);
-    window.setTimeout(() => setCopiedId(null), 1200);
+  async function copy(text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      notify("已复制到剪贴板", "success");
+    } catch {
+      notify("复制失败，请手动选择文本。", "error");
+    }
   }
   async function submit() {
     const value = draft.trim();
@@ -132,9 +136,9 @@ export function CodexConversation({
                   <div className="codex-message-actions">
                     <button
                       type="button"
-                      onClick={() => copy(message.id, message.markdown)}
+                      onClick={() => void copy(message.markdown)}
                     >
-                      {copiedId === message.id ? "已复制" : "复制"}
+                      复制
                     </button>
                     <button
                       type="button"
@@ -166,9 +170,9 @@ export function CodexConversation({
                     <div className="codex-message-actions assistant">
                       <button
                         type="button"
-                        onClick={() => copy(message.id, message.markdown)}
+                        onClick={() => void copy(message.markdown)}
                       >
-                        {copiedId === message.id ? "已复制" : "复制"}
+                        复制
                       </button>
                     </div>
                   </div>
@@ -181,8 +185,8 @@ export function CodexConversation({
           <div className="codex-message-stack user">
             <div className="codex-user-message">{livePrompt}</div>
             <div className="codex-message-actions">
-              <button type="button" onClick={() => copy("live", livePrompt)}>
-                {copiedId === "live" ? "已复制" : "复制"}
+              <button type="button" onClick={() => void copy(livePrompt)}>
+                复制
               </button>
               <button
                 type="button"

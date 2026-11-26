@@ -1,3 +1,4 @@
+import { FeedbackProvider, FeedbackScope } from "./components/FeedbackNotice";
 import { useState } from "react";
 
 import "./App.css";
@@ -79,92 +80,106 @@ function App({ commands = unavailableCommands }: { commands?: QizhiCommands }) {
   }
 
   return (
-    <MaterialBasketProvider commands={commands}>
-      <main className="app-shell">
-        <AppSidebar
-          active={route}
-          onNavigate={navigate}
-          onOpenBasket={() => setBasketOpen(true)}
-        />
-        <div
-          className={
-            route === "today"
-              ? "workspace today-workspace"
-              : route === "knowledge"
-                ? "workspace knowledge-workspace-shell"
-                : route === "codex"
-                  ? "workspace codex-workspace-shell"
-                  : route === "factory"
-                    ? "workspace factory-workspace"
-                    : route === "assembly"
-                      ? "workspace assembly-workspace-shell"
-                      : "workspace"
-          }
-        >
-          {route === "today" && (
-            <TodayPage
-              commands={commands}
-              onOpenCodex={openCommittedCodexHandoff}
-            />
-          )}
-          {settingsMounted && (
-            <section
-              className="page settings-page"
-              style={route === "settings" ? undefined : { display: "none" }}
-              hidden={route !== "settings"}
-            >
-              <SettingsPage
-                commands={commands}
-                initialCategory={settingsInitialCategory}
-              />
-            </section>
-          )}
-          <FactoryWorkspace
-            active={route === "factory"}
-            initialTarget={factoryTarget}
-            onOpenKnowledge={() => navigate("knowledge")}
-            onOpenSettings={openConnectionSettings}
-            onOpenDraft={(endpoint, target) => {
-              setAssemblyEntry((old) => ({
-                endpoint,
-                target,
-                visit: (old?.visit ?? 0) + 1,
-              }));
-              navigate("assembly");
-            }}
+    <FeedbackProvider>
+      <MaterialBasketProvider commands={commands}>
+        <main className="app-shell">
+          <AppSidebar
+            active={route}
+            onNavigate={navigate}
+            onOpenBasket={() => setBasketOpen(true)}
           />
-          {assemblyMounted && (
-            <AssemblyPage
-              key={assemblyEntry?.visit}
-              active={route === "assembly"}
-              entry={assemblyEntry}
-              onSettings={openConnectionSettings}
-              onTask={(id, title, tab = "plan") =>
-                openFactory({ kind: "task", link: { id, title, tab } })
-              }
-              onNewTask={(scope) => openFactory({ kind: "new", scope })}
-            />
+          <div
+            className={
+              route === "today"
+                ? "workspace today-workspace"
+                : route === "knowledge"
+                  ? "workspace knowledge-workspace-shell"
+                  : route === "codex"
+                    ? "workspace codex-workspace-shell"
+                    : route === "factory"
+                      ? "workspace factory-workspace"
+                      : route === "assembly"
+                        ? "workspace assembly-workspace-shell"
+                        : "workspace"
+            }
+          >
+            {route === "today" && (
+              <FeedbackScope active={route === "today"}>
+                <TodayPage
+                  commands={commands}
+                  onOpenCodex={openCommittedCodexHandoff}
+                />
+              </FeedbackScope>
+            )}
+            {settingsMounted && (
+              <section
+                className="page settings-page"
+                style={route === "settings" ? undefined : { display: "none" }}
+                hidden={route !== "settings"}
+              >
+                <FeedbackScope active={route === "settings"}>
+                  <SettingsPage
+                    commands={commands}
+                    initialCategory={settingsInitialCategory}
+                  />
+                </FeedbackScope>
+              </section>
+            )}
+            <FeedbackScope active={route === "factory"}>
+              <FactoryWorkspace
+                active={route === "factory"}
+                initialTarget={factoryTarget}
+                onOpenKnowledge={() => navigate("knowledge")}
+                onOpenSettings={openConnectionSettings}
+                onOpenDraft={(endpoint, target) => {
+                  setAssemblyEntry((old) => ({
+                    endpoint,
+                    target,
+                    visit: (old?.visit ?? 0) + 1,
+                  }));
+                  navigate("assembly");
+                }}
+              />
+            </FeedbackScope>
+            {assemblyMounted && (
+              <FeedbackScope active={route === "assembly"}>
+                <AssemblyPage
+                  key={assemblyEntry?.visit}
+                  active={route === "assembly"}
+                  entry={assemblyEntry}
+                  onSettings={openConnectionSettings}
+                  onTask={(id, title, tab = "plan") =>
+                    openFactory({ kind: "task", link: { id, title, tab } })
+                  }
+                  onNewTask={(scope) => openFactory({ kind: "new", scope })}
+                />
+              </FeedbackScope>
+            )}
+            {knowledgeMounted ? (
+              <FeedbackScope active={route === "knowledge"}>
+                <KnowledgePage
+                  commands={commands}
+                  hidden={route !== "knowledge"}
+                  onOpenCodex={openCommittedCodexHandoff}
+                />
+              </FeedbackScope>
+            ) : null}
+            {codexMounted ? (
+              <FeedbackScope active={route === "codex"}>
+                <CodexPage
+                  commands={commands}
+                  hidden={route !== "codex"}
+                  navigationTarget={codexNavigationTarget}
+                />
+              </FeedbackScope>
+            ) : null}
+          </div>
+          {basketOpen && (
+            <MaterialBasketDialog close={() => setBasketOpen(false)} />
           )}
-          {knowledgeMounted ? (
-            <KnowledgePage
-              commands={commands}
-              hidden={route !== "knowledge"}
-              onOpenCodex={openCommittedCodexHandoff}
-            />
-          ) : null}
-          {codexMounted ? (
-            <CodexPage
-              commands={commands}
-              hidden={route !== "codex"}
-              navigationTarget={codexNavigationTarget}
-            />
-          ) : null}
-        </div>
-        {basketOpen && (
-          <MaterialBasketDialog close={() => setBasketOpen(false)} />
-        )}
-      </main>
-    </MaterialBasketProvider>
+        </main>
+      </MaterialBasketProvider>
+    </FeedbackProvider>
   );
 }
 

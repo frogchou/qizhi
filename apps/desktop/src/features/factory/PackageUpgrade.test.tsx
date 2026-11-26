@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { render } from "../../test/render";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { PackageUpgrade } from "./PackageUpgrade";
 import { factoryApi } from "./factory-client";

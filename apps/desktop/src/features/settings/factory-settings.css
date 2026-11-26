@@ -152,19 +152,6 @@
   justify-content: flex-end;
   flex-wrap: wrap;
 }
-.factory-feedback {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  margin: 0;
-  color: var(--q-accent);
-  font-size: 12px;
-  overflow-wrap: anywhere;
-}
-.factory-feedback.is-error {
-  color: #9b4138;
-}
 @media (max-width: 760px) {
   .factory-settings-head {
     padding: 17px 16px;

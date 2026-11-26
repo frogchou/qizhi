@@ -1,3 +1,7 @@
+import {
+  useFeedback,
+  type FeedbackTone,
+} from "../../components/FeedbackNotice";
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { ControlIcon } from "../../components/ControlIcon";
@@ -22,7 +26,7 @@ type Props = {
   commands: QizhiCommands;
   result: SummaryDialogState;
   onClose: () => void;
-  onNotice: (message: string) => void;
+  onNotice: (message: string, tone?: FeedbackTone) => void;
 };
 
 async function copyText(content: string) {
@@ -72,7 +76,7 @@ export function SummaryResultDialog({
   const [parentPath, setParentPath] = useState("");
   const [startParsing, setStartParsing] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const notifyError = useFeedback("error");
   const contentRef = useRef<HTMLDivElement>(null);
   const autoFollow = useRef(true);
   const complete = result.status === "completed";
@@ -84,19 +88,19 @@ export function SummaryResultDialog({
 
   async function saveMarkdown() {
     if (!commands.pickSummarySavePath || !commands.saveSummaryMarkdown) {
-      setError("当前版本暂不支持另存总结。");
+      notifyError("当前版本暂不支持另存总结。");
       return;
     }
     const suggested = artifactFilename(result.templateTitle);
     const path = await commands.pickSummarySavePath(suggested);
     if (!path) return;
     setBusy(true);
-    setError(null);
+    notifyError(null);
     try {
       await commands.saveSummaryMarkdown({ content: result.markdown, path });
-      onNotice("总结已保存为 Markdown 文件。");
+      onNotice("总结已保存为 Markdown 文件。", "success");
     } catch {
-      setError("无法保存总结，请重新选择保存位置。");
+      notifyError("无法保存总结，请重新选择保存位置。");
     } finally {
       setBusy(false);
     }
@@ -104,19 +108,19 @@ export function SummaryResultDialog({
 
   async function showUpload() {
     setUploadOpen(true);
-    setError(null);
+    notifyError(null);
     if (datasets.length || !commands.listRagflowDatasets) return;
     try {
       setDatasets(await commands.listRagflowDatasets());
     } catch {
-      setError("无法读取 RAGFlow 知识库。");
+      notifyError("无法读取 RAGFlow 知识库。");
     }
   }
 
   async function upload() {
     if (!commands.uploadSummaryMarkdown || !datasetId) return;
     setBusy(true);
-    setError(null);
+    notifyError(null);
     try {
       const output = await commands.uploadSummaryMarkdown({
         content: result.markdown,
@@ -131,10 +135,11 @@ export function SummaryResultDialog({
           : output.parsingError
             ? `总结已上传，但未能启动解析：${output.parsingError}`
             : "总结已上传到知识库。",
+        output.parsingError ? "error" : "success",
       );
       onClose();
     } catch {
-      setError("总结上传失败，请检查 RAGFlow 连接和目标知识库。");
+      notifyError("总结上传失败，请检查 RAGFlow 连接和目标知识库。");
     } finally {
       setBusy(false);
     }
@@ -181,7 +186,7 @@ export function SummaryResultDialog({
           </button>
         </header>
         {result.truncated ? (
-          <p className="summary-warning">
+          <p className="summary-detail">
             模型服务标记本次输出不完整，以下内容可能缺失。
           </p>
         ) : null}
@@ -254,15 +259,14 @@ export function SummaryResultDialog({
             </label>
           </div>
         ) : null}
-        {error ? <p className="upload-error">{error}</p> : null}
         <footer>
           <button
             className="button secondary"
             disabled={busy || !complete}
             onClick={() =>
               void copyText(result.markdown)
-                .then(() => onNotice("总结已复制到剪贴板。"))
-                .catch(() => setError("无法复制总结。"))
+                .then(() => onNotice("总结已复制到剪贴板。", "success"))
+                .catch(() => notifyError("无法复制总结。"))
             }
             type="button"
           >

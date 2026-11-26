@@ -1,6 +1,7 @@
+import { FeedbackNotice } from "../../components/FeedbackNotice";
 import { useRef, useState } from "react";
 import { factoryApi } from "./factory-client";
-import { ActionNotice, ContextHelp, Modal, useAction } from "./FactoryControls";
+import { ContextHelp, Modal, useAction } from "./FactoryControls";
 import {
   FactoryAttachments,
   useFactoryAttachments,
@@ -93,8 +94,10 @@ export function RevisionForm({
           中台将在当前工单重新编排。上一轮的成果和验收记录可随时查看。
           <ContextHelp id="revision" />
         </p>
-        {stale && <p role="alert">连接已中断，请在恢复后提交。</p>}
-        <ActionNotice action={action} />
+        <FeedbackNotice
+          tone="error"
+          message={stale ? "连接已中断，请在恢复后提交。" : ""}
+        />
         <footer>
           <button
             type="button"

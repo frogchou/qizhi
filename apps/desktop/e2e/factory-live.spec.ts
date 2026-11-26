@@ -802,12 +802,22 @@ test("导入 Skill 文件夹可核对相对路径，复制新版本保留附件�
     ],
   });
 });
-test("装配编辑保留手工输入，明确选用建议与多个真实知识库", async ({ page }) => {
+test("装配编辑保留手工输入，明确选用建议与多个真实知识库", async ({
+  page,
+}, testInfo) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (entry) => {
+    if (["warning", "error"].includes(entry.type())) errors.push(entry.text());
+  });
+  await page.setViewportSize({ width: 1280, height: 820 });
   const panel = await openStudio(page);
-  await expect(panel.getByRole("heading", { name: "基本信息" })).toBeVisible();
+  await expect(
+    panel.getByRole("heading", { name: "智能体基本信息" }),
+  ).toBeVisible();
   await panel.getByLabel("智能体与版本").selectOption("quote-draft");
   await panel
-    .getByRole("textbox", { name: "工作委托", exact: true })
+    .getByRole("textbox", { name: "智能体职责", exact: true })
     .fill("保留人工调整的结算日期");
   await panel.getByRole("tab", { name: "智能体管理", exact: true }).click();
   const manager = panel.getByRole("tabpanel", { name: "智能体管理" });
@@ -816,7 +826,7 @@ test("装配编辑保留手工输入，明确选用建议与多个真实知识�
   ).toBeVisible();
   await panel.getByRole("tab", { name: "智能体组装", exact: true }).click();
   await expect(
-    panel.getByRole("textbox", { name: "工作委托", exact: true }),
+    panel.getByRole("textbox", { name: "智能体职责", exact: true }),
   ).toHaveValue("保留人工调整的结算日期");
   await expect(
     panel.getByRole("heading", { name: "资源与权限" }),
@@ -843,19 +853,81 @@ test("装配编辑保留手工输入，明确选用建议与多个真实知识�
     )
     .toMatchObject({
       revision: 1,
-      description: "保留人工调整的结算日期",
+      description: "核对五月生效的报价",
       config: {
+        description: "保留人工调整的结算日期",
         skills: ["quote-rules@1.0.0"],
         datasetIds: ["products", "prices"],
         mcpTools: [],
       },
     });
-  await panel.getByText("与装配助手沟通", { exact: true }).click();
-  await panel.getByLabel("给装配助手的消息").fill("按最近生效日");
-  await panel.getByRole("button", { name: "发送给装配助手" }).click();
+  const log = panel.getByRole("log", { name: "装配对话" });
+  const composer = panel.getByLabel("给装配助手的消息");
+  const assemble = panel.getByRole("button", { name: "一键装配" });
+  await composer.fill("核对供应商发来的两份有效报价");
+  await assemble.click();
+  await expect(log.getByText("核对供应商发来的两份有效报价")).toBeVisible();
   await expect(
-    panel.getByText("遇到同币种的两份有效报价，应选哪份？"),
+    log.getByText("遇到同币种的两份有效报价，应选哪份？"),
   ).toBeVisible();
+  await composer.fill("按最近生效日");
+  await assemble.click();
+  await expect(log.getByText("按最近生效日", { exact: true })).toBeVisible();
+  const assembled = log.getByText(
+    "《报价核对》v1.0.0 已生成，可以测试这个版本。",
+  );
+  await expect(assembled).toBeVisible();
+  await expect(panel.getByLabel("业务流程与交付物")).toHaveValue(
+    "比较两份报价，按最近生效日选用有效报价。",
+  );
+  await expect(panel.getByLabel("智能体职责")).toHaveValue(
+    "保留人工调整的结算日期",
+  );
+  await expect(
+    panel.getByRole("button", { name: /去测试此版本/ }),
+  ).toBeVisible();
+  await panel.getByRole("button", { name: /RAGFlow 知识库/ }).click();
+  await panel.getByRole("button", { name: /精选 Skill/ }).click();
+  const dismiss = page
+    .getByRole("region", { name: "桌面提示" })
+    .getByRole("button", { name: "关闭提示" });
+  while (await dismiss.count()) await dismiss.last().click();
+  for (const width of [1280, 412]) {
+    await page.setViewportSize({ width, height: 820 });
+    await panel.evaluate((el) => {
+      el.scrollTop = 0;
+      el.querySelector(".studio-configuration")!.scrollTop = 0;
+    });
+    const chat = (await panel.locator(".studio-brief").boundingBox())!;
+    const basics = (await panel.locator(".studio-basics").boundingBox())!;
+    const permissions = (await panel
+      .locator(".studio-resources")
+      .boundingBox())!;
+    const submit = (await assemble.boundingBox())!;
+    const mine = (await log
+      .locator('[data-role="user"]')
+      .last()
+      .boundingBox())!;
+    const theirs = (await log
+      .locator('[data-role="assistant"]')
+      .last()
+      .boundingBox())!;
+    expect(mine.x + mine.width).toBeGreaterThan(theirs.x + theirs.width);
+    expect(permissions.y).toBeGreaterThanOrEqual(basics.y + basics.height - 1);
+    expect(submit.y + submit.height).toBeLessThanOrEqual(820);
+    if (width === 1280)
+      expect(basics.x).toBeGreaterThanOrEqual(chat.x + chat.width);
+    else expect(basics.y).toBeGreaterThanOrEqual(chat.y + chat.height);
+    await expect(assembled).toBeInViewport();
+    await page.screenshot({
+      path: testInfo.outputPath("assembly-dialogue-" + width + ".png"),
+    });
+  }
+  await log.getByRole("button", { name: /测试此版本/ }).click();
+  await expect(panel.getByLabel("生成记录", { exact: true })).toHaveValue(
+    "auto-build-2",
+  );
+  expect(errors).toEqual([]);
 });
 test("三页签保留未提交内容，并把指定生成记录交给测试", async ({
   page,
@@ -891,7 +963,7 @@ test("三页签保留未提交内容，并把指定生成记录交给测试", as
   await tools.click();
   await expect(studio.getByText("修改已保存", { exact: true })).toBeVisible();
   await studio
-    .getByRole("textbox", { name: "工作委托", exact: true })
+    .getByRole("textbox", { name: "智能体职责", exact: true })
     .fill("下次生成时增加审批步骤");
   await editor.focus();
   await page.keyboard.press("End");
@@ -913,7 +985,7 @@ test("三页签保留未提交内容，并把指定生成记录交给测试", as
   await expect(studio.getByLabel("样例需求")).toHaveValue("只测试选中的旧记录");
   await editor.click();
   await expect(
-    studio.getByRole("textbox", { name: "工作委托", exact: true }),
+    studio.getByRole("textbox", { name: "智能体职责", exact: true }),
   ).toHaveValue("下次生成时增加审批步骤");
   await studio.getByRole("button", { name: /测试上次生成/ }).click();
   await expect(tests).toHaveAttribute("aria-selected", "true");
@@ -1035,7 +1107,68 @@ test("用指定生成版本和附件测试，答复后人工认可并按同一�
   await expect(
     panel.getByText("preview-adapter", { exact: true }),
   ).toBeVisible();
+  await panel.getByLabel("验收意见（可选）").fill("已核对报价差异和预览回执。");
   await panel.getByRole("button", { name: "认可测试结果" }).click();
+  await expect(page.getByRole("region", { name: "桌面提示" })).toContainText(
+    "必需项待人工核实",
+  );
+  expect(
+    await page.evaluate(() =>
+      window.factoryLiveFixture.calls.some((c) => c.path?.endsWith("/accept")),
+    ),
+  ).toBe(false);
+  await panel.getByRole("button", { name: "去工单人工复核" }).click();
+  await expect(inspector.getByText("第 1 轮等待决定")).toBeVisible();
+  await inspector
+    .getByRole("button", { name: "确认验收", exact: true })
+    .click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          window.factoryLiveFixture.calls.find(
+            (c) => c.path === "/v1/tasks/trial-order/review",
+          )?.body,
+      ),
+    )
+    .toMatchObject({ decision: "accept", reviewId: "quote-review" });
+  await openStudio(page);
+  await panel.getByRole("button", { name: "刷新测试记录" }).click();
+  await expect(panel.getByText(/工单第 1 轮已由人工验收通过/)).toBeVisible();
+  await expect(panel.getByLabel("验收意见（可选）")).toHaveValue(
+    "已核对报价差异和预览回执。",
+  );
+  await panel
+    .getByRole("button", { name: "认可测试结果" })
+    .scrollIntoViewIfNeeded();
+  await page.screenshot({
+    path: testInfo.outputPath("trial-human-review.png"),
+  });
+  await panel.getByRole("button", { name: "提交发布审核" }).click();
+  await expect(page.getByRole("region", { name: "桌面提示" })).toContainText(
+    "请先认可这份测试结果",
+  );
+  expect(
+    await page.evaluate(() =>
+      window.factoryLiveFixture.calls.some((c) => c.path?.endsWith("/publish")),
+    ),
+  ).toBe(false);
+  await panel.getByRole("button", { name: "认可测试结果" }).click();
+  await expect(panel.getByText("用户已认可", { exact: true })).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          window.factoryLiveFixture.calls.find((c) =>
+            c.path?.endsWith("/accept"),
+          )?.body,
+      ),
+    )
+    .toMatchObject({
+      candidateId: "sealed-one",
+      reviewId: "quote-review",
+      feedback: "已核对报价差异和预览回执。",
+    });
   await panel.getByRole("button", { name: "提交发布审核" }).click();
   await expect
     .poll(() =>
@@ -1159,12 +1292,14 @@ test("中台重连带来新修订时，合并保留人工改动及服务器新�
   const panel = await openStudio(page);
   await panel.getByLabel("智能体与版本").selectOption("quote-draft");
   await panel
-    .getByRole("textbox", { name: "工作委托", exact: true })
+    .getByRole("textbox", { name: "智能体职责", exact: true })
     .fill("人工增加月底核验");
   await page.evaluate(() => {
     window.factoryLiveFixture.disconnect = true;
   });
-  await expect(panel.getByText(/中台连接已中断/)).toBeVisible();
+  await expect(
+    page.getByRole("region", { name: "桌面提示" }).getByText(/中台连接已中断/),
+  ).toBeVisible();
   await expect(panel.getByRole("button", { name: "保存修改" })).toBeDisabled();
   await page.evaluate(() => {
     (
@@ -1184,8 +1319,8 @@ test("中台重连带来新修订时，合并保留人工改动及服务器新�
     )
     .toMatchObject({
       revision: 2,
-      description: "人工增加月底核验",
-      config: { workflow: "中台新增汇率校验" },
+      description: "核对五月生效的报价",
+      config: { description: "人工增加月底核验", workflow: "中台新增汇率校验" },
     });
 });
 test("版本目录在全库搜索并保留筛选、页码和返回位置", async ({
@@ -1328,7 +1463,9 @@ test("资源登记与下架使用精确版本，删除一个智能体版本保�
     .getByRole("button", { name: "确认删除此版本", exact: true })
     .click();
   await expect(
-    manager.getByText(/已删除 audit-assistant v0.9.0/),
+    page
+      .getByRole("region", { name: "桌面提示" })
+      .getByText(/已删除 audit-assistant v0.9.0/),
   ).toBeVisible();
   await manager.getByRole("button", { name: "返回版本列表" }).click();
   await expect(manager.getByRole("tab", { name: "全部版本" })).toHaveAttribute(
@@ -1402,28 +1539,42 @@ test("桌面与窄屏的装配页可选资源并切换到版本管理", async ({
   }
   expect(errors).toEqual([]);
 });
-test("处理连接设置后继续未保存的手工委托", async ({ page }) => {
+test("处理连接设置后继续未发送的装配消息", async ({ page }) => {
   const panel = await openStudio(page);
   await panel.getByLabel("智能体与版本").selectOption("quote-draft");
   await panel
-    .getByRole("textbox", { name: "工作委托", exact: true })
+    .getByRole("textbox", { name: "给装配助手的消息", exact: true })
     .fill("继续在原草稿编辑的业务规则");
   await panel.getByRole("button", { name: "连接设置" }).click();
   await openStudio(page);
   await expect(
-    panel.getByRole("textbox", { name: "工作委托", exact: true }),
+    panel.getByRole("textbox", { name: "给装配助手的消息", exact: true }),
   ).toHaveValue("继续在原草稿编辑的业务规则");
 });
 test("从新委托生成时保护重复请求并能停止服务端操作", async ({ page }) => {
   const panel = await openStudio(page);
   await panel
-    .getByRole("textbox", { name: "工作委托", exact: true })
+    .getByRole("textbox", { name: "给装配助手的消息", exact: true })
     .fill("生成供应商报价核对流程");
-  await panel.getByRole("button", { name: "整理工作委托" }).click();
+  await panel.getByRole("button", { name: "一键装配" }).click();
   await expect(panel.getByText(/两份有效报价/)).toBeVisible();
+  await panel.getByLabel("给装配助手的消息").fill("按最近生效日");
+  await panel.getByRole("button", { name: "一键装配" }).click();
+  await expect(
+    panel.getByRole("log").getByText(/确认是否使用报价规范/),
+  ).toBeVisible();
+  const skills = panel.getByRole("button", { name: /精选 Skill/ });
+  await expect(skills).toContainText("1 项建议");
+  await skills.click();
+  await expect(
+    panel.getByRole("checkbox", { name: /报价规范/ }),
+  ).not.toBeChecked();
+  await skills.click();
   const generate = panel.getByRole("button", { name: "生成智能体" });
   await generate.click();
-  await expect(panel.getByRole("alert")).toContainText("请重试");
+  await expect(
+    page.getByRole("region", { name: "桌面提示" }).getByRole("alert"),
+  ).toContainText("请重试");
   await generate.click();
   await expect(panel.getByText("校验候选源码")).toBeVisible();
   await panel.getByRole("button", { name: "停止操作" }).click();
@@ -1593,16 +1744,18 @@ test("生产线读取失败可重试，切换页签时不会沿用另一类的�
     window.factoryLiveFixture.lineError = true;
   });
   await panel.getByRole("tab", { name: "正在运行" }).click();
-  await expect(panel.getByRole("alert")).toContainText("运行实例暂时不可用");
+  await expect(
+    page.getByRole("region", { name: "桌面提示" }).getByRole("alert"),
+  ).toContainText("运行实例暂时不可用");
   await expect(panel.getByText("共 1 个版本")).toHaveCount(0);
   await page.evaluate(() => {
     window.factoryLiveFixture.lineError = false;
     window.factoryLiveFixture.oldRuntimeApi = true;
   });
   await panel.getByRole("button", { name: "重新读取" }).click();
-  await expect(panel.getByRole("alert")).toContainText(
-    "当前中台未提供生产线运行实例清单",
-  );
+  await expect(
+    page.getByRole("region", { name: "桌面提示" }).getByRole("alert"),
+  ).toContainText("当前中台未提供生产线运行实例清单");
   await page.evaluate(() => {
     window.factoryLiveFixture.oldRuntimeApi = false;
     window.factoryLiveFixture.lineCount = 0;
@@ -1816,7 +1969,11 @@ test("停止只作用于选中工单，可取消，重复确认只提交一次",
       (button as HTMLButtonElement).click();
       (button as HTMLButtonElement).click();
     });
-  await expect(panel.getByText("中台已确认停止该工单。")).toBeVisible();
+  await expect(
+    page
+      .getByRole("region", { name: "桌面提示" })
+      .getByText("中台已确认停止该工单。"),
+  ).toBeVisible();
   await expect(panel.locator(".fc-badge").first()).toHaveText("已停止");
   const stops = await page.evaluate(() =>
     window.factoryLiveFixture.calls
@@ -1866,14 +2023,18 @@ test("删除全部版本用智能体标识，可刷新在用冲突，撤销失�
     .getByRole("button", { name: "删除智能体（全部版本）", exact: true })
     .click();
   await confirm.getByRole("button", { name: "确认删除全部版本" }).click();
-  await expect(panel.getByRole("alert")).toContainText("task-running");
+  await expect(
+    page.getByRole("region", { name: "桌面提示" }).getByRole("alert"),
+  ).toContainText("task-running");
   await panel.getByRole("button", { name: "刷新智能体状态" }).click();
   await page.evaluate(() => {
     window.factoryLiveFixture.blockDeletion = false;
     window.factoryLiveFixture.revokeFails = true;
   });
   await confirm.getByRole("button", { name: "确认删除全部版本" }).click();
-  await expect(panel.getByRole("alert")).toContainText("503");
+  await expect(
+    page.getByRole("region", { name: "桌面提示" }).getByRole("alert"),
+  ).toContainText("503");
   await confirm.getByRole("button", { name: "取消" }).click();
   await expect(
     panel.getByRole("button", { name: "重试删除智能体（全部版本）" }),
@@ -1891,7 +2052,9 @@ test("删除全部版本用智能体标识，可刷新在用冲突，撤销失�
       (button as HTMLButtonElement).click();
     });
   await expect(
-    panel.getByText(/已删除智能体 audit-assistant 的全部 2 个登记版本/),
+    page
+      .getByRole("region", { name: "桌面提示" })
+      .getByText(/已删除智能体 audit-assistant 的全部 2 个登记版本/),
   ).toBeVisible();
   await expect(panel.getByRole("button", { name: "删除此版本" })).toHaveCount(
     0,
@@ -1971,7 +2134,9 @@ test("新建工单可混用本地附件与知识片段，补充需求在同一�
     window.factoryLiveFixture.failNextAmend = true;
   });
   await submit.click();
-  await expect(modal.getByRole("alert")).toBeVisible();
+  await expect(
+    modal.getByRole("region", { name: "桌面提示" }).getByRole("alert"),
+  ).toBeVisible();
   await submit.click();
   await expect(modal).toHaveCount(0);
   const calls = await page.evaluate(() => window.factoryLiveFixture.calls);

@@ -1,4 +1,5 @@
 import type { Page } from "@playwright/test";
+import type { AssemblyRun } from "../src/features/factory/assembly-model";
 
 export async function installAssemblyFixture(page: Page) {
   await page.evaluate(() => {
@@ -80,7 +81,13 @@ export async function installAssemblyFixture(page: Page) {
       description: "核对五月生效的报价",
       updatedAt: now,
       config,
-      messages: [] as { role: string; content: string }[],
+      messages: [] as {
+        role: string;
+        content: string;
+        requestId?: string;
+        operationId?: string;
+        candidateId?: string;
+      }[],
       operations: [] as {
         id: string;
         kind: string;
@@ -102,20 +109,7 @@ export async function installAssemblyFixture(page: Page) {
           createdAt: new Date(Date.parse(now) - 60000).toISOString(),
         },
       ],
-      runs: [] as {
-        id: string;
-        candidateId: string;
-        taskId: string;
-        state: string;
-        accepted: boolean;
-        assertions: {
-          name: string;
-          required: boolean;
-          passed: boolean;
-          message: string;
-        }[];
-        createdAt: string;
-      }[],
+      runs: [] as AssemblyRun[],
     };
     const resources: Record<string, unknown>[] = [resource];
     let derived: typeof draft | undefined;
@@ -336,18 +330,76 @@ export async function installAssemblyFixture(page: Page) {
         return structuredClone(draft);
       }
       if (path.endsWith("/suggest")) {
+        const requestId = String(body.requestId);
+        const existing = draft.messages.findIndex(
+          (message) => message.requestId === requestId,
+        );
+        if (existing >= 0)
+          return {
+            id: draft.messages[existing + 1].operationId,
+            state: "completed",
+          };
+        if (body.revision !== draft.revision)
+          throw Error("编辑修订冲突（HTTP 409）");
+        const round =
+          draft.messages.filter((message) => message.role === "user").length +
+          1;
+        const operationId = "assistant-" + round;
         draft.messages.push({
-          role: "assistant",
-          content: "遇到同币种的两份有效报价，应选哪份？",
+          role: "user",
+          content: String(body.message),
+          requestId,
         });
+        let reply = "遇到同币种的两份有效报价，应选哪份？";
+        let generate = false;
+        if (round > 1) {
+          draft.config.workflow = "比较两份报价，按最近生效日选用有效报价。";
+          draft.revision++;
+          const needsPermission = draft.suggestions.skills.some(
+            (id) => !draft.config.skills.includes(id),
+          );
+          generate = body.generateWhenReady === true && !needsPermission;
+          reply = needsPermission
+            ? "已更新比价流程。请在资源与权限中确认是否使用报价规范。"
+            : "已将最近生效日写入比价流程。";
+        }
+        draft.messages.push({ role: "assistant", content: reply, operationId });
         draft.operations.push({
-          id: "clarify-one",
+          id: operationId,
           kind: "suggest",
-          state: "succeeded",
-          message: "已整理委托",
+          state: "completed",
+          message: "助手已回复",
           createdAt: now,
         });
-        return { id: "clarify-one", state: "queued" };
+        if (generate) {
+          const build = {
+            ...candidate,
+            id: "auto-build-" + round,
+            createdAt: new Date().toISOString(),
+            revision: draft.revision,
+            config: structuredClone(draft.config),
+          };
+          draft.candidates.unshift(build);
+          draft.operations.push({
+            id: build.id,
+            kind: "generate",
+            state: "completed",
+            message: "智能体已生成",
+            createdAt: build.createdAt,
+          });
+          draft.messages.push({
+            role: "assistant",
+            content:
+              "《" +
+              draft.config.displayName +
+              "》v" +
+              draft.config.version +
+              " 已生成，可以测试这个版本。",
+            operationId: build.id,
+            candidateId: build.id,
+          });
+        }
+        return { id: operationId, state: "completed" };
       }
       if (path.endsWith("/generate")) {
         generationAttempts++;
@@ -381,6 +433,7 @@ export async function installAssemblyFixture(page: Page) {
         const run = {
           id: "run-one",
           candidateId: String(body.candidateId),
+          packageDigest: candidate.packageDigest,
           taskId: "trial-order",
           state: "awaiting_user_input",
           accepted: false,
@@ -393,11 +446,9 @@ export async function installAssemblyFixture(page: Page) {
               message: "边界报价计算正确",
             },
           ],
-          criteria: [
-            { id: "R1", priority: "required", requirement: "交付报价差异" },
-          ],
-          findings: [{ id: "R1", status: "met", reason: "已生成差异文件" }],
-          candidateCompleted: true,
+          criteria: [],
+          findings: [],
+          candidateCompleted: false,
           receipts: [
             {
               resource: "send@1.0.0",
@@ -413,10 +464,45 @@ export async function installAssemblyFixture(page: Page) {
         return run;
       }
       if (path === "/v1/tasks/trial-order/interactions/question/respond") {
-        draft.runs[0].state = "awaiting_review";
+        Object.assign(draft.runs[0], {
+          state: "awaiting_review",
+          candidateCompleted: true,
+          reviewId: "quote-review",
+          reviewRound: 1,
+          reviewDecision: null,
+          criteria: [
+            { id: "R1", priority: "required", requirement: "交付报价差异" },
+          ],
+          findings: [
+            {
+              id: "R1",
+              status: "uncertain",
+              reason: "已归档差异文件，报价内容需要人工复核。",
+              evidenceIds: ["E12"],
+            },
+          ],
+          businessReview: { status: "needs_review", criteriaIds: ["R1"] },
+        });
         return { accepted: true };
       }
+      if (path === "/v1/tasks/trial-order/review") {
+        const run = draft.runs[0];
+        if (
+          run.state !== "awaiting_review" ||
+          run.reviewId !== body.reviewId ||
+          body.decision !== "accept"
+        )
+          throw Error("验收轮次已变化");
+        Object.assign(run, {
+          state: "accepted",
+          reviewDecision: "accept",
+          reviewDecidedAt: now,
+          businessReview: { status: "human_confirmed", criteriaIds: ["R1"] },
+        });
+        return { state: "accepted", decision: "accept" };
+      }
       if (path === "/v1/tasks/trial-order") {
+        const run = draft.runs[0];
         const detail = (await previous(cmd, {
           method: "GET",
           path: "/v1/tasks/task-running",
@@ -429,6 +515,33 @@ export async function installAssemblyFixture(page: Page) {
             goal: "试跑五月报价",
             state: draft.runs[0].state,
           },
+          currentReviewId:
+            run.state === "awaiting_review" ? run.reviewId : null,
+          acceptanceRounds: run.reviewId
+            ? [
+                {
+                  id: run.reviewId,
+                  round: 1,
+                  revision_number: 0,
+                  criteria: run.criteria,
+                  decision: run.reviewDecision,
+                  created_at: now,
+                  decided_at: run.reviewDecidedAt,
+                  assessment: {
+                    items: run.findings,
+                    reportedGaps: [],
+                    evidence: [
+                      {
+                        id: "E12",
+                        node: "candidate",
+                        source: "artifact:核对结果.txt",
+                        text: "所选候选的归档文件",
+                      },
+                    ],
+                  },
+                },
+              ]
+            : [],
           interactions:
             draft.runs[0].state === "awaiting_user_input"
               ? [
@@ -449,9 +562,17 @@ export async function installAssemblyFixture(page: Page) {
         };
       }
       if (path.endsWith("/accept")) {
-        draft.runs[0].accepted = true;
-        draft.runs[0].state = "accepted";
-        return draft.runs[0];
+        const run = draft.runs[0];
+        if (
+          run.reviewDecision !== "accept" ||
+          run.reviewId !== body.reviewId ||
+          run.candidateId !== body.candidateId ||
+          run.packageDigest !== body.packageDigest
+        )
+          throw Error("当前验收决定与测试记录不匹配");
+        run.accepted = true;
+        run.feedback = String(body.feedback ?? "");
+        return { accepted: true, state: "accepted", feedback: run.feedback };
       }
       if (path.endsWith("/publish")) {
         candidate.releaseStatus = "pending_review";
@@ -471,7 +592,9 @@ export async function installAssemblyFixture(page: Page) {
         return {
           agentId: "quote-desk",
           version: "1.0.0",
-          status: "pending_review",
+          state: "pending_review",
+          candidateId: candidate.id,
+          packageDigest: candidate.packageDigest,
         };
       }
       throw Error("未登记装配测试接口 " + path);

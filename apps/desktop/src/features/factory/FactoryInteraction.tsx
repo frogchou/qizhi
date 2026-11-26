@@ -4,7 +4,7 @@ import {
   FactoryAttachments,
   useFactoryAttachments,
 } from "./FactoryAttachments";
-import { ActionNotice, ReadNotice, useAction } from "./FactoryControls";
+import { ReadNotice, useAction } from "./FactoryControls";
 import { useFactoryRead } from "./factory-feed";
 import { factoryApi } from "./factory-client";
 import type { ResponseField, TaskInteraction } from "./factory-model";
@@ -171,7 +171,6 @@ export function FactoryInteraction({
           </button>
         </>
       )}
-      <ActionNotice action={action} />
     </form>
   );
 }

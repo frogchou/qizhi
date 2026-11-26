@@ -6,7 +6,10 @@ import type { AssemblyOptions, ResourceSelection } from "./assembly-model";
 
 it("keeps existing grants visible when the catalog is unavailable and never grants a suggestion on expansion", () => {
   const options: AssemblyOptions = {
-    skills: [{ id: "writing@1", label: "撰稿", version: "1" }],
+    skills: [
+      { id: "writing@1", label: "撰稿", version: "1" },
+      { id: "editing@1", label: "校对", version: "1" },
+    ],
     mcpTools: [],
     capabilities: [],
     datasets: [],
@@ -14,7 +17,7 @@ it("keeps existing grants visible when the catalog is unavailable and never gran
   };
   function Editor() {
     const [selection, setSelection] = useState<ResourceSelection>({
-      skills: [],
+      skills: ["editing@1"],
       mcpTools: [],
       capabilities: [],
       datasetIds: ["采购资料"],
@@ -39,6 +42,7 @@ it("keeps existing grants visible when the catalog is unavailable and never gran
   expect(kb).toHaveAttribute("aria-expanded", "false");
   expect(screen.getByText("知识库连接暂时中断")).toBeVisible();
   expect(skills).toHaveTextContent("1 项建议");
+  expect(skills).toHaveTextContent("已选 1");
   fireEvent.click(skills);
   expect(screen.getByRole("checkbox", { name: /撰稿/ })).not.toBeChecked();
   fireEvent.click(kb);

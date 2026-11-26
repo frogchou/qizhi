@@ -1,7 +1,7 @@
 import ReactMarkdown from "react-markdown";
 import { factoryApi } from "./factory-client";
 import { taskDelivery } from "./factory-delivery";
-import { ActionNotice, ContextHelp, Empty, useAction } from "./FactoryControls";
+import { ContextHelp, Empty, useAction } from "./FactoryControls";
 import { bytes, when, type TaskDetail } from "./factory-model";
 import "./factory-delivery.css";
 
@@ -127,7 +127,6 @@ export function FactoryDelivery({ detail }: { detail: TaskDetail }) {
           </button>
         )}
       </header>
-      <ActionNotice action={action} />
       {delivery.answers.map((answer, index) => (
         <article
           className="live-card live-delivery-answer"

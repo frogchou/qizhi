@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { render } from "../../test/render";
+import { fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { FactoryTaskDetail } from "./FactoryTaskDetail";
 import { factoryApi } from "./factory-client";

@@ -1,14 +1,9 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { ControlIcon } from "../../components/ControlIcon";
+import { FeedbackNotice } from "../../components/FeedbackNotice";
 import { factoryApi } from "./factory-client";
 import { useFactoryRead } from "./factory-feed";
-import {
-  ActionNotice,
-  Badge,
-  Modal,
-  ReadNotice,
-  useAction,
-} from "./FactoryControls";
+import { Badge, Modal, ReadNotice, useAction } from "./FactoryControls";
 import { AgentCatalog, AgentDetail } from "./FactoryAreas";
 import { ResourceChoices } from "./AssemblyChoices";
 import { AssemblyResources } from "./AssemblyResources";
@@ -37,12 +32,15 @@ import { factoryMessage, when, type OpenTask } from "./factory-model";
 import "./assembly.css";
 import "./assembly-studio.css";
 
-type Editable = Pick<DraftSummary, "config" | "description">;
-type Edit = Editable & { base: DraftSummary };
+type Edit = { config: AssemblyConfig; base: DraftSummary };
+type Reply = {
+  text: string;
+  delivery?: { requestId: string; revision: number };
+};
 // Keep unsent fields separate when the user switches between control planes.
 const sessionEdits = new Map<
   string,
-  { edits: Record<string, Edit>; messages: Record<string, string> }
+  { edits: Record<string, Edit>; replies: Record<string, Reply> }
 >();
 const fresh: DraftSummary = {
   id: "",
@@ -78,10 +76,6 @@ function mergeManual(edit: Edit, current: DraftSummary): Edit {
   );
   return {
     base: current,
-    description:
-      edit.description === edit.base.description
-        ? current.description
-        : edit.description,
     config: { ...current.config, ...Object.fromEntries(changed) },
   };
 }
@@ -120,7 +114,6 @@ export function AssemblyWorkspace({
   const [tab, setTab] = useState<StudioTab>("assemble"),
     [visited, setVisited] = useState({ manage: false, test: false }),
     [selectedBuild, setSelectedBuild] = useState<string>(),
-    [conversationOpen, setConversationOpen] = useState(false),
     [historyOpen, setHistoryOpen] = useState(false),
     [version, setVersion] = useState<{ id: string; version: string } | null>(
       null,
@@ -130,8 +123,8 @@ export function AssemblyWorkspace({
     ),
     [library, setLibrary] = useState(false),
     [confirmDelete, setConfirmDelete] = useState(false);
-  const [messages, setMessages] = useState<Record<string, string>>(
-      () => sessionEdits.get(endpoint)?.messages ?? {},
+  const [replies, setReplies] = useState<Record<string, Reply>>(
+      () => sessionEdits.get(endpoint)?.replies ?? {},
     ),
     [tick, setTick] = useState(0),
     [listTick, refreshList] = useState(0);
@@ -162,9 +155,17 @@ export function AssemblyWorkspace({
     !archived &&
     (!id || Boolean(detail.data && !detail.error));
   const hasDescription = Boolean(
-    edit.description.trim() || edit.config.description.trim(),
+    current.description.trim() || edit.config.description.trim(),
   );
-  const message = messages[id] ?? "";
+  const reply = replies[id];
+  useEffect(() => {
+    const requestId = reply?.delivery?.requestId;
+    if (
+      requestId &&
+      detail.data?.messages.some((m) => m.requestId === requestId)
+    )
+      clearDeliveredReply(id, requestId);
+  }, [id, reply, detail.data]);
   useLayoutEffect(() => {
     if (tab === "manage" && version && studio.current) {
       studio.current.scrollTop = 0;
@@ -172,10 +173,13 @@ export function AssemblyWorkspace({
     }
   }, [tab, version]);
   useEffect(() => {
-    if (Object.keys(edits).length || Object.values(messages).some(Boolean))
-      sessionEdits.set(endpoint, { edits, messages });
+    if (
+      Object.keys(edits).length ||
+      Object.values(replies).some((item) => item.text)
+    )
+      sessionEdits.set(endpoint, { edits, replies });
     else sessionEdits.delete(endpoint);
-  }, [edits, messages, endpoint]);
+  }, [edits, replies, endpoint]);
   useEffect(() => {
     if (!active || !id || stale) return;
     const interval = window.setInterval(() => {
@@ -208,12 +212,11 @@ export function AssemblyWorkspace({
       hidden: tab !== value,
     };
   }
-  function select(next: string, keepConversation = false) {
+  function select(next: string) {
     setPackageUpgrade(null);
     if (next === id) return;
     setId(next);
     setSelectedBuild(undefined);
-    if (!keepConversation) setConversationOpen(false);
     setHistoryOpen(false);
     setConfirmDelete(false);
   }
@@ -222,37 +225,41 @@ export function AssemblyWorkspace({
     refreshList((n) => n + 1);
     onChange();
   }
-  function update(partial: Partial<Editable>) {
-    setEdits((old) => {
-      const base = old[id]?.base ?? current;
-      const next = { ...(old[id] ?? base), ...partial, base };
-      if (
-        next.description === base.description &&
-        JSON.stringify(next.config) === JSON.stringify(base.config)
-      ) {
-        if (!old[id]) return old;
-        const remaining = { ...old };
-        delete remaining[id];
-        return remaining;
-      }
-      return { ...old, [id]: next };
+  function clearDeliveredReply(draftId: string, requestId: string) {
+    setReplies((old) => {
+      if (old[draftId]?.delivery?.requestId !== requestId) return old;
+      const next = { ...old };
+      delete next[draftId];
+      return next;
     });
   }
   function config<K extends keyof AssemblyConfig>(
     key: K,
     value: AssemblyConfig[K],
   ) {
-    update({ config: { ...edit.config, [key]: value } });
+    setEdits((old) => {
+      const base = old[id]?.base ?? current;
+      const next = { ...(old[id]?.config ?? base.config), [key]: value };
+      if (JSON.stringify(next) === JSON.stringify(base.config)) {
+        if (!old[id]) return old;
+        const remaining = { ...old };
+        delete remaining[id];
+        return remaining;
+      }
+      return { ...old, [id]: { config: next, base } };
+    });
   }
-  async function save(): Promise<DraftSummary> {
+  async function save(firstMessage?: string): Promise<DraftSummary> {
     if (id && !detail.data)
       throw Error("当前编辑内容尚未加载，请重新读取后再保存。");
     if (conflict)
       throw Error("当前版本的编辑内容已在其他地方更新，请先核对修改。");
     if (id && !buffer) return current;
     const description =
-      edit.description.trim() || edit.config.description.trim();
-    if (!description) throw Error("请填写工作委托或智能体职责。");
+      current.description.trim() ||
+      firstMessage ||
+      edit.config.description.trim();
+    if (!description) throw Error("请描述智能体的工作，或填写智能体职责。");
     const editedConfig = {
       ...edit.config,
       criteria: edit.config.criteria.map((c) => c.trim()).filter(Boolean),
@@ -275,28 +282,43 @@ export function AssemblyWorkspace({
       delete next[id];
       return next;
     });
-    if (!id) select(result.id, true);
-    changed();
+    if (!id) {
+      setReplies((old) => {
+        if (!old[""]) return old;
+        const next = { ...old, [result.id]: old[""] };
+        delete next[""];
+        return next;
+      });
+      select(result.id);
+    }
     return result;
   }
-  function submit(kind: "suggest" | "generate", suggestion?: string) {
+  function submit(kind: "suggest" | "generate") {
+    const text = kind === "suggest" ? reply?.text.trim() : undefined;
+    if (kind === "suggest" && !text) return;
     void action.run(async () => {
       try {
-        const saved = await save();
+        const saved = await save(text);
         const body = {
           revision: saved.revision,
-          ...(kind === "suggest"
-            ? {
-                message:
-                  suggestion?.trim() ||
-                  edit.description.trim() ||
-                  edit.config.description.trim(),
-              }
-            : {}),
+          ...(text ? { message: text, generateWhenReady: true } : {}),
         };
+        const requestId = text
+          ? reply?.delivery?.revision === saved.revision
+            ? reply.delivery.requestId
+            : crypto.randomUUID()
+          : request.forPayload([saved.id, kind, body]);
+        if (text && reply)
+          setReplies((old) => ({
+            ...old,
+            [saved.id]: {
+              ...reply,
+              delivery: { requestId, revision: saved.revision },
+            },
+          }));
         const receipt = await factoryApi.post<{ id: string }>(
           `${draftPath(saved.id)}/${kind}`,
-          { ...body, requestId: request.forPayload([saved.id, kind, body]) },
+          { ...body, requestId },
         );
         if (!receipt?.id)
           throw Error(
@@ -304,10 +326,8 @@ export function AssemblyWorkspace({
               ? "尚未确认生成请求，请核对生成记录和可测试版本。"
               : "尚未确认助手已收到消息，请核对助手记录。",
           );
-        request.confirmed();
-        if (kind === "suggest" && message.trim() === suggestion?.trim())
-          setMessages((old) => ({ ...old, [id]: "" }));
-        if (kind === "suggest") setConversationOpen(true);
+        if (text) clearDeliveredReply(saved.id, requestId);
+        else request.confirmed();
         return kind === "generate"
           ? "已提交生成请求，可在生成记录中查看进度。"
           : "已提交给装配助手。";
@@ -324,8 +344,10 @@ export function AssemblyWorkspace({
     edit.config.mcpTools.length +
     edit.config.capabilities.length +
     edit.config.datasetIds.length;
-  const canGenerate = writable && hasDescription && !conflict && !waiting;
-  const actionsLocked = action.busy || archived;
+  const canSubmit = writable && !conflict && !waiting;
+  const canGenerate = canSubmit && hasDescription;
+  const loadingDraft = Boolean(id && !detail.data);
+  const actionsLocked = action.busy || archived || loadingDraft;
   const versions = editableVersionOptions(
     (list.data?.items ?? []).map((draft) => ({
       ...draft,
@@ -347,6 +369,10 @@ export function AssemblyWorkspace({
     setVersion({ id: agentId, version: targetVersion });
     navigate("manage");
   }
+  function testBuild(candidateId: string) {
+    setSelectedBuild(candidateId);
+    navigate("test");
+  }
   const packageOption = packageUpgrade
     ? "package:" + packageUpgrade.agentId + "@" + packageUpgrade.version
     : "";
@@ -357,7 +383,10 @@ export function AssemblyWorkspace({
       aria-label="智能体装配"
       hidden={!active}
     >
-      <div className="studio-shell">
+      <div
+        className="studio-shell"
+        data-conversation={tab === "assemble" && !packageUpgrade}
+      >
         <header className="studio-header">
           <h1>智能体装配</h1>
           <div className="studio-tools">
@@ -386,11 +415,14 @@ export function AssemblyWorkspace({
           </div>
         </header>
         <AssemblyNavigation id={paneId} tab={tab} onSelect={navigate} />
-        {connection === "reconnecting" && (
-          <p className="live-notice" role="status">
-            中台连接已中断。当前编辑会保留，恢复后可提交。
-          </p>
-        )}
+        <FeedbackNotice
+          message={
+            active && connection === "reconnecting"
+              ? "中台连接已中断。当前编辑会保留，恢复后可提交。"
+              : ""
+          }
+          tone="error"
+        />
         {tab !== "manage" && (
           <div className="studio-command">
             <label className="assembly-field studio-draft">
@@ -452,12 +484,11 @@ export function AssemblyWorkspace({
             )}
           </div>
         )}
-        {tab !== "test" && <ActionNotice action={action} />}
         <ReadNotice read={list} />
         {id && !packageUpgrade && tab !== "manage" && (
           <ReadNotice read={detail} />
         )}
-        <section {...panelProps("assemble")}>
+        <section {...panelProps("assemble")} className="studio-assembly-panel">
           {packageUpgrade ? (
             <PackageUpgrade
               key={packageOption}
@@ -484,12 +515,12 @@ export function AssemblyWorkspace({
                 </div>
               )}
               {archived && (
-                <p className="live-notice">
+                <p className="live-subtle">
                   此编辑记录已删除，仍可查看已生成的版本和测试记录。
                 </p>
               )}
               {conflict && detail.data && buffer && (
-                <section className="live-confirm" role="alert">
+                <section className="live-confirm" aria-label="编辑冲突">
                   <p>
                     当前版本的编辑内容已在其他地方更新。你可以合并本地修改，也可以使用中台已保存的内容。
                   </p>
@@ -520,105 +551,117 @@ export function AssemblyWorkspace({
                   </div>
                 </section>
               )}
-              {id && !detail.data ? null : (
-                <>
-                  <AssemblyBrief
-                    description={edit.description}
-                    reply={message}
-                    messages={detail.data?.messages ?? []}
-                    canSuggest={canGenerate}
-                    locked={actionsLocked}
-                    open={conversationOpen}
-                    onOpen={setConversationOpen}
-                    onDescription={(description) => update({ description })}
-                    onReply={(text) =>
-                      setMessages((old) => ({ ...old, [id]: text }))
-                    }
-                    onSuggest={(text) => submit("suggest", text)}
-                  />
-                  <div className="studio-columns">
-                    <section
-                      className="studio-card studio-basics"
-                      aria-labelledby="studio-basic-title"
+              <div className="studio-assembly-layout">
+                <AssemblyBrief
+                  key={id}
+                  active={active && tab === "assemble"}
+                  initialBrief={current.description}
+                  reply={reply?.text ?? ""}
+                  messages={detail.data?.messages ?? []}
+                  candidates={detail.data?.candidates ?? []}
+                  canSubmit={canSubmit}
+                  pending={
+                    generating
+                      ? "正在生成智能体…"
+                      : waiting
+                        ? "装配助手正在回复…"
+                        : undefined
+                  }
+                  locked={actionsLocked}
+                  readStatus={
+                    loadingDraft
+                      ? detail.error
+                        ? "暂时无法读取这份装配对话。"
+                        : "正在读取装配对话…"
+                      : undefined
+                  }
+                  onReply={(text) =>
+                    setReplies((old) => ({ ...old, [id]: { text } }))
+                  }
+                  onSubmit={() => submit("suggest")}
+                  onTest={testBuild}
+                />
+                <div className="studio-configuration" key={id + "-config"}>
+                  <section
+                    className="studio-card studio-basics"
+                    aria-labelledby="studio-basic-title"
+                  >
+                    <header className="studio-card-title">
+                      <ControlIcon name="file" size={19} />
+                      <h2 id="studio-basic-title">智能体基本信息</h2>
+                    </header>
+                    <fieldset
+                      className="assembly-editable"
+                      disabled={actionsLocked}
                     >
-                      <header className="studio-card-title">
-                        <ControlIcon name="file" size={19} />
-                        <h2 id="studio-basic-title">基本信息</h2>
-                      </header>
-                      <fieldset
-                        className="assembly-editable"
-                        disabled={actionsLocked}
-                      >
-                        <div className="assembly-grid">
-                          {fields.map(([key, label, placeholder]) => (
-                            <label className="assembly-field" key={key}>
-                              {label}
-                              <input
-                                value={edit.config[key]}
-                                readOnly={
-                                  key === "agentId" &&
-                                  !!detail.data?.baseRelease
-                                }
-                                placeholder={placeholder}
-                                onChange={(e) => config(key, e.target.value)}
-                              />
-                            </label>
-                          ))}
-                        </div>
-                        <label className="assembly-field">
-                          智能体职责
-                          <textarea
-                            value={edit.config.description}
-                            rows={2}
-                            onChange={(e) =>
-                              config("description", e.target.value)
-                            }
-                          />
-                        </label>
-                        <label className="assembly-field">
-                          业务流程与交付物
-                          <textarea
-                            value={edit.config.workflow}
-                            rows={3}
-                            onChange={(e) => config("workflow", e.target.value)}
-                          />
-                        </label>
-                        <label className="assembly-field">
-                          验收条件（每行一项）
-                          <textarea
-                            value={edit.config.criteria.join("\n")}
-                            rows={2}
-                            onChange={(e) =>
-                              config("criteria", e.target.value.split("\n"))
-                            }
-                          />
-                        </label>
-                      </fieldset>
-                    </section>
-                    <section
-                      className="studio-card studio-resources"
-                      aria-labelledby="studio-resource-title"
-                    >
-                      <header className="studio-card-title">
-                        <ControlIcon name="sliders" size={19} />
-                        <h2 id="studio-resource-title">资源与权限</h2>
-                        <span className="studio-count">
-                          已选 {resourceCount} 项
-                        </span>
-                      </header>
-                      <ReadNotice read={options} />
-                      {options.data && (
-                        <ResourceChoices
-                          collapsible
-                          options={options.data}
-                          selection={edit.config}
-                          suggestions={detail.data?.suggestions}
-                          onEdit={config}
-                          disabled={actionsLocked}
+                      <div className="assembly-grid">
+                        {fields.map(([key, label, placeholder]) => (
+                          <label className="assembly-field" key={key}>
+                            {label}
+                            <input
+                              value={edit.config[key]}
+                              readOnly={
+                                key === "agentId" && !!detail.data?.baseRelease
+                              }
+                              placeholder={placeholder}
+                              onChange={(e) => config(key, e.target.value)}
+                            />
+                          </label>
+                        ))}
+                      </div>
+                      <label className="assembly-field">
+                        智能体职责
+                        <textarea
+                          value={edit.config.description}
+                          rows={2}
+                          onChange={(e) =>
+                            config("description", e.target.value)
+                          }
                         />
-                      )}
-                    </section>
-                  </div>
+                      </label>
+                      <label className="assembly-field">
+                        业务流程与交付物
+                        <textarea
+                          value={edit.config.workflow}
+                          rows={2}
+                          onChange={(e) => config("workflow", e.target.value)}
+                        />
+                      </label>
+                      <label className="assembly-field">
+                        验收条件（每行一项）
+                        <textarea
+                          value={edit.config.criteria.join("\n")}
+                          rows={2}
+                          onChange={(e) =>
+                            config("criteria", e.target.value.split("\n"))
+                          }
+                        />
+                      </label>
+                    </fieldset>
+                  </section>
+                  <section
+                    className="studio-card studio-resources"
+                    aria-labelledby="studio-resource-title"
+                  >
+                    <header className="studio-card-title">
+                      <ControlIcon name="sliders" size={19} />
+                      <h2 id="studio-resource-title">资源与权限</h2>
+                      <span className="studio-count">
+                        已选 {resourceCount} 项
+                      </span>
+                    </header>
+                    <ReadNotice read={options} />
+                    {options.data && (
+                      <ResourceChoices
+                        collapsible
+                        options={options.data}
+                        selection={edit.config}
+                        suggestions={detail.data?.suggestions}
+                        onEdit={config}
+                        disabled={actionsLocked}
+                      />
+                    )}
+                  </section>
                   <div className="studio-build-footer">
                     <div className="studio-build-state">
                       {generating
@@ -647,7 +690,7 @@ export function AssemblyWorkspace({
                               await save();
                               return "修改已保存。";
                             } finally {
-                              setTick((n) => n + 1);
+                              changed();
                             }
                           })
                         }
@@ -656,7 +699,7 @@ export function AssemblyWorkspace({
                       </button>
                       <button
                         type="button"
-                        className="ui-action ui-primary"
+                        className="ui-action"
                         disabled={!canGenerate}
                         onClick={() => submit("generate")}
                       >
@@ -666,10 +709,7 @@ export function AssemblyWorkspace({
                         <button
                           type="button"
                           className="ui-action ui-quiet"
-                          onClick={() => {
-                            setSelectedBuild(latest.id);
-                            navigate("test");
-                          }}
+                          onClick={() => testBuild(latest.id)}
                         >
                           {editChanged ? "测试上次生成" : "去测试此版本"} →
                         </button>
@@ -698,7 +738,7 @@ export function AssemblyWorkspace({
                             <div>
                               <strong>
                                 {op.kind === "suggest"
-                                  ? "整理工作委托"
+                                  ? "装配助手"
                                   : "生成智能体"}
                               </strong>
                               <Badge value={op.state} />
@@ -729,8 +769,8 @@ export function AssemblyWorkspace({
                         ))}
                     </details>
                   )}
-                </>
-              )}
+                </div>
+              </div>
             </>
           )}
         </section>
@@ -750,7 +790,7 @@ export function AssemblyWorkspace({
             detail.data ? (
             <div className="studio-card studio-testing">
               {generating && (
-                <p className="live-notice">
+                <p className="live-subtle">
                   新记录正在生成，当前样例仍使用下方选定的生成记录。
                 </p>
               )}
@@ -759,12 +799,22 @@ export function AssemblyWorkspace({
                 draft={detail.data}
                 selectedBuild={selectedBuild}
                 onBuildChange={setSelectedBuild}
+                onEditDraft={() => navigate("assemble")}
                 onManageVersion={(id, version) => {
                   setVersion({ id, version });
                   navigate("manage");
                 }}
                 dirty={Boolean(buffer)}
                 disabled={!writable}
+                unavailableReason={
+                  archived
+                    ? "该草稿已归档。请从可编辑的草稿生成并测试。"
+                    : stale
+                      ? "中台连接尚未就绪，请恢复连接并刷新测试记录。"
+                      : action.busy
+                        ? "草稿变更正在提交，请稍后再试。"
+                        : "未能读取最新草稿，请刷新测试记录后重试。"
+                }
                 onChange={changed}
                 onTask={onTask}
                 onNewTask={onNewTask}
@@ -821,8 +871,7 @@ export function AssemblyWorkspace({
                         ? undefined
                         : (record) => {
                             select(record.draftId);
-                            setSelectedBuild(record.candidateId);
-                            navigate("test");
+                            testBuild(record.candidateId);
                           }
                     }
                     onBased={
@@ -881,7 +930,6 @@ export function AssemblyWorkspace({
               删除「{current.config.displayName || current.description}
               」的编辑记录？已生成的版本、测试和发布记录仍可查看。
             </p>
-            <ActionNotice action={action} />
             <div className="fc-actions">
               <button
                 className="ui-action ui-danger"

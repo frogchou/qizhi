@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ControlIcon } from "../../components/ControlIcon";
+import { FeedbackNotice, useFeedback } from "../../components/FeedbackNotice";
 
 import type {
   CodexApprovalDecision,
@@ -65,7 +65,7 @@ export function CodexPage({
     useState<CodexArtifact | null>(null);
   const [liveTurns, setLiveTurns] = useState<Record<string, LiveTurnState>>({});
   const [importing, setImporting] = useState(false);
-  const [error, setError] = useState("");
+  const notify = useFeedback("error", !hidden);
   const [creatingProject, setCreatingProject] = useState(false);
   const [projectName, setProjectName] = useState("");
   const [projectGoal, setProjectGoal] = useState("");
@@ -137,7 +137,7 @@ export function CodexPage({
       setProjects(values);
       if (!selectedProjectRef.current && values[0]) setProjectId(values[0].id);
     } catch (reason) {
-      setError(message(reason));
+      notify(message(reason));
     }
   }
   async function loadProject(id: string) {
@@ -161,7 +161,7 @@ export function CodexPage({
       )
         setConversationId(nextConversations[0]?.id ?? null);
     } catch (reason) {
-      setError(message(reason));
+      notify(message(reason));
     }
   }
   async function loadConversation(id: string) {
@@ -169,7 +169,7 @@ export function CodexPage({
       const value = (await commands.readCodexConversation?.(id)) ?? null;
       if (selectedConversationRef.current === id) setHistory(value);
     } catch (reason) {
-      setError(message(reason));
+      notify(message(reason));
     }
   }
   async function loadPendingHandoffs(id: string) {
@@ -182,7 +182,7 @@ export function CodexPage({
       )
         setPendingHandoffs(value);
     } catch (reason) {
-      setError(message(reason));
+      notify(message(reason));
     }
   }
   async function onBasketAttached(result: CodexHandoffResult) {
@@ -202,7 +202,7 @@ export function CodexPage({
       basketReceipts.current.get(conversationId)?.delete(handoffId);
       await loadPendingHandoffs(conversationId);
     } catch (reason) {
-      setError(message(reason));
+      notify(message(reason));
     }
   }
   async function createProject() {
@@ -224,7 +224,7 @@ export function CodexPage({
       setProjectName("");
       setProjectGoal("");
     } catch (reason) {
-      setError(message(reason));
+      notify(message(reason));
     }
   }
   async function createConversation() {
@@ -237,7 +237,7 @@ export function CodexPage({
       await loadProject(projectId);
       setConversationId(value.id);
     } catch (reason) {
-      setError(message(reason));
+      notify(message(reason));
     }
   }
   async function renameSelected() {
@@ -258,7 +258,7 @@ export function CodexPage({
       }
       setRenameTarget(null);
     } catch (reason) {
-      setError(message(reason));
+      notify(message(reason));
     }
   }
   async function deleteSelected() {
@@ -272,7 +272,7 @@ export function CodexPage({
       );
     if (projectLocked) {
       setDeleteTarget(null);
-      setError("任务运行期间不能删除项目或会话，请先停止任务。");
+      notify("任务运行期间不能删除项目或会话，请先停止任务。");
       return;
     }
     try {
@@ -315,7 +315,7 @@ export function CodexPage({
       }
       setDeleteTarget(null);
     } catch (reason) {
-      setError(message(reason));
+      notify(message(reason));
     }
   }
   async function importMaterials() {
@@ -355,7 +355,7 @@ export function CodexPage({
         if (selectedProjectRef.current === targetProjectId)
           setPendingLargeMaterials({ projectId: targetProjectId, paths });
       } else if (selectedProjectRef.current === targetProjectId) {
-        setError(text);
+        notify(text);
       }
     } finally {
       setImporting(false);
@@ -381,7 +381,7 @@ export function CodexPage({
         }
       } catch (reason) {
         if (selectedProjectRef.current === targetProjectId)
-          setError(message(reason));
+          notify(message(reason));
       }
     }
   }
@@ -408,7 +408,7 @@ export function CodexPage({
       }
     } catch (reason) {
       if (selectedProjectRef.current === targetProjectId)
-        setError(message(reason));
+        notify(message(reason));
     }
   }
   async function revealMaterialSource(id: string) {
@@ -416,7 +416,7 @@ export function CodexPage({
     try {
       await commands.revealCodexMaterialSource(projectId, id);
     } catch (reason) {
-      setError(message(reason));
+      notify(message(reason));
     }
   }
   async function send(prompt: string) {
@@ -446,7 +446,7 @@ export function CodexPage({
         running: true,
       },
     }));
-    setError("");
+    notify("");
     try {
       const result = await commands.startCodexTurn(
         {
@@ -516,7 +516,7 @@ export function CodexPage({
         delete next[targetConversationId];
         return next;
       });
-      setError(message(reason));
+      notify(message(reason));
     }
   }
   async function stop() {
@@ -528,13 +528,13 @@ export function CodexPage({
   ) {
     const targetConversationId = conversationId;
     if (!commands.resolveCodexApproval || !targetConversationId) {
-      setError("当前 Codex 连接无法处理审批，请重新进入 Codex 工作后重试。");
+      notify("当前 Codex 连接无法处理审批，请重新进入 Codex 工作后重试。");
       return;
     }
     try {
       await commands.resolveCodexApproval(requestId, decision);
     } catch (reason) {
-      setError(message(reason));
+      notify(message(reason));
       return;
     }
     setLiveTurns((current) => {
@@ -628,17 +628,14 @@ export function CodexPage({
             <span>{selectedProject?.name || "独立资料与生成目录"}</span>
           </div>
           <div
+            title={runtimeStatus ? runtimeMessage : undefined}
             className={`codex-runtime-chip${runtimeUnavailable ? " unavailable" : ""}`}
           >
             <i />
             {runtimeUnavailable ? "Codex 未就绪" : "本机 Codex"}
           </div>
         </header>
-        {runtimeMessage ? (
-          <div className="codex-runtime-notice" role="status">
-            {runtimeMessage}
-          </div>
-        ) : null}
+        <FeedbackNotice message={runtimeStatus && runtimeMessage} />
         {projects.length ? (
           <ConversationPane
             history={history}
@@ -681,19 +678,6 @@ export function CodexPage({
             </button>
           </div>
         )}
-        {error ? (
-          <div className="codex-toast" role="alert">
-            {error}
-            <button
-              type="button"
-              className="ui-icon-button ui-close"
-              aria-label="关闭错误提示"
-              onClick={() => setError("")}
-            >
-              <ControlIcon name="x" size={16} />
-            </button>
-          </div>
-        ) : null}
       </main>
       <CodexContextPanel
         materials={materials}
@@ -721,7 +705,7 @@ export function CodexPage({
           artifact={artifactUploadTarget}
           commands={commands}
           onClose={() => setArtifactUploadTarget(null)}
-          onUploaded={() => setError("")}
+          onUploaded={() => notify("")}
         />
       ) : null}
       {creatingProject ? (

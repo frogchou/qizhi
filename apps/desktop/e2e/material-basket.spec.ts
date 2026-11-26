@@ -61,7 +61,14 @@ test("切换页面保留资料筐；选择本地文件、去重、清空和关�
   await dialog.getByRole("button", { name: "添加本地文件" }).click();
   await expect(dialog.getByText("文档快照.md", { exact: true })).toBeVisible();
   await dialog.getByRole("button", { name: "添加本地文件" }).click();
-  await expect(dialog.getByRole("status")).toContainText("筐中已有 1 项");
+  const bubbles = dialog.getByRole("region", { name: "桌面提示" });
+  await expect(bubbles.getByRole("status")).toContainText("筐中已有 1 项");
+  await expect(bubbles).toHaveCSS("position", "fixed");
+  const pick = dialog.getByRole("button", { name: "添加本地文件" });
+  await expect(pick).toBeFocused();
+  await bubbles.getByRole("button", { name: "关闭提示" }).click();
+  await expect(bubbles).toHaveCount(0);
+  await expect(pick).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
   await expect(open).toBeFocused();
