@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useState, type ComponentProps } from "react";
 import { fireEvent, screen, within } from "@testing-library/react";
 import { render } from "../../test/render";
 import { afterEach, expect, it, vi } from "vitest";
-import { AssemblyTrials } from "./AssemblyTrials";
+import { AssemblyTrials as Trials } from "./AssemblyTrials";
+import { useTrialInputs } from "./trial-inputs";
 import {
   emptyConfig,
   type AssemblyDraft,
@@ -11,6 +12,24 @@ import {
 import { factoryApi } from "./factory-client";
 
 afterEach(() => vi.restoreAllMocks());
+
+function AssemblyTrials(
+  props: Omit<ComponentProps<typeof Trials>, "forms" | "optimization">,
+) {
+  const forms = useTrialInputs();
+  return (
+    <Trials
+      {...props}
+      forms={forms}
+      optimization={{
+        focused: null,
+        submitting: false,
+        submit: vi.fn(),
+        open: vi.fn(),
+      }}
+    />
+  );
+}
 
 it("keeps the selected build and sample when another build has the same release version", async () => {
   const config = { ...emptyConfig(), agentId: "quote", version: "2.3.0" };

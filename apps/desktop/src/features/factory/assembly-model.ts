@@ -87,6 +87,11 @@ export type AssemblyRun = {
   taskId: string;
   state: string;
   feedback?: string;
+  optimizationNeedsFeedback?: boolean;
+  optimizations?: (OptimizationReceipt & {
+    feedback: string;
+    createdAt: string;
+  })[];
   accepted: boolean;
   candidateCompleted?: boolean;
   reviewId?: string | null;
@@ -110,6 +115,21 @@ export type AssemblyRun = {
   }[];
   createdAt: string;
 };
+export type OptimizationSource = {
+  draftId: string;
+  candidateId: string;
+  runId: string;
+  packageDigest: string;
+};
+export type OptimizationReceipt = {
+  draftId: string;
+  operationId: string;
+  state: string;
+  revision: number;
+};
+export type FocusedOptimization = OptimizationReceipt & {
+  source: OptimizationSource;
+};
 export type AssemblyOperation = {
   id: string;
   kind: string;
@@ -117,6 +137,7 @@ export type AssemblyOperation = {
   message?: string;
   createdAt: string;
   updatedAt?: string;
+  optimizationSource?: OptimizationSource | null;
 };
 export type AssemblyDraft = DraftSummary & {
   baseRelease?: { agentId: string; version: string } | null;
@@ -223,7 +244,7 @@ export const effectLabel = (effect?: string) => {
   if (effect === "read") return "只读";
   return effect ?? "";
 };
-export const pendingOperation = (op: AssemblyOperation) =>
+export const pendingOperation = (op: { state: string }) =>
   ["queued", "pending", "running", "generating", "stopping"].includes(op.state);
 export type TrialBlock = {
   message: string;
@@ -381,16 +402,18 @@ export function trialBlock(
 export const canAccept = (run: AssemblyRun) =>
   !run.accepted && !trialBlock(run);
 export function useRequestId() {
-  const last = useRef<{ signature: string; id: string } | null>(null);
+  const requests = useRef(new Map<string, { signature: string; id: string }>());
   return {
-    forPayload(payload: unknown) {
+    forPayload(payload: unknown, scope = "") {
       const signature = JSON.stringify(payload);
-      if (last.current?.signature !== signature)
-        last.current = { signature, id: crypto.randomUUID() };
-      return last.current.id;
+      const previous = requests.current.get(scope);
+      if (previous?.signature === signature) return previous.id;
+      const id = crypto.randomUUID();
+      requests.current.set(scope, { signature, id });
+      return id;
     },
-    confirmed() {
-      last.current = null;
+    confirmed(scope = "") {
+      requests.current.delete(scope);
     },
   };
 }

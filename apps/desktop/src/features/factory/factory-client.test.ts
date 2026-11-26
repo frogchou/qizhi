@@ -45,6 +45,7 @@ describe("factory desktop transport", () => {
       ["POST", root + "/draft/runs"],
       ["POST", root + "/draft/operations/op/stop"],
       ["POST", root + "/draft/runs/trial/accept"],
+      ["POST", root + "/draft/runs/trial/optimize"],
       ["POST", root + "/draft/publish"],
       ["GET", "/v1/tasks/capability-options"],
       ["GET", "/v1/factory/agents/qa/versions/1.2.0%2Bnotes/upgrade"],
@@ -66,6 +67,8 @@ describe("factory desktop transport", () => {
       ["POST", "/v1/factory/assembly-resources/unknown/read/1.0/state"],
       ["POST", "/v1/factory/assembly-resources/skill/rules/1.2.0"],
       ["POST", root + "/draft/candidates/snapshot/source"],
+      ["GET", root + "/draft/runs/trial/optimize"],
+      ["POST", root + "/draft/runs/%2F/optimize"],
     ])
       expect(validFactoryRoute(method, path), path).toBe(false);
   });

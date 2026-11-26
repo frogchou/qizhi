@@ -245,6 +245,34 @@
   flex: none;
 }
 
+.studio-optimization-progress {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding: 10px 16px;
+  margin-bottom: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #edf3ed;
+}
+
+.studio-optimization-progress p,
+.studio-optimization-record p {
+  margin: 4px 0;
+  overflow-wrap: anywhere;
+}
+
+.studio-trial-optimization {
+  margin-block: 8px 16px;
+}
+
+.studio-optimization-record {
+  padding-block: 8px;
+  border-top: 1px solid var(--line);
+}
+
 .studio-configuration .studio-build-footer {
   margin: 0;
   padding: 10px 12px;

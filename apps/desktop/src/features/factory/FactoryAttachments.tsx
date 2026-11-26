@@ -17,12 +17,26 @@ function checkedUpload(upload: UploadReceipt | null): UploadReceipt {
   return upload;
 }
 
-export function useFactoryAttachments() {
-  const [basketIds, setBasketIds] = useState<string[]>([]);
-  const [local, setLocal] = useState<UploadReceipt[]>([]);
-  const [failures, setFailures] = useState<
-    { key: string; name?: string; text: string }[]
-  >([]);
+export type AttachmentSelection = {
+  basketIds: string[];
+  local: UploadReceipt[];
+  failures: { key: string; name?: string; text: string }[];
+};
+export const emptyAttachments: AttachmentSelection = {
+  basketIds: [],
+  local: [],
+  failures: [],
+};
+
+export function useFactoryAttachments(saved?: {
+  value: AttachmentSelection;
+  update: (
+    change: (previous: AttachmentSelection) => AttachmentSelection,
+  ) => void;
+}) {
+  const [initial, setInitial] = useState(emptyAttachments);
+  const { basketIds, local, failures } = saved?.value ?? initial;
+  const update = saved?.update ?? setInitial;
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState("");
   const notify = useFeedback("error");
@@ -52,17 +66,21 @@ export function useFactoryAttachments() {
           uploaded.push(checkedUpload(entry.upload));
         }
       }
-      setLocal((old) => [
+      failed.push(...issues.map((issue) => issue.text));
+      update((old) => ({
         ...old,
-        ...uploaded.filter((u) => !old.some((p) => p.id === u.id)),
-      ]);
-      if (issues.length) {
-        failed.push(...issues.map((issue) => issue.text));
-        setFailures((old) => [...old, ...issues]);
-      }
+        local: [
+          ...old.local,
+          ...uploaded.filter((u) => !old.local.some((p) => p.id === u.id)),
+        ],
+        failures: [...old.failures, ...issues],
+      }));
     }
     function clearRetryErrors(names: Set<string>) {
-      setFailures((old) => old.filter((e) => e.name && !names.has(e.name)));
+      update((old) => ({
+        ...old,
+        failures: old.failures.filter((e) => e.name && !names.has(e.name)),
+      }));
     }
     try {
       if (files === undefined) {
@@ -101,7 +119,8 @@ export function useFactoryAttachments() {
     } catch (error) {
       const text = factoryErrorMessage(error);
       failed.push(text);
-      setFailures((old) => [...old, { key: crypto.randomUUID(), text }]);
+      const issue = { key: crypto.randomUUID(), text };
+      update((old) => ({ ...old, failures: [...old.failures, issue] }));
     } finally {
       if (failed.length)
         notify(
@@ -149,7 +168,8 @@ export function useFactoryAttachments() {
   }
   return {
     basketIds,
-    setBasketIds,
+    setBasketIds: (ids: string[]) =>
+      update((old) => ({ ...old, basketIds: ids })),
     local,
     failures,
     busy,
@@ -158,9 +178,15 @@ export function useFactoryAttachments() {
     resolveIds,
     count: local.length + basketIds.length,
     removeLocal: (id: string) =>
-      setLocal((old) => old.filter((u) => u.id !== id)),
+      update((old) => ({
+        ...old,
+        local: old.local.filter((u) => u.id !== id),
+      })),
     removeFailure: (key: string) =>
-      setFailures((old) => old.filter((e) => e.key !== key)),
+      update((old) => ({
+        ...old,
+        failures: old.failures.filter((e) => e.key !== key),
+      })),
   };
 }
 

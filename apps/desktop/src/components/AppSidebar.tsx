@@ -63,7 +63,7 @@ export function AppSidebar({
   onOpenBasket?: () => void;
 }) {
   const basket = useMaterialBasket();
-  const [version, setVersion] = useState("0.1.5");
+  const [version, setVersion] = useState("0.1.6");
   useEffect(() => {
     void getVersion()
       .then((runtimeVersion) => {

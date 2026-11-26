@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { installAssemblyFixture } from "./factory-assembly.fixture";
+import { installOptimizationFixture } from "./factory-optimization.fixture";
 
 // This fixture is confined to Playwright. Every observation and write uses the same desktop command surface as a packaged client.
 type Call = {
@@ -1218,6 +1219,259 @@ test("用指定生成版本和附件测试，答复后人工认可并按同一�
     ),
   ).toEqual({ agentId: "quote-desk", version: "1.0.0" });
 });
+test("根据反馈优化失败测试，保护手改配置和样例，按真实进度测试新生成的候选", async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(45000);
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  page.on("console", (e) => {
+    if (["error", "warning"].includes(e.type())) errors.push(e.text());
+  });
+  await installOptimizationFixture(page, "failed");
+  const studio = await openStudio(page);
+  const assembly = studio.getByRole("tab", { name: "智能体组装", exact: true });
+  const tests = studio.getByRole("tab", { name: "智能体测试" });
+  await studio.getByLabel("智能体与版本").selectOption("quote-draft");
+  const duty = studio.getByRole("textbox", { name: "智能体职责", exact: true });
+  await expect(duty).toHaveValue("按币种和生效日核对");
+  const original = await duty.inputValue();
+  await duty.fill("我正在修改的职责");
+  await tests.click();
+  await studio.getByLabel("选择测试记录").selectOption("bound-run");
+  await studio.getByLabel("样例需求").fill("尚未提交的新样例");
+  await studio.getByText("结构化样例（可选）", { exact: true }).click();
+  await studio.getByLabel("输入 JSON").fill('{"currency":"USD"}');
+  await studio.getByRole("button", { name: "上传本地文件" }).click();
+  await expect(
+    studio.getByText("新增说明.txt", { exact: false }),
+  ).toBeVisible();
+  const optimize = studio.getByRole("button", { name: "根据反馈优化" });
+  await optimize.click();
+  await expect(page.getByRole("region", { name: "桌面提示" })).toContainText(
+    "有未保存的修改",
+  );
+  await studio.getByRole("button", { name: "查看未保存的修改" }).click();
+  await expect(duty).toHaveValue("我正在修改的职责");
+  await duty.fill(original);
+  await tests.click();
+  await expect(studio.getByLabel("验收意见（可选）")).toHaveValue("");
+  await page.evaluate(() => {
+    window.optimizationFixture.response = "hold";
+  });
+  await optimize.dblclick();
+  await expect(optimize).toBeDisabled();
+  await expect(tests).toHaveAttribute("aria-selected", "true");
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          window.factoryLiveFixture.calls.filter((c) =>
+            c.path?.endsWith("/optimize"),
+          ).length,
+      ),
+    )
+    .toBe(1);
+  const [request] = await page.evaluate(() =>
+    window.factoryLiveFixture.calls.filter((c) =>
+      c.path?.endsWith("/optimize"),
+    ),
+  );
+  expect(request).toMatchObject({
+    method: "POST",
+    path: "/v1/factory/assemblies/quote-draft/runs/bound-run/optimize",
+    body: {
+      candidateId: "sealed-one",
+      packageDigest: "a".repeat(64),
+      revision: 1,
+      feedback: "",
+      reviewId: null,
+      requestId: expect.any(String),
+    },
+  });
+  await page.evaluate(() => window.optimizationFixture.acknowledge());
+  await expect(assembly).toHaveAttribute("aria-selected", "true");
+  const progress = studio.getByRole("region", { name: "反馈优化进度" });
+  await expect(progress).toContainText("反馈优化已排队");
+  await expect(
+    progress.getByRole("button", { name: "测试优化后的版本" }),
+  ).toHaveCount(0);
+  await progress.getByRole("button", { name: "返回原测试" }).click();
+  await expect(optimize).toBeDisabled();
+  await expect(studio.getByLabel("选择测试记录")).toHaveValue("bound-run");
+  await studio.getByRole("button", { name: "查看优化进度" }).click();
+  await page.evaluate(() => window.optimizationFixture.advance("running"));
+  await expect(progress).toContainText("正在校验优化后的包和固定用例", {
+    timeout: 10000,
+  });
+  for (const width of [1280, 412]) {
+    await page.setViewportSize({ width, height: 840 });
+    await expect(page).toHaveTitle(/栖知|qizhi/i);
+    await expect(page.locator("vite-error-overlay")).toHaveCount(0);
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+    ).toBe(true);
+    await page.screenshot({
+      path: testInfo.outputPath("optimization-running-" + width + ".png"),
+    });
+  }
+  await page.evaluate(() => window.optimizationFixture.advance("completed"));
+  const retest = progress.getByRole("button", { name: "测试优化后的版本" });
+  await expect(retest).toBeVisible({ timeout: 10000 });
+  await retest.click();
+  await expect(studio.getByLabel("生成记录", { exact: true })).toHaveValue(
+    "optimization-1",
+  );
+  await expect(studio.getByLabel("样例需求")).toHaveValue("");
+  await assembly.click();
+  await progress.getByRole("button", { name: "返回原测试" }).click();
+  await expect(studio.getByLabel("样例需求")).toHaveValue("尚未提交的新样例");
+  await expect(
+    studio.getByText("新增说明.txt", { exact: false }),
+  ).toBeVisible();
+  await studio.getByText("结构化样例（可选）", { exact: true }).click();
+  await expect(studio.getByLabel("输入 JSON")).toHaveValue(
+    '{"currency":"USD"}',
+  );
+  await expect(
+    studio.getByText("汇率缺失时输出错误", { exact: true }),
+  ).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+test("根据反馈优化已归档来源的上线版本，保留认可意见，失败可重试并进入独立升级草稿", async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(45000);
+  await installOptimizationFixture(page, "published");
+  const studio = await openStudio(page);
+  const assembly = studio.getByRole("tab", { name: "智能体组装", exact: true });
+  const workInProgress = studio.getByRole("textbox", {
+    name: "给装配助手的消息",
+  });
+  await workInProgress.fill("正在起草另一项装配委托");
+  await studio.getByRole("tab", { name: "智能体管理" }).click();
+  await studio.getByRole("button", { name: /正式报价核对.*v1\.0\.0/ }).click();
+  await expect(studio.getByRole("heading", { name: "发布依据" })).toBeVisible();
+  await studio.getByRole("button", { name: "打开版本测试" }).click();
+  await expect(studio.getByLabel("选择测试记录")).toHaveValue("bound-run");
+  await expect(
+    studio.getByText("验收意见 · 原版报价已逐项核对", { exact: true }),
+  ).toBeVisible();
+  const optimize = studio.getByRole("button", { name: "根据反馈优化" });
+  const opinion = studio.getByRole("textbox", { name: "优化意见" });
+  await optimize.click();
+  await expect(opinion).toBeFocused();
+  await expect(page.getByRole("region", { name: "桌面提示" })).toContainText(
+    "请填写希望改进的内容",
+  );
+  await opinion.fill("按币种分组，再列出换算依据");
+  await studio.getByLabel("样例需求").fill("保留到稍后再测的样例");
+  await opinion.scrollIntoViewIfNeeded();
+  await page.screenshot({
+    path: testInfo.outputPath("published-feedback.png"),
+  });
+  const reqs = () =>
+    page.evaluate(() =>
+      window.factoryLiveFixture.calls
+        .filter((c) => c.path?.endsWith("/optimize"))
+        .map((c) => c.body!),
+    );
+  for (const mode of ["invalid", "error"] as const) {
+    await page.evaluate((mode) => {
+      window.optimizationFixture.response = mode;
+    }, mode);
+    await optimize.click();
+    await expect(page.getByRole("alert")).toContainText(
+      mode === "invalid" ? "有效的优化回执" : "中台连接中断",
+    );
+    await expect(
+      studio.getByRole("tab", { name: "智能体测试" }),
+    ).toHaveAttribute("aria-selected", "true");
+    await expect(opinion).toHaveValue("按币种分组，再列出换算依据");
+  }
+  await page.evaluate(() => {
+    window.optimizationFixture.response = "ok";
+  });
+  await optimize.click();
+  const draft = studio.getByLabel("智能体与版本");
+  await expect(draft).toHaveValue("upgrade-1");
+  await expect(studio.getByLabel("目标发布版本")).toHaveValue("1.0.1");
+  const sent = await reqs();
+  expect(sent).toHaveLength(3);
+  expect(new Set(sent.map((body) => body.requestId)).size).toBe(1);
+  expect(sent[0]).toMatchObject({
+    candidateId: "sealed-one",
+    packageDigest: "a".repeat(64),
+    feedback: "按币种分组，再列出换算依据",
+    reviewId: "bound-review",
+    revision: 1,
+  });
+  const progress = studio.getByRole("region", { name: "反馈优化进度" });
+  await expect(progress).toContainText("反馈优化已排队");
+  await page.evaluate(() => window.optimizationFixture.advance("failed"));
+  await expect(progress).toContainText("本次优化生成失败", { timeout: 10000 });
+  await expect(page.getByRole("alert")).toContainText(
+    "本轮生成未通过固定用例校验",
+  );
+  await progress.getByRole("button", { name: "返回原测试" }).click();
+  await expect(draft).toHaveValue("quote-draft");
+  await expect(opinion).toHaveValue("按币种分组，再列出换算依据");
+  await expect(studio.getByLabel("样例需求")).toHaveValue(
+    "保留到稍后再测的样例",
+  );
+  await expect(
+    studio.getByText("验收意见 · 原版报价已逐项核对", { exact: true }),
+  ).toBeVisible();
+  await optimize.click();
+  await expect(draft).toHaveValue("upgrade-2");
+  const retried = await reqs();
+  expect(retried[3].requestId).not.toBe(retried[0].requestId);
+  await page.evaluate(() => window.optimizationFixture.advance("completed"));
+  const retest = progress.getByRole("button", { name: "测试优化后的版本" });
+  await expect(retest).toBeVisible({ timeout: 10000 });
+  await retest.click();
+  await expect(studio.getByLabel("生成记录", { exact: true })).toHaveValue(
+    "optimization-2",
+  );
+  await assembly.click();
+  await draft.selectOption("");
+  await expect(workInProgress).toHaveValue("正在起草另一项装配委托");
+  expect(
+    await page.evaluate(() =>
+      window.factoryLiveFixture.calls.filter(
+        (c) => c.path?.endsWith("/publish") || c.path?.endsWith("/accept"),
+      ),
+    ),
+  ).toEqual([]);
+});
+
+test("根据反馈优化保护无已发布候选的归档组装", async ({ page }) => {
+  await installOptimizationFixture(page, "archived");
+  await page.evaluate(() =>
+    localStorage.setItem(
+      "qizhi.factory.assembly.http://127.0.0.1:3010",
+      "quote-draft",
+    ),
+  );
+  const studio = await openStudio(page);
+  await studio.getByRole("tab", { name: "智能体测试" }).click();
+  await studio.getByLabel("选择测试记录").selectOption("bound-run");
+  await studio.getByRole("button", { name: "根据反馈优化" }).click();
+  await expect(page.getByRole("region", { name: "桌面提示" })).toContainText(
+    "这份组装记录已归档",
+  );
+  expect(
+    await page.evaluate(() =>
+      window.factoryLiveFixture.calls.filter((c) =>
+        c.path?.endsWith("/optimize"),
+      ),
+    ),
+  ).toEqual([]);
+});
+
 test("从已上线版本新建正式工单，带入主能力和知识库并保留写入授权选择", async ({
   page,
 }) => {

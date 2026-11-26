@@ -2,6 +2,8 @@ import { useRef, useState } from "react";
 import { useFeedback } from "../../components/FeedbackNotice";
 import { TrialReceipts } from "./AssemblyReceipts";
 import { SampleReview, TrialAcceptance } from "./TrialAcceptance";
+import type { OptimizationActions } from "./TrialOptimization";
+import type { useTrialInputs } from "./trial-inputs";
 import {
   FactoryAttachments,
   useFactoryAttachments,
@@ -236,6 +238,8 @@ export function AssemblyReview({
 
 export function AssemblyTrials({
   draft,
+  forms,
+  optimization,
   selectedBuild,
   onBuildChange,
   onEditDraft,
@@ -248,6 +252,8 @@ export function AssemblyTrials({
   onNewTask,
 }: {
   draft: AssemblyDraft;
+  forms: ReturnType<typeof useTrialInputs>;
+  optimization: OptimizationActions;
   selectedBuild?: string;
   onBuildChange: (id: string) => void;
   onEditDraft: () => void;
@@ -298,6 +304,7 @@ export function AssemblyTrials({
           生成记录
           <select
             aria-label="生成记录"
+            disabled={optimization.submitting}
             value={candidate.id}
             onChange={(e) => onBuildChange(e.target.value)}
           >
@@ -388,6 +395,8 @@ export function AssemblyTrials({
         key={candidate.id}
         draft={draft}
         candidate={candidate}
+        form={forms.forBuild(draft.id, candidate.id)}
+        optimization={optimization}
         dirty={dirty}
         disabled={disabled}
         unavailableReason={unavailableReason}
@@ -410,6 +419,8 @@ export function AssemblyTrials({
 function TrialForm({
   draft,
   candidate,
+  form,
+  optimization,
   dirty,
   disabled,
   unavailableReason,
@@ -421,6 +432,8 @@ function TrialForm({
 }: {
   draft: AssemblyDraft;
   candidate: Candidate;
+  form: ReturnType<ReturnType<typeof useTrialInputs>["forBuild"]>;
+  optimization: OptimizationActions;
   dirty: boolean;
   disabled: boolean;
   unavailableReason?: string;
@@ -430,12 +443,19 @@ function TrialForm({
   onChange: () => void;
   onTask: OpenTask;
 }) {
-  const [goal, setGoal] = useState(""),
-    [input, setInput] = useState(""),
-    [selectedRun, selectRun] = useState("");
+  const { goal, input, selectedRun, opinions } = form.fields;
+  const selectRun = (id: string) =>
+    form.update((old) => ({ ...old, selectedRun: id }));
   const goalField = useRef<HTMLTextAreaElement>(null);
   const notify = useFeedback();
-  const attachments = useFactoryAttachments(),
+  const attachments = useFactoryAttachments({
+      value: form.fields.attachments,
+      update: (change) =>
+        form.update((old) => ({
+          ...old,
+          attachments: change(old.attachments),
+        })),
+    }),
     action = useAction(onChange),
     request = useRequestId();
   const runs = draft.runs
@@ -485,7 +505,10 @@ function TrialForm({
             <textarea
               ref={goalField}
               value={goal}
-              onChange={(e) => setGoal(e.target.value)}
+              onChange={(e) => {
+                const goal = e.target.value;
+                form.update((old) => ({ ...old, goal }));
+              }}
               placeholder="说明输入、期望产物和需要验证的行为"
             />
           </label>
@@ -496,7 +519,10 @@ function TrialForm({
               输入 JSON
               <textarea
                 value={input}
-                onChange={(e) => setInput(e.target.value)}
+                onChange={(e) => {
+                  const input = e.target.value;
+                  form.update((old) => ({ ...old, input }));
+                }}
                 placeholder="{}"
               />
             </label>
@@ -532,6 +558,7 @@ function TrialForm({
               <select
                 aria-label="选择测试记录"
                 value={run?.id ?? selectedRun}
+                disabled={optimization.submitting}
                 onChange={(e) => selectRun(e.target.value)}
               >
                 {!run && (
@@ -592,6 +619,15 @@ function TrialForm({
                 run={run}
                 draft={draft}
                 candidate={candidate}
+                feedback={opinions[run.id] ?? ""}
+                onFeedback={(text) =>
+                  form.update((old) => ({
+                    ...old,
+                    selectedRun: run.id,
+                    opinions: { ...old.opinions, [run.id]: text },
+                  }))
+                }
+                optimization={optimization}
                 dirty={dirty}
                 unavailableReason={
                   disabled

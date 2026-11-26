@@ -1,6 +1,6 @@
 [package]
 name = "qizhi_desktop"
-version = "0.1.5"
+version = "0.1.6"
 description = "Qizhi local-first work knowledge desktop app"
 authors = ["Qizhi contributors"]
 edition = "2024"

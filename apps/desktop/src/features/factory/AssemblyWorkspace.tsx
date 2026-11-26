@@ -12,6 +12,12 @@ import { PackageUpgrade, type PackageTarget } from "./PackageUpgrade";
 import { AssemblyBrief } from "./AssemblyBrief";
 import { AssemblyTrials } from "./AssemblyTrials";
 import {
+  OptimizationProgress,
+  validOptimizationReceipt,
+  type OptimizationActions,
+} from "./TrialOptimization";
+import { useTrialInputs } from "./trial-inputs";
+import {
   assemblies,
   prepareAgentUpgrade,
   type UpgradeEntry,
@@ -26,6 +32,9 @@ import {
   type AssemblyDraft,
   type AssemblyOptions,
   type DraftSummary,
+  type FocusedOptimization,
+  type OptimizationReceipt,
+  type OptimizationSource,
   type TaskScope,
 } from "./assembly-model";
 import { factoryMessage, when, type OpenTask } from "./factory-model";
@@ -128,6 +137,12 @@ export function AssemblyWorkspace({
     ),
     [tick, setTick] = useState(0),
     [listTick, refreshList] = useState(0);
+  const trialForms = useTrialInputs();
+  const [focusedOptimization, setFocusedOptimization] =
+    useState<FocusedOptimization | null>(null);
+  const [registeredSource, setRegisteredSource] =
+    useState<OptimizationSource | null>(null);
+  const optimizationRequest = useRequestId();
   const list = useFactoryRead<{ items: DraftSummary[] }>(
     assemblies,
     revision + listTick,
@@ -338,7 +353,28 @@ export function AssemblyWorkspace({
   }
   const operations =
     detail.data?.operations.filter((o) => o.kind !== "trial") ?? [];
-  const waiting = operations.some(pendingOperation);
+  const focus =
+    focusedOptimization?.draftId === id ? focusedOptimization : null;
+  const optimizationOp = focus
+    ? operations.find((op) => op.id === focus.operationId)
+    : [...operations]
+        .filter((op) => op.optimizationSource)
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+  const tracked =
+    focus ??
+    (optimizationOp?.optimizationSource
+      ? {
+          draftId: id,
+          operationId: optimizationOp.id,
+          source: optimizationOp.optimizationSource,
+          revision: current.revision,
+          state: optimizationOp.state,
+        }
+      : null);
+  const waitingForOptimization = Boolean(
+    tracked && pendingOperation(optimizationOp ?? tracked),
+  );
+  const waiting = waitingForOptimization || operations.some(pendingOperation);
   const resourceCount =
     edit.config.skills.length +
     edit.config.mcpTools.length +
@@ -360,9 +396,9 @@ export function AssemblyWorkspace({
   );
   const newVersion = edits[""]?.config;
   const latest = generationOptions(detail.data?.candidates ?? [])[0]?.candidate;
-  const generating = operations.some(
-    (op) => op.kind === "generate" && pendingOperation(op),
-  );
+  const generating =
+    waitingForOptimization ||
+    operations.some((op) => op.kind === "generate" && pendingOperation(op));
   const editChanged =
     Boolean(buffer) || (latest && latest.revision !== current.revision);
   function openVersion(agentId: string, targetVersion: string) {
@@ -373,6 +409,65 @@ export function AssemblyWorkspace({
     setSelectedBuild(candidateId);
     navigate("test");
   }
+  function openSourceTest(source: OptimizationSource) {
+    select(source.draftId);
+    trialForms
+      .forBuild(source.draftId, source.candidateId)
+      .update((old) => ({ ...old, selectedRun: source.runId }));
+    testBuild(source.candidateId);
+  }
+  function openOptimization(
+    source: OptimizationSource,
+    receipt: OptimizationReceipt,
+  ) {
+    setFocusedOptimization({ ...receipt, source });
+    select(receipt.draftId);
+    navigate("assemble");
+  }
+  const optimization: OptimizationActions = {
+    focused:
+      focus && optimizationOp
+        ? { ...focus, state: optimizationOp.state }
+        : focusedOptimization,
+    registeredSource,
+    submitting: action.busy,
+    unavailable: stale
+      ? "中台连接尚未就绪，请恢复连接并刷新测试记录。"
+      : detail.error
+        ? "未能读取最新组装内容，请刷新测试记录后重试。"
+        : waiting
+          ? "当前组装已有操作正在进行，请等待完成后再优化。"
+          : undefined,
+    open: openOptimization,
+    submit(source, revision, feedback, reviewId) {
+      void action.run(async () => {
+        const body = {
+          candidateId: source.candidateId,
+          packageDigest: source.packageDigest,
+          revision,
+          feedback,
+          ...(reviewId !== undefined ? { reviewId } : {}),
+        };
+        const path =
+          `${draftPath(source.draftId)}/runs/${encodeURIComponent(source.runId)}/optimize` as const;
+        const requestId = optimizationRequest.forPayload(body, path);
+        try {
+          const receipt = await factoryApi.post<OptimizationReceipt>(path, {
+            ...body,
+            requestId,
+          });
+          if (!validOptimizationReceipt(receipt))
+            throw Error("尚未收到有效的优化回执，请刷新测试记录后重试。");
+          optimizationRequest.confirmed(path);
+          openOptimization(source, receipt);
+          if (pendingOperation(receipt))
+            return "已提交反馈，可在智能体组装查看生成进度。";
+        } finally {
+          changed();
+        }
+      });
+    },
+  };
   const packageOption = packageUpgrade
     ? "package:" + packageUpgrade.agentId + "@" + packageUpgrade.version
     : "";
@@ -502,6 +597,17 @@ export function AssemblyWorkspace({
             />
           ) : (
             <>
+              {tracked && (
+                <OptimizationProgress
+                  focus={tracked}
+                  operation={optimizationOp}
+                  candidate={detail.data?.candidates.find(
+                    (c) => c.id === tracked.operationId,
+                  )}
+                  onTest={testBuild}
+                  onOriginal={() => openSourceTest(tracked.source)}
+                />
+              )}
               {detail.data?.baseRelease && (
                 <div className="studio-upgrade-origin">
                   <ControlIcon name="layers" size={17} />
@@ -797,6 +903,8 @@ export function AssemblyWorkspace({
               <AssemblyTrials
                 key={id}
                 draft={detail.data}
+                forms={trialForms}
+                optimization={optimization}
                 selectedBuild={selectedBuild}
                 onBuildChange={setSelectedBuild}
                 onEditDraft={() => navigate("assemble")}
@@ -808,7 +916,7 @@ export function AssemblyWorkspace({
                 disabled={!writable}
                 unavailableReason={
                   archived
-                    ? "该草稿已归档。请从可编辑的草稿生成并测试。"
+                    ? "这份组装记录已归档，原测试和发布记录可供查阅。"
                     : stale
                       ? "中台连接尚未就绪，请恢复连接并刷新测试记录。"
                       : action.busy
@@ -870,8 +978,8 @@ export function AssemblyWorkspace({
                       action.busy
                         ? undefined
                         : (record) => {
-                            select(record.draftId);
-                            testBuild(record.candidateId);
+                            setRegisteredSource(record);
+                            openSourceTest(record);
                           }
                     }
                     onBased={

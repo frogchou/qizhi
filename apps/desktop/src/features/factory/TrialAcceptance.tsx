@@ -1,8 +1,12 @@
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { useFeedback } from "../../components/FeedbackNotice";
 import { factoryApi } from "./factory-client";
 import { stateName, when } from "./factory-model";
 import type { useAction } from "./FactoryControls";
+import {
+  TrialOptimization,
+  type OptimizationActions,
+} from "./TrialOptimization";
 import {
   draftPath,
   trialBlock,
@@ -124,6 +128,9 @@ export function TrialAcceptance({
   onRefresh,
   onKeepSelection,
   onRemedy,
+  feedback,
+  onFeedback,
+  optimization,
 }: {
   draft: AssemblyDraft;
   candidate: Candidate;
@@ -135,8 +142,11 @@ export function TrialAcceptance({
   onRefresh: () => void;
   onKeepSelection: () => void;
   onRemedy: (remedy: Remedy) => void;
+  feedback: string;
+  onFeedback: (text: string) => void;
+  optimization: OptimizationActions;
 }) {
-  const [feedback, setFeedback] = useState("");
+  const opinion = useRef<HTMLTextAreaElement>(null);
   const [recognition, setRecognition] = useState<{ feedback: string } | null>(
     null,
   );
@@ -182,6 +192,7 @@ export function TrialAcceptance({
       if (!receipt?.accepted || receipt.state !== "accepted")
         throw Error("尚未收到本次认可的回执，请刷新测试记录。");
       setRecognition({ feedback: receipt.feedback ?? feedback.trim() });
+      onFeedback("");
       return "已认可本次测试结果。";
     } catch (error) {
       onRefresh();
@@ -224,19 +235,32 @@ export function TrialAcceptance({
     <>
       {current.accepted && <strong>用户已认可</strong>}
       {current.feedback && <p>验收意见 · {current.feedback}</p>}
-      {!current.accepted && (
-        <label className="assembly-field">
-          验收意见（可选）
-          <textarea
-            maxLength={4000}
-            value={feedback}
-            onChange={(e) => {
-              onKeepSelection();
-              setFeedback(e.target.value);
-            }}
-          />
-        </label>
-      )}
+      <label className="assembly-field">
+        {current.accepted ? "优化意见" : "验收意见（可选）"}
+        <textarea
+          ref={opinion}
+          readOnly={waiting || optimization.submitting}
+          maxLength={4000}
+          value={feedback}
+          onChange={(e) => {
+            onKeepSelection();
+            onFeedback(e.target.value);
+          }}
+        />
+      </label>
+      <TrialOptimization
+        actions={optimization}
+        draft={draft}
+        candidate={candidate}
+        run={run}
+        dirty={dirty}
+        waiting={waiting}
+        feedback={feedback}
+        onNeedFeedback={() => opinion.current?.focus()}
+        onRestoreFeedback={onFeedback}
+        onKeepSelection={onKeepSelection}
+        onEditDraft={() => onRemedy("edit")}
+      />
       <div id={infoId}>
         {notices.map((message) => (
           <p key={message} className="live-subtle">
@@ -249,7 +273,7 @@ export function TrialAcceptance({
           <button
             type="button"
             className={acceptBlock ? "ui-action" : "ui-action ui-primary"}
-            disabled={waiting}
+            disabled={waiting || optimization.submitting}
             aria-describedby={infoId}
             onClick={() => {
               onKeepSelection();
@@ -263,7 +287,7 @@ export function TrialAcceptance({
         <button
           type="button"
           className={publishBlock ? "ui-action" : "ui-action ui-primary"}
-          disabled={waiting}
+          disabled={waiting || optimization.submitting}
           aria-describedby={infoId}
           onClick={() => {
             onKeepSelection();

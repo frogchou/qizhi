@@ -29,7 +29,7 @@ export type FactoryWritePath =
   | Resources
   | `${Assembly}/${string}/${"save" | "suggest" | "generate" | "delete" | "runs" | "publish"}`
   | `${Assembly}/${string}/operations/${string}/stop`
-  | `${Assembly}/${string}/runs/${string}/accept`
+  | `${Assembly}/${string}/runs/${string}/${"accept" | "optimize"}`
   | `${Resources}/${"mcp" | "skill"}/${string}/${string}/state`
   | "/v1/tasks"
   | "/v1/factory/releases"
@@ -132,7 +132,7 @@ export function validFactoryRoute(
       (length === 6 &&
         safeFactoryId(d) &&
         ((c === "operations" && e === "stop") ||
-          (c === "runs" && e === "accept")))
+          (c === "runs" && (e === "accept" || e === "optimize"))))
     );
   }
   if (method === "GET" && group === "factory" && length === 2) {

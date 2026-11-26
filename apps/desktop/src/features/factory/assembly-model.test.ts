@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { canAccept } from "./assembly-model";
+import { renderHook } from "@testing-library/react";
+import { canAccept, useRequestId } from "./assembly-model";
 const run = {
   id: "r",
   candidateId: "c",
@@ -34,4 +35,24 @@ describe("matching sample acceptance", () => {
     ).toBe(false);
     expect(canAccept({ ...run, accepted: true })).toBe(false);
   });
+});
+
+it("keeps an unacknowledged feedback request when another trial is submitted", () => {
+  const { result } = renderHook(() => useRequestId());
+  const first = result.current.forPayload(
+    { feedback: "增加列名" },
+    "trial-one",
+  );
+  const second = result.current.forPayload(
+    { feedback: "增加列名" },
+    "trial-two",
+  );
+  expect(first).not.toBe(second);
+  result.current.confirmed("trial-two");
+  expect(result.current.forPayload({ feedback: "增加列名" }, "trial-one")).toBe(
+    first,
+  );
+  expect(
+    result.current.forPayload({ feedback: "增加日期" }, "trial-one"),
+  ).not.toBe(first);
 });
