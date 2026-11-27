@@ -5,7 +5,7 @@ import { factoryApi } from "./factory-client";
 import { useFactoryRead } from "./factory-feed";
 import { Badge, Modal, ReadNotice, useAction } from "./FactoryControls";
 import { AgentCatalog, AgentDetail } from "./FactoryAreas";
-import { ResourceChoices } from "./AssemblyChoices";
+import { ResourceChoices, RuntimeNativeChoice } from "./AssemblyChoices";
 import { AssemblyResources } from "./AssemblyResources";
 import { AssemblyNavigation, type StudioTab } from "./AssemblyNavigation";
 import { PackageUpgrade, type PackageTarget } from "./PackageUpgrade";
@@ -26,6 +26,7 @@ import {
   generationOptions,
   editableVersionOptions,
   editingVersionLabel,
+  runtimeNativeLabel,
   pendingOperation,
   useRequestId,
   type AssemblyConfig,
@@ -77,15 +78,22 @@ function readSelection(key: string) {
     return "";
   }
 }
-function mergeManual(edit: Edit, current: DraftSummary): Edit {
-  const changed = Object.entries(edit.config).filter(
-    ([key, value]) =>
-      JSON.stringify(value) !==
-      JSON.stringify(edit.base.config[key as keyof AssemblyConfig]),
+function changedFields(config: AssemblyConfig, base: AssemblyConfig) {
+  return Object.fromEntries(
+    Object.entries(config).filter(
+      ([key, value]) =>
+        JSON.stringify(value) !==
+        JSON.stringify(base[key as keyof AssemblyConfig]),
+    ),
   );
+}
+function mergeManual(edit: Edit, current: DraftSummary): Edit {
   return {
     base: current,
-    config: { ...current.config, ...Object.fromEntries(changed) },
+    config: {
+      ...current.config,
+      ...changedFields(edit.config, edit.base.config),
+    },
   };
 }
 export function AssemblyWorkspace({
@@ -160,6 +168,9 @@ export function AssemblyWorkspace({
   const current = detail.data ?? fresh,
     buffer = edits[id],
     edit = buffer ?? current;
+  const useRuntimeNative =
+    edit.config.useRuntimeNative ??
+    (!id && options.data?.runtimeNative ? true : undefined);
   const conflict = Boolean(
     buffer && detail.data && buffer.base.revision !== detail.data.revision,
   );
@@ -255,13 +266,8 @@ export function AssemblyWorkspace({
     setEdits((old) => {
       const base = old[id]?.base ?? current;
       const next = { ...(old[id]?.config ?? base.config), [key]: value };
-      if (
-        key === "nativeSkills" &&
-        !base.config.nativeSkills &&
-        Array.isArray(value) &&
-        !value.length
-      )
-        delete next.nativeSkills;
+      if (!id && key === "useRuntimeNative" && value === true)
+        delete next.useRuntimeNative;
       if (JSON.stringify(next) === JSON.stringify(base.config)) {
         if (!old[id]) return old;
         const remaining = { ...old };
@@ -277,6 +283,11 @@ export function AssemblyWorkspace({
     if (conflict)
       throw Error("当前版本的编辑内容已在其他地方更新，请先核对修改。");
     if (id && !buffer) return current;
+    if (
+      !options.data?.runtimeNative &&
+      useRuntimeNative !== current.config.useRuntimeNative
+    )
+      throw Error("请刷新中台的运行时原生能力设置后再保存。");
     const description =
       current.description.trim() ||
       firstMessage ||
@@ -284,17 +295,19 @@ export function AssemblyWorkspace({
     if (!description) throw Error("请描述智能体的工作，或填写智能体职责。");
     const editedConfig = {
       ...edit.config,
+      ...(useRuntimeNative !== undefined && { useRuntimeNative }),
       criteria: edit.config.criteria.map((c) => c.trim()).filter(Boolean),
     };
+    if (useRuntimeNative !== undefined) delete editedConfig.nativeSkills;
+    const savedConfig = id
+      ? editedConfig
+      : changedFields(editedConfig, fresh.config);
     const result = await factoryApi.post<DraftSummary>(
       id ? `${draftPath(id)}/save` : assemblies,
       {
         description,
-        ...(id
-          ? { revision: buffer!.base.revision, config: editedConfig }
-          : JSON.stringify(editedConfig) !== JSON.stringify(fresh.config)
-            ? { config: editedConfig }
-            : {}),
+        ...(id && { revision: buffer!.base.revision }),
+        ...(Object.keys(savedConfig).length > 0 && { config: savedConfig }),
       },
     );
     if (!result?.id || typeof result.revision !== "number")
@@ -384,7 +397,6 @@ export function AssemblyWorkspace({
   const waiting = waitingForOptimization || operations.some(pendingOperation);
   const resourceCount =
     edit.config.skills.length +
-    (edit.config.nativeSkills?.length ?? 0) +
     edit.config.mcpTools.length +
     edit.config.capabilities.length +
     edit.config.datasetIds.length;
@@ -761,19 +773,37 @@ export function AssemblyWorkspace({
                       <ControlIcon name="sliders" size={19} />
                       <h2 id="studio-resource-title">资源与权限</h2>
                       <span className="studio-count">
-                        已选 {resourceCount} 项
+                        企业资源已选 {resourceCount} 项
                       </span>
                     </header>
                     <ReadNotice read={options} />
                     {options.data && (
-                      <ResourceChoices
-                        collapsible
-                        options={options.data}
-                        selection={edit.config}
-                        suggestions={detail.data?.suggestions}
-                        onEdit={config}
-                        disabled={actionsLocked}
-                      />
+                      <>
+                        <RuntimeNativeChoice
+                          value={useRuntimeNative}
+                          status={options.data.runtimeNative}
+                          legacy={
+                            detail.data && useRuntimeNative === undefined
+                              ? runtimeNativeLabel(
+                                  edit.config,
+                                  options.data.nativeSkills,
+                                )
+                              : undefined
+                          }
+                          disabled={actionsLocked}
+                          onChange={(enabled) =>
+                            config("useRuntimeNative", enabled)
+                          }
+                        />
+                        <ResourceChoices
+                          collapsible
+                          options={options.data}
+                          selection={edit.config}
+                          suggestions={detail.data?.suggestions}
+                          onEdit={config}
+                          disabled={actionsLocked}
+                        />
+                      </>
                     )}
                   </section>
                   <div className="studio-build-footer">

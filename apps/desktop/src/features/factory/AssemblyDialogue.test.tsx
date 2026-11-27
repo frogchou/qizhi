@@ -36,6 +36,7 @@ it.each([false, true])(
           mcpTools: [],
           capabilities: [],
           datasets: [],
+          runtimeNative: { runtime: "codex", available: true },
           connection: { status: "connected" },
         };
       if (path === draftPath(draft.id)) return structuredClone(draft);
@@ -47,6 +48,7 @@ it.each([false, true])(
       .mockImplementation(async (path, body) => {
         if (path === assemblies) {
           Object.assign(draft, body);
+          draft.config = { ...emptyConfig(), ...draft.config };
           return structuredClone(draft);
         }
         if (path !== draftPath(draft.id) + "/suggest")
@@ -85,6 +87,14 @@ it.each([false, true])(
     const composer = () =>
       screen.getByRole("textbox", { name: "给装配助手的消息" });
     const send = () => screen.getByRole("button", { name: "一键装配" });
+    const mode = await screen.findByRole("checkbox", {
+      name: "使用运行时原生能力",
+    });
+    expect(mode).toBeChecked();
+    if (!accepted) fireEvent.click(mode);
+    fireEvent.click(screen.getByRole("tab", { name: "智能体测试" }));
+    fireEvent.click(screen.getByRole("tab", { name: "智能体组装" }));
+    expect(mode).toHaveProperty("checked", accepted);
     fireEvent.change(screen.getByRole("textbox", { name: "智能体名称" }), {
       target: { value: "周报员" },
     });
@@ -111,10 +121,13 @@ it.each([false, true])(
     expect(screen.getByLabelText("智能体名称")).toHaveValue("周报员");
     const creates = post.mock.calls.filter(([path]) => path === assemblies);
     expect(creates).toHaveLength(1);
-    expect(creates[0][1]).toMatchObject({
+    expect(creates[0][1]).toEqual({
       description,
-      config: { displayName: "周报员" },
+      config: { displayName: "周报员", useRuntimeNative: accepted },
     });
+    expect(
+      screen.getByRole("checkbox", { name: "使用运行时原生能力" }),
+    ).toHaveProperty("checked", accepted);
     const turns = post.mock.calls.filter(([path]) => path.endsWith("/suggest"));
     expect(turns).toHaveLength(accepted ? 1 : 2);
     expect(turns[0][1]).toEqual({

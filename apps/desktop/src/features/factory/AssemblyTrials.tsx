@@ -30,7 +30,8 @@ import {
   generationOptions,
   assemblies,
   draftPath,
-  nativeRequirementLabel,
+  legacyImageRequired,
+  runtimeNativeLabel,
   useRequestId,
   type AssemblyDraft,
   type AssemblyOptions,
@@ -165,7 +166,10 @@ export function AssemblyReview({
         r.packageDigest === record.packageDigest),
   );
   const options = useFactoryRead<AssemblyOptions>(
-    candidate?.config.nativeSkills?.length ? `${assemblies}/options` : null,
+    candidate?.config.useRuntimeNative === undefined &&
+      candidate?.config.nativeSkills?.length
+      ? `${assemblies}/options`
+      : null,
     0,
   );
   return (
@@ -196,9 +200,9 @@ export function AssemblyReview({
                 candidate.config.skills.join("、") || "未选用",
               ],
               [
-                "Codex 原生能力",
-                nativeRequirementLabel(
-                  candidate.config.nativeSkills,
+                "运行时原生能力",
+                runtimeNativeLabel(
+                  candidate.config,
                   options.data?.nativeSkills,
                 ),
               ],
@@ -245,9 +249,8 @@ export function AssemblyReview({
           </ul>
           <SampleReview
             run={run}
-            requiresImage={candidate?.config.nativeSkills?.includes(
-              "codex.imagegen",
-            )}
+            useRuntimeNative={candidate?.config.useRuntimeNative}
+            requiresImage={legacyImageRequired(candidate?.config)}
           />
           <TrialReceipts items={run.receipts} />
           <button
@@ -431,11 +434,8 @@ export function AssemblyTrials({
             ["验收条件", candidate.config.criteria.join("、")],
             ["企业精选 Skill", candidate.config.skills.join("、") || "未选用"],
             [
-              "Codex 原生能力",
-              nativeRequirementLabel(
-                candidate.config.nativeSkills,
-                nativeOptions,
-              ),
+              "运行时原生能力",
+              runtimeNativeLabel(candidate.config, nativeOptions),
             ],
             ["工具", candidate.config.mcpTools.join("、") || "未选用"],
             ["知识库", candidate.config.datasetIds.join("、") || "不用知识库"],
@@ -719,9 +719,8 @@ function TrialForm({
               )}
               <SampleReview
                 run={run}
-                requiresImage={candidate.config.nativeSkills?.includes(
-                  "codex.imagegen",
-                )}
+                useRuntimeNative={candidate.config.useRuntimeNative}
+                requiresImage={legacyImageRequired(candidate.config)}
               />
               <TrialReceipts items={run.receipts} />
               <TrialAcceptance

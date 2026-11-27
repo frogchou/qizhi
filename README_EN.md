@@ -4,7 +4,7 @@
 
 Qizhi is a local-first work assistant for Windows knowledge workers. It uses a built-in NTFS/USN index to discover recent file activity, turns scattered documents into searchable and reusable work context, and integrates with RAGFlow, OpenAI-compatible services, TypeSafe AI JEV, and the local Codex CLI.
 
-> Qizhi is currently an early-stage project (`0.1.1`). APIs, data formats, and installation behavior may change. Use it in a test environment first.
+> Qizhi is currently an early-stage project (`0.1.9`). APIs, data formats, and installation behavior may change. Use it in a test environment first.
 
 ## Smart Factory
 
@@ -14,6 +14,7 @@ Smart Factory maps complex agent workflows onto an observable campus. Requiremen
 
 - **Demo mode** works offline with built-in work orders, state transitions, human approvals, and delivery flows.
 - **Enterprise mode** connects to an enterprise platform configured under **Settings → Smart Factory** and displays real work orders, agents, knowledge resources, runtimes, quality reviews, and deliveries.
+- On platforms that support runtime-native capabilities, new assemblies enable them by default. Codex selects native tools and skills for each task. Enterprise skills, MCP tools, business capabilities, and datasets retain their individual authorization controls.
 - **Explainable operations** use map regions, status labels, and contextual guidance to explain each object and workflow while preserving explicit user confirmation for important changes.
 
 This repository contains the Smart Factory desktop client. The enterprise platform backend is deployed separately and is not required to build Qizhi Desktop:
@@ -140,7 +141,7 @@ pnpm --filter @qizhi/desktop tauri build
 The command runs TypeScript checks and a Vite production build, compiles the Rust release binary, and creates an x64 NSIS installer at:
 
 ```text
-apps/desktop/src-tauri/target/release/bundle/nsis/栖知_0.1.1_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/栖知_0.1.9_x64-setup.exe
 ```
 
 The installer uses per-machine mode. Windows displays a UAC prompt while the built-in NTFS indexing service is installed.

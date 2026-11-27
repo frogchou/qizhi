@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { renderHook } from "@testing-library/react";
-import { canAccept, useRequestId } from "./assembly-model";
+import { canAccept, trialBlock, useRequestId } from "./assembly-model";
 const run = {
   id: "r",
   candidateId: "c",
@@ -13,6 +13,15 @@ const run = {
   findings: [{ id: "R1", status: "met" }],
 };
 describe("matching sample acceptance", () => {
+  it("explains missing runtime execution evidence without asking for a picture", () => {
+    const block = trialBlock({
+      ...run,
+      businessReview: { status: "native_session_missing", criteriaIds: [] },
+    });
+    expect(block?.message).toMatch(/运行时.*记录/);
+    expect(block?.message).not.toMatch(/PNG|图片/);
+    expect(block?.action).toBe("sample");
+  });
   it("requires the bound sample outcome and required assertion evidence", () => {
     expect(canAccept(run)).toBe(true);
     expect(

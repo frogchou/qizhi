@@ -20,9 +20,10 @@ export type TaskScope = {
 };
 export type ResourceSelection = TaskScope & {
   skills: string[];
-  nativeSkills?: string[];
 };
 export type AssemblyConfig = ResourceSelection & {
+  useRuntimeNative?: boolean;
+  nativeSkills?: string[];
   agentId: string;
   displayName: string;
   version: string;
@@ -64,23 +65,27 @@ export type NativeSkillOption = AssemblyOption & {
 };
 export type AssemblyOptions = {
   skills: AssemblyOption[];
+  runtimeNative?: { runtime: "codex"; available: boolean; reason?: string };
   nativeSkills?: NativeSkillOption[];
   mcpTools: AssemblyOption[];
   capabilities: AssemblyOption[];
   datasets: { id: string; name: string }[];
   connection: { status: string; message?: string; observedAt?: string };
 };
-export function nativeAvailability(available?: boolean) {
+function nativeAvailability(available?: boolean) {
   if (available === true) return "当前可用";
   if (available === false) return "当前不可用";
   return "当前可用性未知";
 }
-export function nativeRequirementLabel(
-  ids?: string[],
+export function runtimeNativeLabel(
+  config: AssemblyConfig,
   options?: NativeSkillOption[],
 ) {
-  if (!ids?.length) return "未声明";
-  return ids
+  if (config.useRuntimeNative === true)
+    return "已开启 · 运行时按需选择工具和技能";
+  if (config.useRuntimeNative === false) return "已关闭";
+  if (!config.nativeSkills?.length) return "旧版未声明原生能力";
+  const declarations = config.nativeSkills
     .map((id) => {
       const option = options?.find((item) => item.id === id);
       return [
@@ -93,6 +98,13 @@ export function nativeRequirementLabel(
         .join(" · ");
     })
     .join("、");
+  return "旧版声明 · " + declarations;
+}
+export function legacyImageRequired(config?: AssemblyConfig) {
+  return (
+    config?.useRuntimeNative === undefined &&
+    config?.nativeSkills?.includes("codex.imagegen")
+  );
 }
 export type DraftSummary = {
   id: string;
@@ -128,6 +140,7 @@ export type AssemblyRun = {
   })[];
   accepted: boolean;
   candidateCompleted?: boolean;
+  hasRequiredNativeSession?: boolean;
   hasRequiredNativeImage?: boolean;
   reviewId?: string | null;
   reviewRound?: number | null;
@@ -374,6 +387,12 @@ export function trialBlock(
     case "met":
     case "human_confirmed":
       return null;
+    case "native_session_missing":
+      return {
+        message:
+          "缺少本次测试的运行时执行记录。请核对工单中的 Codex 运行记录后重新测试。",
+        action: "sample",
+      };
     case "native_file_missing":
       return {
         message:

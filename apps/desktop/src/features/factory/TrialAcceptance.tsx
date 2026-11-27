@@ -19,14 +19,23 @@ import {
 
 export function SampleReview({
   run,
+  useRuntimeNative,
   requiresImage,
 }: {
   run: AssemblyRun;
+  useRuntimeNative?: boolean;
   requiresImage?: boolean;
 }) {
   return (
     <>
       <h4>样例验收条件</h4>
+      {useRuntimeNative && run.hasRequiredNativeSession !== undefined && (
+        <p>
+          {run.hasRequiredNativeSession
+            ? "已核对本次测试的 Codex 运行记录"
+            : "尚无本次测试的 Codex 运行记录"}
+        </p>
+      )}
       {requiresImage && (
         <p>
           原生图片核验 ·{" "}

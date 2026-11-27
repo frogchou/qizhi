@@ -484,6 +484,19 @@
   display: grid;
   gap: 0;
 }
+.studio-runtime-native {
+  align-items: flex-start;
+  padding: 8px 5px 12px;
+  cursor: pointer;
+}
+.studio-runtime-native strong {
+  font-size: 14px;
+}
+.studio-runtime-native small {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+}
 .studio-resource-group {
   border-top: 1px solid var(--line);
 }

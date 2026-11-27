@@ -4,7 +4,7 @@
 
 栖知是一款面向 Windows 知识工作者的本地优先工作助手。它使用内置的 NTFS/USN 索引快速发现近期文件变动，把分散的文档整理成可检索、可总结、可继续处理的工作上下文，并连接 RAGFlow、OpenAI 兼容服务、TypeSafe AI JEV 与本机 Codex CLI。
 
-> 当前处于早期开发阶段（`0.1.8`）。接口、数据结构和安装方式仍可能变化，请先在测试环境中使用。
+> 当前处于早期开发阶段（`0.1.9`）。接口、数据结构和安装方式仍可能变化，请先在测试环境中使用。
 
 ## 智能工厂
 
@@ -22,6 +22,8 @@
 - [qizhi_mg](https://github.com/frogchou/qizhi_mg)：Linux 上的控制平面、节点管理器、智能体群、协议、运维控制台和部署配置。
 
 从左侧「智能体装配」进入「智能体测试」，可以按某次测试结果填写优化意见，点击「根据反馈优化」。已登记的版本会另建升级草稿，生成后可以换一个场景测试，再决定是否发布。
+
+在支持此功能的中台上，新建智能体默认勾选「使用运行时原生能力」。Codex 会按任务选择原生工具和技能。企业精选 Skill、MCP 工具、业务能力和知识库仍分别授权。
 
 ### 智能工厂与中台如何协作
 
@@ -147,7 +149,7 @@ pnpm --filter @qizhi/desktop tauri build
 该命令会先执行 TypeScript 检查和 Vite 生产构建，再编译 Rust release 程序并生成 NSIS x64 安装器。输出位于：
 
 ```text
-apps/desktop/src-tauri/target/release/bundle/nsis/栖知_0.1.8_x64-setup.exe
+apps/desktop/src-tauri/target/release/bundle/nsis/栖知_0.1.9_x64-setup.exe
 ```
 
 安装器采用按计算机安装模式，安装内置 NTFS 索引服务时会出现 Windows UAC 确认。

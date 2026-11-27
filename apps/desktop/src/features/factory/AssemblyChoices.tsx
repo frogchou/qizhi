@@ -6,12 +6,55 @@ import {
 import { Badge } from "./FactoryControls";
 import {
   effectLabel,
-  nativeAvailability,
   type AssemblyOption,
   type AssemblyOptions,
   type ResourceSelection,
 } from "./assembly-model";
 import { when } from "./factory-model";
+
+export function RuntimeNativeChoice({
+  value,
+  status,
+  legacy,
+  disabled,
+  onChange,
+}: {
+  value?: boolean;
+  status: AssemblyOptions["runtimeNative"];
+  legacy?: string;
+  disabled: boolean;
+  onChange: (enabled: boolean) => void;
+}) {
+  const id = useId();
+  return (
+    <label className="assembly-choice studio-runtime-native">
+      <input
+        type="checkbox"
+        checked={value === true}
+        disabled={disabled || !status}
+        aria-labelledby={id + "-label"}
+        aria-describedby={id + "-description"}
+        onChange={(event) => onChange(event.target.checked)}
+      />
+      <span>
+        <strong id={id + "-label"}>使用运行时原生能力</strong>
+        <span id={id + "-description"}>
+          <small>开启后，Codex 会按任务需要选择原生工具和技能。</small>
+          {legacy && <small>{legacy}</small>}
+          {!status ? (
+            <small>当前中台未提供此开关，升级中台后可设置。</small>
+          ) : (
+            !status.available && (
+              <small>
+                运行节点当前不可用{status.reason ? " · " + status.reason : "。"}
+              </small>
+            )
+          )}
+        </span>
+      </span>
+    </label>
+  );
+}
 
 type ChoiceProps = {
   label: string;
@@ -22,8 +65,6 @@ type ChoiceProps = {
   clearLabel?: string;
   disabled?: boolean;
   disclosureIcon?: ControlIconName;
-  nativeRequirements?: boolean;
-  nativeDirectoryMissing?: boolean;
   children?: ReactNode;
 };
 
@@ -36,8 +77,6 @@ export function ChoiceGroup({
   clearLabel,
   disabled = false,
   disclosureIcon,
-  nativeRequirements = false,
-  nativeDirectoryMissing = false,
   children,
 }: ChoiceProps) {
   const [expanded, setExpanded] = useState(false);
@@ -51,17 +90,13 @@ export function ChoiceGroup({
         id,
         label: id,
         available: false,
-        description: nativeRequirements
-          ? "已声明的能力不在当前目录中，可取消此要求。"
-          : "已选记录已离开当前目录，仍可取消授权",
+        description: "已选记录已离开当前目录，仍可取消授权",
       })),
   ];
   const selectedIds = new Set(selected);
   const suggestedIds = new Set(suggested);
   const checked = selected.map((id) => catalog.get(id)?.label || id);
-  const summary = checked.length
-    ? checked.join("、")
-    : clearLabel || (nativeRequirements ? "未声明" : "未选用");
+  const summary = checked.length ? checked.join("、") : clearLabel || "未选用";
   const suggestedCount = choices.filter(
     (item) => !selectedIds.has(item.id) && suggestedIds.has(item.id),
   ).length;
@@ -69,16 +104,11 @@ export function ChoiceGroup({
     (item) => selectedIds.has(item.id) && item.effect === "external_write",
   );
   const hasUnavailable = selected.some(
-    (id) =>
-      catalog.get(id)?.available === false ||
-      (!nativeRequirements && !catalog.has(id)),
+    (id) => !catalog.has(id) || catalog.get(id)?.available === false,
   );
   const caption = [
     hasWrite && "包含对外写入",
-    hasUnavailable && (nativeRequirements ? "含不可用能力" : "含不可用资源"),
-    nativeRequirements &&
-      selected.some((id) => catalog.get(id)?.available === undefined) &&
-      "可用性未知",
+    hasUnavailable && "含不可用资源",
     summary,
   ]
     .filter(Boolean)
@@ -94,13 +124,6 @@ export function ChoiceGroup({
     >
       {!disclosureIcon && <legend>{label}</legend>}
       <div className="assembly-choice-list">
-        {nativeRequirements && (
-          <p className="live-subtle">
-            {nativeDirectoryMissing
-              ? "当前中台未提供原生能力目录。"
-              : "勾选此版本运行时需要的 Codex 能力。可用性由中台所在节点报告。"}
-          </p>
-        )}
         {clearLabel && (
           <label className="assembly-choice">
             <input
@@ -114,16 +137,9 @@ export function ChoiceGroup({
         {choices.map((option) => {
           const isSelected = selectedIds.has(option.id);
           const metadata = [
-            (!disclosureIcon || nativeRequirements) &&
-            option.id !== option.label
-              ? option.id
-              : "",
+            !disclosureIcon && option.id !== option.label ? option.id : "",
             disclosureIcon && option.version ? "v" + option.version : "",
-            nativeRequirements
-              ? nativeAvailability(catalog.get(option.id)?.available)
-              : option.available === false
-                ? "当前不可用"
-                : "",
+            option.available === false ? "当前不可用" : "",
             effectLabel(option.effect),
             option.destination && "目的地 " + option.destination,
             option.description,
@@ -140,11 +156,7 @@ export function ChoiceGroup({
               <input
                 type="checkbox"
                 checked={isSelected}
-                disabled={
-                  option.available === false &&
-                  !isSelected &&
-                  !(nativeRequirements && catalog.has(option.id))
-                }
+                disabled={option.available === false && !isSelected}
                 onChange={(e) =>
                   onSelect(
                     e.target.checked
@@ -166,9 +178,7 @@ export function ChoiceGroup({
             </label>
           );
         })}
-        {!choices.length && !nativeDirectoryMissing && (
-          <p className="live-subtle">目录中暂无可选项</p>
-        )}
+        {!choices.length && <p className="live-subtle">目录中暂无可选项</p>}
       </div>
     </fieldset>
   );
@@ -197,17 +207,11 @@ export function ChoiceGroup({
         </span>
         <span className="studio-resource-count">
           {[
-            selected.length > 0 &&
-              (nativeRequirements ? "已声明 " : "已选 ") + selected.length,
+            selected.length > 0 && "已选 " + selected.length,
             suggestedCount > 0 && suggestedCount + " 项建议",
           ]
             .filter(Boolean)
-            .join(" · ") ||
-            (nativeRequirements
-              ? nativeDirectoryMissing
-                ? "未报告"
-                : options.filter((o) => o.available).length + " 项可用"
-              : options.length + " 项可选")}
+            .join(" · ") || options.length + " 项可选"}
         </span>
         <ControlIcon
           name="chevron"
@@ -253,12 +257,6 @@ export function ResourceChoices({
       options: options.skills,
     },
     {
-      key: "nativeSkills",
-      label: "Codex 原生能力",
-      icon: "terminal",
-      options: options.nativeSkills ?? [],
-    },
-    {
       key: "mcpTools",
       label: "MCP 工具",
       icon: "sliders",
@@ -293,10 +291,7 @@ export function ResourceChoices({
       }
     >
       {groups
-        .filter(
-          (g) =>
-            includeSkills || (g.key !== "skills" && g.key !== "nativeSkills"),
-        )
+        .filter((g) => includeSkills || g.key !== "skills")
         .map((g) => (
           <div key={g.key}>
             <ChoiceGroup
@@ -307,10 +302,6 @@ export function ResourceChoices({
               onSelect={(ids) => onEdit(g.key, ids)}
               disabled={disabled}
               disclosureIcon={collapsible ? g.icon : undefined}
-              nativeRequirements={g.key === "nativeSkills"}
-              nativeDirectoryMissing={
-                g.key === "nativeSkills" && !options.nativeSkills
-              }
               clearLabel={g.key === "datasetIds" ? "不用知识库" : undefined}
             >
               {g.key === "datasetIds" && !connectionIssue && connection}

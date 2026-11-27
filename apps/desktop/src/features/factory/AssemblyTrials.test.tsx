@@ -233,8 +233,8 @@ it("shows the sealed native requirement and reads the selected trial's archived 
     />,
   );
   fireEvent.click(screen.getByText("工作流程与授权范围"));
-  expect(screen.getByText("Codex 原生能力")).toBeVisible();
-  expect(screen.getByText(/codex\.imagegen/)).toBeVisible();
+  expect(screen.getByText("运行时原生能力")).toBeVisible();
+  expect(screen.getByText(/旧版声明.*codex\.imagegen/)).toBeVisible();
   expect(get).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "查看测试产物" }));
   expect(
@@ -246,6 +246,34 @@ it("shows the sealed native requirement and reads the selected trial's archived 
     expect.any(AbortSignal),
   );
 });
+
+it.each([true, false])(
+  "uses the sealed runtime mode (%s) for text samples, even if a transitional record carries an old image declaration",
+  (enabled) => {
+    const config = {
+      ...painting,
+      useRuntimeNative: enabled,
+      nativeSkills: ["codex.imagegen"],
+    };
+    const props = trialProps();
+    render(
+      <AssemblyTrials
+        {...props}
+        draft={{
+          ...paintingDraft,
+          config: { ...painting, useRuntimeNative: !enabled },
+          candidates: [{ ...candidate, config }],
+          runs: [{ ...reviewed, hasRequiredNativeImage: true }],
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByText("工作流程与授权范围"));
+    expect(screen.getByText("运行时原生能力")).toBeVisible();
+    expect(screen.getByText(enabled ? /已开启.*按需/ : "已关闭")).toBeVisible();
+    expect(screen.queryByText(/原生图片核验|codex\.imagegen/)).toBeNull();
+    expect(screen.getByText(/已由人工验收通过/)).toBeVisible();
+  },
+);
 
 it("records the operator's recognition after formal image review, then publishes the exact tested build", async () => {
   const props = trialProps();

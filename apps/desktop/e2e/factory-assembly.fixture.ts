@@ -24,6 +24,7 @@ export async function installAssemblyFixture(page: Page) {
       description: "按币种和生效日核对",
       workflow: "比较两份报价",
       criteria: ["列出差异"],
+      useRuntimeNative: true,
       skills: [] as string[],
       mcpTools: [] as string[],
       datasetIds: [] as string[],
@@ -39,6 +40,7 @@ export async function installAssemblyFixture(page: Page) {
       state: "active",
     };
     const options = {
+      runtimeNative: { runtime: "codex", available: true },
       skills: [
         {
           id: "quote-rules@1.0.0",
@@ -298,20 +300,7 @@ export async function installAssemblyFixture(page: Page) {
         if (row) row.state = body.state;
         return { state: body.state };
       }
-      if (path === base + "/options")
-        return window.factoryLiveFixture.png
-          ? {
-              ...options,
-              nativeSkills: [
-                {
-                  id: "codex.imagegen",
-                  label: "Codex 原生图像生成",
-                  description: "从节点生成原图",
-                  available: true,
-                },
-              ],
-            }
-          : options;
+      if (path === base + "/options") return options;
       if (path === base && args.method === "GET")
         return { items: derived ? [derived, draft] : [draft] };
       if (path === base && args.method === "POST") {
@@ -338,19 +327,7 @@ export async function installAssemblyFixture(page: Page) {
         if (window.factoryLiveFixture.png)
           return {
             ...structuredClone(draft),
-            suggestions: {
-              ...draft.suggestions,
-              nativeSkills: ["codex.imagegen"],
-            },
-            candidates: [
-              {
-                ...candidate,
-                config: {
-                  ...candidate.config,
-                  nativeSkills: ["codex.imagegen"],
-                },
-              },
-            ],
+            candidates: [candidate],
             runs: [
               {
                 id: "native-run",
@@ -361,6 +338,7 @@ export async function installAssemblyFixture(page: Page) {
                 accepted: false,
                 candidateCompleted: true,
                 hasRequiredNativeImage: true,
+                hasRequiredNativeSession: true,
                 createdAt: now,
                 reviewRound: 3,
                 reviewId: "round-real-9",
@@ -395,12 +373,16 @@ export async function installAssemblyFixture(page: Page) {
         return structuredClone(draft);
       }
       if (path.endsWith("/save")) {
-        if (body.revision !== draft.revision)
+        const target =
+          derived && path === base + "/" + derived.id + "/save"
+            ? derived
+            : draft;
+        if (body.revision !== target.revision)
           throw new Error("编辑修订冲突（HTTP 409）");
-        draft.description = String(body.description);
-        draft.config = body.config as typeof config;
-        draft.revision++;
-        return structuredClone(draft);
+        target.description = String(body.description);
+        target.config = body.config as typeof config;
+        target.revision++;
+        return structuredClone(target);
       }
       if (path.endsWith("/suggest")) {
         const requestId = String(body.requestId);
@@ -540,6 +522,7 @@ export async function installAssemblyFixture(page: Page) {
         Object.assign(draft.runs[0], {
           state: "awaiting_review",
           candidateCompleted: true,
+          hasRequiredNativeSession: true,
           reviewId: "quote-review",
           reviewRound: 1,
           reviewDecision: null,

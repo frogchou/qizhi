@@ -715,7 +715,7 @@ test.beforeEach(async ({ page }) => {
   await installAssemblyFixture(page);
 });
 
-test("Codex 原生能力跨页保存，试跑和普通工单预览并下载归档 PNG", async ({
+test("运行时原生能力跨页保存，试跑和普通工单预览并下载实际归档的 PNG", async ({
   page,
 }, info) => {
   const png = await readFile(
@@ -735,22 +735,48 @@ test("Codex 原生能力跨页保存，试跑和普通工单预览并下载归�
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   page.on("console", (message) => {
-    if (message.type() === "error") errors.push(message.text());
+    if (["error", "warning"].includes(message.type()))
+      errors.push(message.text());
   });
+  await page.setViewportSize({ width: 1280, height: 820 });
   const studio = await openStudio(page);
-  await studio.getByLabel("智能体与版本").selectOption("quote-draft");
+  await expect(page).toHaveTitle(/栖知|qizhi/i);
+  await expect(page.locator("vite-error-overlay")).toHaveCount(0);
+  await expect(page).toHaveURL(/\/\s*$/);
   const assembly = studio.getByRole("tab", { name: "智能体组装" });
   const tests = studio.getByRole("tab", { name: "智能体测试" });
-  await studio.getByRole("button", { name: /Codex 原生能力/ }).click();
-  const requirement = studio.getByRole("checkbox", {
-    name: /Codex 原生图像生成/,
+  const setting = studio.getByRole("checkbox", {
+    name: "使用运行时原生能力",
+    exact: true,
   });
-  await expect(requirement).not.toBeChecked();
-  await expect(requirement).toHaveAccessibleName(/当前可用/);
-  await requirement.check();
+  await expect(setting).toBeChecked();
+  await expect(setting).toHaveAccessibleDescription(
+    /按任务需要选择原生工具和技能/,
+  );
+  await expect(studio.getByRole("checkbox", { name: /图像生成/ })).toHaveCount(
+    0,
+  );
+  for (const width of [1280, 412]) {
+    await page.setViewportSize({ width, height: 820 });
+    await setting.scrollIntoViewIfNeeded();
+    await expect(setting).toBeInViewport();
+    await expect(
+      studio.getByRole("button", { name: /企业精选 Skill/ }),
+    ).toBeVisible();
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth),
+    ).toBeLessThanOrEqual(width);
+    await page.screenshot({
+      path: info.outputPath("runtime-native-" + width + ".png"),
+    });
+  }
+  await page.setViewportSize({ width: 1280, height: 820 });
+  await studio.getByLabel("智能体与版本").selectOption("quote-draft");
+  await expect(setting).toBeChecked();
+  await setting.uncheck();
   await tests.click();
   await assembly.click();
-  await expect(requirement).toBeChecked();
+  await expect(setting).not.toBeChecked();
   await studio.getByRole("button", { name: "保存修改" }).click();
   await expect
     .poll(() =>
@@ -760,18 +786,18 @@ test("Codex 原生能力跨页保存，试跑和普通工单预览并下载归�
             ?.body?.config,
       ),
     )
-    .toMatchObject({ nativeSkills: ["codex.imagegen"], skills: [] });
-  await requirement.scrollIntoViewIfNeeded();
-  await page.screenshot({ path: info.outputPath("native-skill.png") });
+    .toMatchObject({ useRuntimeNative: false, skills: [] });
   await tests.click();
   await studio.getByText("工作流程与授权范围").click();
   await expect(
     studio
       .getByRole("tabpanel", { name: "智能体测试" })
-      .getByText(/codex\.imagegen · 当前可用/),
+      .getByText(/已开启.*按需选择工具和技能/),
   ).toBeVisible();
   await expect(studio.getByText(/第 3 轮已由人工验收通过/)).toBeVisible();
-  await expect(studio.getByText(/已核对本次生图回执与归档 PNG/)).toBeVisible();
+  await expect(
+    studio.getByText(/已核对本次测试的 Codex 运行记录/),
+  ).toBeVisible();
   await expect(studio.getByText(/自动核验 · 缺项/)).toBeVisible();
   await studio.getByRole("button", { name: "查看测试产物" }).click();
   const name = "原生插画.png";
@@ -1142,7 +1168,10 @@ test("三页签保留未提交内容，并把指定生成记录交给测试", as
   await expect(editor).toHaveAttribute("aria-selected", "true");
   await studio.getByLabel("智能体与版本").selectOption("quote-draft");
   const groups = studio.locator(".studio-resource-toggle");
-  await expect(groups).toHaveCount(5);
+  await expect(groups).toHaveCount(4);
+  await expect(
+    studio.getByRole("checkbox", { name: "使用运行时原生能力", exact: true }),
+  ).toBeChecked();
   await expect(
     studio.locator('.studio-resource-toggle[aria-expanded="true"]'),
   ).toHaveCount(0);
@@ -1332,6 +1361,10 @@ test("用指定生成版本和附件测试，答复后人工认可并按同一�
   await openStudio(page);
   await panel.getByRole("button", { name: "刷新测试记录" }).click();
   await expect(panel.getByText(/工单第 1 轮已由人工验收通过/)).toBeVisible();
+  await expect(
+    panel.getByText(/已核对本次测试的 Codex 运行记录/),
+  ).toBeVisible();
+  await expect(panel.getByText(/原生图片核验|缺少原生生图交付/)).toHaveCount(0);
   await expect(panel.getByLabel("验收意见（可选）")).toHaveValue(
     "已核对报价差异和预览回执。",
   );
@@ -1382,6 +1415,7 @@ test("用指定生成版本和附件测试，答复后人工认可并按同一�
   await expect(
     managed.getByRole("heading", { name: "发布依据" }),
   ).toBeVisible();
+  await expect(managed.getByText(/已开启.*按需选择工具和技能/)).toBeVisible();
   await managed.getByRole("button", { name: "打开版本测试" }).click();
   await expect(panel.getByRole("tab", { name: "智能体测试" })).toHaveAttribute(
     "aria-selected",
@@ -1404,6 +1438,20 @@ test("用指定生成版本和附件测试，答复后人工认可并按同一�
   await inspector.getByRole("button", { name: "升级智能体" }).click();
   await expect(panel.getByLabel("智能体与版本")).toHaveValue("derived-draft");
   await expect(panel.getByLabel("目标发布版本")).toHaveValue("1.0.1");
+  const upgradeMode = panel.getByRole("checkbox", {
+    name: "使用运行时原生能力",
+    exact: true,
+  });
+  await expect(upgradeMode).toBeChecked();
+  await upgradeMode.uncheck();
+  await panel.getByRole("button", { name: "保存修改", exact: true }).click();
+  await expect(panel.getByText("修改已保存", { exact: true })).toBeVisible();
+  const versions = panel.getByLabel("智能体与版本");
+  await versions.selectOption("");
+  await expect(upgradeMode).toBeChecked();
+  await versions.selectOption("derived-draft");
+  await expect(panel.getByLabel("目标发布版本")).toHaveValue("1.0.1");
+  await expect(upgradeMode).not.toBeChecked();
   expect(
     await page.evaluate(
       () =>
