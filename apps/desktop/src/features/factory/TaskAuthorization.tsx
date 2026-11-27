@@ -158,7 +158,8 @@ export function TaskAuthorization({
               options={auth.options}
               selection={{ ...emptyConfig(), ...auth.scope }}
               onEdit={(field, ids) => {
-                if (field !== "skills") auth.select(field, ids);
+                if (field !== "skills" && field !== "nativeSkills")
+                  auth.select(field, ids);
               }}
             />
           )}

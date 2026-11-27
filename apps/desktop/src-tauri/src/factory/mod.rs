@@ -336,6 +336,21 @@ pub fn factory_cancel_read(
 }
 
 #[tauri::command]
+pub async fn factory_preview_png(
+    state: State<'_, FactoryBridge>,
+    task_id: String,
+    artifact_id: String,
+) -> Result<tauri::ipc::Response, String> {
+    let auth = state.connection.for_live()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        download::preview_png(auth, &task_id, &artifact_id)
+    })
+    .await
+    .map_err(|_| "归档图片读取中断。".to_owned())?
+    .map(tauri::ipc::Response::new)
+}
+
+#[tauri::command]
 pub async fn factory_download(
     app: tauri::AppHandle,
     state: State<'_, FactoryBridge>,

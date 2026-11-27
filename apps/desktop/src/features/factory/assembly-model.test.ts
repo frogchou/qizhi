@@ -15,6 +15,14 @@ const run = {
 describe("matching sample acceptance", () => {
   it("requires the bound sample outcome and required assertion evidence", () => {
     expect(canAccept(run)).toBe(true);
+    expect(
+      canAccept({
+        ...run,
+        state: "accepted",
+        reviewDecision: "accept",
+        businessReview: { status: "native_file_missing", criteriaIds: [] },
+      }),
+    ).toBe(false);
     expect(canAccept({ ...run, candidateCompleted: false })).toBe(false);
     expect(
       canAccept({

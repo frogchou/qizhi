@@ -490,7 +490,8 @@ function AssemblyTrace({ detail }: { detail: TaskDetail }) {
     detail.events?.filter(
       (e) =>
         e.payload?.stage === "assembly_turn" ||
-        e.payload?.stage === "assembly_tool",
+        e.payload?.stage === "assembly_tool" ||
+        e.payload?.stage === "assembly_runtime",
     ) ?? [];
   const finalReceipts = observations.some(
     (e) => e.payload?.stage === "assembly_tool",
@@ -508,13 +509,34 @@ function AssemblyTrace({ detail }: { detail: TaskDetail }) {
           <strong>
             {e.payload!.stage === "assembly_turn"
               ? "业务步骤 " + (e.payload?.step ?? "")
-              : "工具执行回执"}
+              : e.payload!.stage === "assembly_runtime"
+                ? e.payload?.stageLabel || "原生能力执行"
+                : "工具执行回执"}
           </strong>
           {e.occurred_at && <small>{when(e.occurred_at)}</small>}
           {e.payload?.stage === "assembly_turn" ? (
             <p>
               本步知识库 · {e.payload.datasetIds?.join("、") || "不用知识库"}
             </p>
+          ) : e.payload?.stage === "assembly_runtime" ? (
+            <>
+              {e.payload.message &&
+                e.payload.message !== e.payload.stageLabel && (
+                  <p>{e.payload.message}</p>
+                )}
+              {(e.payload.threadId || e.payload.turnId || e.payload.itemId) && (
+                <details>
+                  <summary>查看原生调用回执</summary>
+                  <Facts
+                    rows={[
+                      ["会话编号", e.payload.threadId],
+                      ["轮次编号", e.payload.turnId],
+                      ["调用项编号", e.payload.itemId],
+                    ]}
+                  />
+                </details>
+              )}
+            </>
           ) : (
             <ReceiptDetails item={e.payload!} />
           )}

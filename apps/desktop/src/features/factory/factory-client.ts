@@ -446,7 +446,84 @@ function downloadBlob(blob: Blob, fileName: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 60000);
   return true;
 }
+
+const previewByteLimit = 32 * 1024 * 1024;
+const previewTooLarge = "图片较大，请下载原文件查看。";
+async function readPreview(response: Response): Promise<ArrayBuffer> {
+  if (Number(response.headers.get("Content-Length")) > previewByteLimit) {
+    await response.body?.cancel();
+    throw new Error(previewTooLarge);
+  }
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error("归档图片没有返回内容。");
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      size += value.length;
+      if (size > previewByteLimit) {
+        await reader.cancel();
+        throw new Error(previewTooLarge);
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return bytes.buffer;
+}
+
 export const factoryApi = {
+  async previewPng(
+    taskId: string,
+    artifactId: string,
+    signal?: AbortSignal,
+  ): Promise<Blob> {
+    if (!safeFactoryId(taskId) || !safeFactoryId(artifactId))
+      throw new Error(invalidRoute);
+    const payload = isDesktop()
+      ? await invoke<ArrayBuffer | number[]>("factory_preview_png", {
+          taskId,
+          artifactId,
+        })
+      : await browserFetch(
+          "GET",
+          `/v1/tasks/${taskId}/artifacts/${artifactId}`,
+          activeBrowserToken(),
+          readPreview,
+          { artifact: true, signal },
+        );
+    const bytes = Array.isArray(payload)
+      ? Uint8Array.from(payload).buffer
+      : payload;
+    const header = new DataView(bytes);
+    if (
+      bytes.byteLength < 33 ||
+      header.getUint32(0) !== 0x89504e47 ||
+      header.getUint32(4) !== 0x0d0a1a0a ||
+      header.getUint32(8) !== 13 ||
+      header.getUint32(12) !== 0x49484452
+    )
+      throw new Error("归档内容不是有效的 PNG 图片，可下载原文件核对。");
+    const width = header.getUint32(16),
+      height = header.getUint32(20);
+    if (
+      !width ||
+      !height ||
+      width * height > 40_000_000 ||
+      bytes.byteLength > previewByteLimit
+    )
+      throw new Error(previewTooLarge);
+    return new Blob([bytes], { type: "image/png" });
+  },
   async saveSkillFile(
     fileName: string,
     bytes: Uint8Array<ArrayBuffer>,

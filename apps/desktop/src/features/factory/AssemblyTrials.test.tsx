@@ -202,6 +202,51 @@ const trialProps = () => ({
   onNewTask: vi.fn(),
 });
 
+it("shows the sealed native requirement and reads the selected trial's archived files on demand", async () => {
+  const props = trialProps();
+  const config = { ...painting, nativeSkills: ["codex.imagegen"] };
+  const get = vi.spyOn(factoryApi, "get").mockResolvedValue({
+    task: { id: "ink-task", state: "accepted", revision_number: 0 },
+    acceptanceRounds: [],
+    artifacts: [
+      {
+        id: "art-ink",
+        fileName: "山水.png",
+        mediaType: "image/png",
+        sizeBytes: 1042700,
+        revision: 1,
+        sha256: "a".repeat(64),
+        createdAt: reviewed.createdAt,
+      },
+    ],
+    delivery: {
+      revisionNumber: 0,
+      answers: [],
+      artifactIds: ["art-ink"],
+      supportingArtifactIds: [],
+    },
+  });
+  render(
+    <AssemblyTrials
+      {...props}
+      draft={{ ...paintingDraft, candidates: [{ ...candidate, config }] }}
+    />,
+  );
+  fireEvent.click(screen.getByText("工作流程与授权范围"));
+  expect(screen.getByText("Codex 原生能力")).toBeVisible();
+  expect(screen.getByText(/codex\.imagegen/)).toBeVisible();
+  expect(get).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "查看测试产物" }));
+  expect(
+    await screen.findByRole("button", { name: "预览 山水.png" }),
+  ).toBeVisible();
+  expect(screen.getByRole("button", { name: "下载 山水.png" })).toBeVisible();
+  expect(get).toHaveBeenCalledWith(
+    "/v1/tasks/ink-task",
+    expect.any(AbortSignal),
+  );
+});
+
 it("records the operator's recognition after formal image review, then publishes the exact tested build", async () => {
   const props = trialProps();
   const post = vi

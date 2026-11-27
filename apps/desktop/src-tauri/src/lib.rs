@@ -110,6 +110,7 @@ pub fn run() {
             factory::factory_request,
             factory::factory_cancel_read,
             factory::factory_download,
+            factory::factory_preview_png,
             factory::factory_save_skill_file,
             factory::upload::factory_upload_basket_item,
             factory::upload::factory_pick_uploads,

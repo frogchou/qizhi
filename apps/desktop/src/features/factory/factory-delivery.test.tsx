@@ -106,6 +106,45 @@ afterEach(() => {
 });
 
 describe("factory delivery", () => {
+  it("offers PNG preview and original download and reports human acceptance with outstanding automated findings", () => {
+    const value = detail();
+    value.artifacts = [
+      { ...artifact("painting", "山水.png"), mediaType: "image/png" },
+      artifact("description", "说明.json"),
+    ];
+    value.delivery = {
+      revisionNumber: 1,
+      answers: [],
+      artifactIds: ["painting", "description"],
+      supportingArtifactIds: [],
+    };
+    value.currentReviewId = null;
+    value.acceptanceRounds = [
+      {
+        ...round("round-1", 1, 2, ""),
+        decision: "accept",
+        criteria: [
+          { id: "R1", requirement: "图片格式" },
+          { id: "R2", requirement: "有题款" },
+        ],
+        assessment: {
+          items: [
+            { id: "R1", status: "met", reason: "PNG 可读取" },
+            { id: "R2", status: "missing", reason: "缺题款" },
+          ],
+        },
+      },
+    ];
+    show(value);
+    expect(screen.getByRole("button", { name: "预览 山水.png" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "下载 山水.png" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "预览 说明.json" })).toBeNull();
+    const review = screen.getByRole("region", { name: "本轮验收" });
+    expect(review).toHaveTextContent(/第 2 轮.*人工.*通过/);
+    expect(review).toHaveTextContent("已满足 1 项");
+    expect(review).toHaveTextContent("缺项 1 项");
+  });
+
   it("shows both README analyses from legacy findings before process reports", () => {
     const value = detail();
     value.nodes = [

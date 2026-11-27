@@ -13,6 +13,97 @@ import { factoryApi } from "./factory-client";
 
 afterEach(() => vi.restoreAllMocks());
 
+it("preserves a release's native requirements when saving an upgrade and sends an explicit empty list when removed", async () => {
+  const draft: AssemblyDraft = {
+    id: "image-upgrade",
+    revision: 1,
+    description: "生成图片",
+    messages: [],
+    operations: [],
+    candidates: [],
+    runs: [],
+    baseRelease: { agentId: "ink-studio", version: "1.0.0" },
+    config: {
+      ...emptyConfig(),
+      agentId: "ink-studio",
+      displayName: "水墨插画",
+      version: "1.0.1",
+      nativeSkills: ["codex.imagegen"],
+    },
+  };
+  vi.spyOn(factoryApi, "get").mockImplementation(async (path) => {
+    if (path === assemblies) return { items: [structuredClone(draft)] };
+    if (path === draftPath(draft.id)) return structuredClone(draft);
+    if (path === assemblies + "/options")
+      return {
+        skills: [],
+        mcpTools: [],
+        capabilities: [],
+        datasets: [],
+        connection: { status: "connected" },
+        nativeSkills: [
+          {
+            id: "codex.imagegen",
+            label: "图像生成",
+            description: "生成图片",
+            available: false,
+            reason: "节点离线",
+          },
+        ],
+      };
+    throw Error("Unexpected read: " + path);
+  });
+  const save = vi
+    .spyOn(factoryApi, "post")
+    .mockImplementation(async (path, body) => {
+      if (path !== draftPath(draft.id) + "/save")
+        throw Error("Unexpected write: " + path);
+      draft.config = structuredClone(
+        (body as { config: AssemblyDraft["config"] }).config,
+      );
+      draft.revision++;
+      return structuredClone(draft);
+    });
+  render(
+    <AssemblyWorkspace
+      active
+      endpoint="https://upgrade-fixture.example"
+      revision={0}
+      connection="live"
+      entry={{ kind: "assembly", draftId: draft.id }}
+      onChange={vi.fn()}
+      onSettings={vi.fn()}
+      onTask={vi.fn()}
+      onNewTask={vi.fn()}
+    />,
+  );
+  const native = await screen.findByRole("button", {
+    name: /Codex 原生能力.*图像生成/,
+  });
+  fireEvent.click(native);
+  const requirement = screen.getByRole("checkbox", { name: /图像生成/ });
+  expect(requirement).toBeChecked();
+  fireEvent.change(screen.getByLabelText("智能体名称"), {
+    target: { value: "新版水墨插画" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "保存修改" }));
+  expect(await screen.findByText("修改已保存。")).toBeVisible();
+  expect(save).toHaveBeenLastCalledWith(
+    draftPath(draft.id) + "/save",
+    expect.objectContaining({
+      config: expect.objectContaining({ nativeSkills: ["codex.imagegen"] }),
+    }),
+  );
+  fireEvent.click(requirement);
+  fireEvent.click(screen.getByRole("button", { name: "保存修改" }));
+  expect(save).toHaveBeenLastCalledWith(
+    draftPath(draft.id) + "/save",
+    expect.objectContaining({
+      config: expect.objectContaining({ nativeSkills: [] }),
+    }),
+  );
+});
+
 it("shows real editable versions and keeps the editor usable after a conflict or disconnection", async () => {
   const config = {
     ...emptyConfig(),

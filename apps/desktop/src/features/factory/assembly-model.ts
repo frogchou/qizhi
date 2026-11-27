@@ -18,7 +18,10 @@ export type TaskScope = {
   datasetIds: string[];
   mcpTools: string[];
 };
-export type ResourceSelection = TaskScope & { skills: string[] };
+export type ResourceSelection = TaskScope & {
+  skills: string[];
+  nativeSkills?: string[];
+};
 export type AssemblyConfig = ResourceSelection & {
   agentId: string;
   displayName: string;
@@ -51,16 +54,46 @@ export type AssemblyOption = {
   effect?: string;
   destination?: string;
   available?: boolean;
+  reason?: string;
   inputSchema?: unknown;
   outputSchema?: unknown;
 };
+export type NativeSkillOption = AssemblyOption & {
+  description: string;
+  available: boolean;
+};
 export type AssemblyOptions = {
   skills: AssemblyOption[];
+  nativeSkills?: NativeSkillOption[];
   mcpTools: AssemblyOption[];
   capabilities: AssemblyOption[];
   datasets: { id: string; name: string }[];
   connection: { status: string; message?: string; observedAt?: string };
 };
+export function nativeAvailability(available?: boolean) {
+  if (available === true) return "当前可用";
+  if (available === false) return "当前不可用";
+  return "当前可用性未知";
+}
+export function nativeRequirementLabel(
+  ids?: string[],
+  options?: NativeSkillOption[],
+) {
+  if (!ids?.length) return "未声明";
+  return ids
+    .map((id) => {
+      const option = options?.find((item) => item.id === id);
+      return [
+        option?.label,
+        id,
+        nativeAvailability(option?.available),
+        option?.reason,
+      ]
+        .filter(Boolean)
+        .join(" · ");
+    })
+    .join("、");
+}
 export type DraftSummary = {
   id: string;
   revision: number;
@@ -95,6 +128,7 @@ export type AssemblyRun = {
   })[];
   accepted: boolean;
   candidateCompleted?: boolean;
+  hasRequiredNativeImage?: boolean;
   reviewId?: string | null;
   reviewRound?: number | null;
   reviewDecision?: string | null;
@@ -340,6 +374,12 @@ export function trialBlock(
     case "met":
     case "human_confirmed":
       return null;
+    case "native_file_missing":
+      return {
+        message:
+          "缺少原生生图交付。请核对本次测试的调用回执和归档 PNG，再重新测试。",
+        action: "sample",
+      };
     case "candidate_incomplete":
       return {
         message:

@@ -106,3 +106,19 @@
   padding-top: 7px;
   border-top: 1px solid var(--line);
 }
+.fc-live .live-delivery-review {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0 12px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.fc-live .live-png-preview img {
+  display: block;
+  max-width: 100%;
+  max-height: 50vh;
+  object-fit: contain;
+  margin: 8px 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}

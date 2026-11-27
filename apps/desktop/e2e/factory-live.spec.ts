@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { installAssemblyFixture } from "./factory-assembly.fixture";
 import { installOptimizationFixture } from "./factory-optimization.fixture";
@@ -35,6 +36,7 @@ type Fixture = {
   idleVersion?: boolean;
   catalogCount?: number;
   readyCandidate?: boolean;
+  png?: { encoded: string; size: number; sha256: string };
   failNextAmend?: boolean;
   deleted?: boolean;
   deleting?: boolean;
@@ -259,6 +261,17 @@ async function install(page: Page) {
           isActive: true,
           updatedAtUtcMs: 1,
         };
+      if (command === "factory_preview_png") {
+        if (
+          !state.png ||
+          args.artifactId !== "archived-png" ||
+          !["task-with-review", "task-delivered"].includes(args.taskId ?? "")
+        )
+          throw Error("没有这份归档图片");
+        state.calls.push({ method: "PREVIEW", ...args });
+        return Uint8Array.from(atob(state.png.encoded), (c) => c.charCodeAt(0))
+          .buffer;
+      }
       if (command === "factory_download") {
         state.calls.push({ method: "DOWNLOAD", ...args });
         return true;
@@ -636,6 +649,19 @@ async function install(page: Page) {
           activities: [event],
           inputs: [],
           artifacts: [
+            ...(state.png
+              ? [
+                  {
+                    id: "archived-png",
+                    fileName: "原生插画.png",
+                    mediaType: "image/png",
+                    revision: 1,
+                    createdAt: now(),
+                    sizeBytes: state.png.size,
+                    sha256: state.png.sha256,
+                  },
+                ]
+              : []),
             {
               id: "actual-artifact",
               fileName: "核对结果.txt",
@@ -650,7 +676,7 @@ async function install(page: Page) {
             {
               id: "round-real-9",
               round: 3,
-              decision: reviewed ? "accept" : null,
+              decision: reviewed || state.png ? "accept" : null,
               created_at: now(),
               criteria: [{ id: "R2", requirement: "找到原件" }],
               assessment: {
@@ -687,6 +713,128 @@ test.beforeEach(async ({ page }) => {
   await page.goto("/");
   await expect(page.getByText("实时连接", { exact: false })).toBeVisible();
   await installAssemblyFixture(page);
+});
+
+test("Codex 原生能力跨页保存，试跑和普通工单预览并下载归档 PNG", async ({
+  page,
+}, info) => {
+  const png = await readFile(
+    process.env.QIZHI_E2E_PNG ?? "../../docs/images/smart-factory-overview.png",
+  );
+  const sha256 = createHash("sha256").update(png).digest("hex");
+  await page.evaluate(
+    (fixture) => {
+      window.factoryLiveFixture.png = fixture;
+    },
+    {
+      encoded: png.toString("base64"),
+      size: png.length,
+      sha256,
+    },
+  );
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") errors.push(message.text());
+  });
+  const studio = await openStudio(page);
+  await studio.getByLabel("智能体与版本").selectOption("quote-draft");
+  const assembly = studio.getByRole("tab", { name: "智能体组装" });
+  const tests = studio.getByRole("tab", { name: "智能体测试" });
+  await studio.getByRole("button", { name: /Codex 原生能力/ }).click();
+  const requirement = studio.getByRole("checkbox", {
+    name: /Codex 原生图像生成/,
+  });
+  await expect(requirement).not.toBeChecked();
+  await expect(requirement).toHaveAccessibleName(/当前可用/);
+  await requirement.check();
+  await tests.click();
+  await assembly.click();
+  await expect(requirement).toBeChecked();
+  await studio.getByRole("button", { name: "保存修改" }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          window.factoryLiveFixture.calls.find((c) => c.path?.endsWith("/save"))
+            ?.body?.config,
+      ),
+    )
+    .toMatchObject({ nativeSkills: ["codex.imagegen"], skills: [] });
+  await requirement.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: info.outputPath("native-skill.png") });
+  await tests.click();
+  await studio.getByText("工作流程与授权范围").click();
+  await expect(
+    studio
+      .getByRole("tabpanel", { name: "智能体测试" })
+      .getByText(/codex\.imagegen · 当前可用/),
+  ).toBeVisible();
+  await expect(studio.getByText(/第 3 轮已由人工验收通过/)).toBeVisible();
+  await expect(studio.getByText(/已核对本次生图回执与归档 PNG/)).toBeVisible();
+  await expect(studio.getByText(/自动核验 · 缺项/)).toBeVisible();
+  await studio.getByRole("button", { name: "查看测试产物" }).click();
+  const name = "原生插画.png";
+  const checkImage = async (
+    surface: typeof studio,
+    taskId: string,
+    screenshot: string,
+  ) => {
+    await surface.getByRole("button", { name: "预览 " + name }).click();
+    const image = surface.getByRole("img", { name, exact: true });
+    await expect(image).toBeVisible();
+    const rendered = await image.evaluate(async (element: HTMLImageElement) => {
+      await element.decode();
+      const hash = await crypto.subtle.digest(
+        "SHA-256",
+        await (await fetch(element.src)).arrayBuffer(),
+      );
+      return {
+        width: element.naturalWidth,
+        height: element.naturalHeight,
+        local: element.src.startsWith("blob:"),
+        sha256: Array.from(new Uint8Array(hash), (b) =>
+          b.toString(16).padStart(2, "0"),
+        ).join(""),
+      };
+    });
+    expect(rendered).toEqual({
+      width: png.readUInt32BE(16),
+      height: png.readUInt32BE(20),
+      local: true,
+      sha256,
+    });
+    await image.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: info.outputPath(screenshot) });
+    await surface.getByRole("button", { name: "下载 " + name }).click();
+    await expect
+      .poll(() =>
+        page.evaluate(
+          (id) =>
+            window.factoryLiveFixture.calls
+              .filter((c) => c.taskId === id && c.artifactId === "archived-png")
+              .map((c) => c.method),
+          taskId,
+        ),
+      )
+      .toEqual(["PREVIEW", "DOWNLOAD"]);
+  };
+  await checkImage(studio, "task-with-review", "trial-png.png");
+  await page
+    .getByRole("navigation", { name: "主导航" })
+    .getByRole("button", { name: "智能工厂" })
+    .click();
+  await page.locator('[data-area="delivery"]').click();
+  const panel = page.locator(".live-inspector");
+  await panel.getByRole("button", { name: /采购文件审核/ }).click();
+  await expect(panel.getByRole("region", { name: "本轮验收" })).toContainText(
+    "缺项 1 项",
+  );
+  await expect(
+    panel.getByRole("button", { name: "下载 核对结果.txt" }),
+  ).toBeVisible();
+  await checkImage(panel, "task-delivered", "task-png.png");
+  expect(errors).toEqual([]);
 });
 test("八栋楼读取真实接口，抽屉覆盖河谷并保留导航", async ({ page }) => {
   const map = page.locator(".fc-plate"),
@@ -994,7 +1142,7 @@ test("三页签保留未提交内容，并把指定生成记录交给测试", as
   await expect(editor).toHaveAttribute("aria-selected", "true");
   await studio.getByLabel("智能体与版本").selectOption("quote-draft");
   const groups = studio.locator(".studio-resource-toggle");
-  await expect(groups).toHaveCount(4);
+  await expect(groups).toHaveCount(5);
   await expect(
     studio.locator('.studio-resource-toggle[aria-expanded="true"]'),
   ).toHaveCount(0);

@@ -298,7 +298,20 @@ export async function installAssemblyFixture(page: Page) {
         if (row) row.state = body.state;
         return { state: body.state };
       }
-      if (path === base + "/options") return options;
+      if (path === base + "/options")
+        return window.factoryLiveFixture.png
+          ? {
+              ...options,
+              nativeSkills: [
+                {
+                  id: "codex.imagegen",
+                  label: "Codex 原生图像生成",
+                  description: "从节点生成原图",
+                  available: true,
+                },
+              ],
+            }
+          : options;
       if (path === base && args.method === "GET")
         return { items: derived ? [derived, draft] : [draft] };
       if (path === base && args.method === "POST") {
@@ -322,6 +335,47 @@ export async function installAssemblyFixture(page: Page) {
       if (derived && path === base + "/" + derived.id)
         return structuredClone(derived);
       if (path === base + "/quote-draft") {
+        if (window.factoryLiveFixture.png)
+          return {
+            ...structuredClone(draft),
+            suggestions: {
+              ...draft.suggestions,
+              nativeSkills: ["codex.imagegen"],
+            },
+            candidates: [
+              {
+                ...candidate,
+                config: {
+                  ...candidate.config,
+                  nativeSkills: ["codex.imagegen"],
+                },
+              },
+            ],
+            runs: [
+              {
+                id: "native-run",
+                candidateId: candidate.id,
+                taskId: "task-with-review",
+                packageDigest: candidate.packageDigest,
+                state: "accepted",
+                accepted: false,
+                candidateCompleted: true,
+                hasRequiredNativeImage: true,
+                createdAt: now,
+                reviewRound: 3,
+                reviewId: "round-real-9",
+                reviewDecision: "accept",
+                assertions: [
+                  { name: "PNG 格式", required: true, passed: true },
+                ],
+                criteria: [
+                  { id: "R2", priority: "required", requirement: "准确的题款" },
+                ],
+                findings: [{ id: "R2", status: "missing", reason: "题款缺失" }],
+                businessReview: { status: "missing", criteriaIds: ["R2"] },
+              },
+            ],
+          };
         if (window.factoryLiveFixture.readyCandidate)
           return {
             ...structuredClone(draft),

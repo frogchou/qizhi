@@ -255,6 +255,13 @@ export function AssemblyWorkspace({
     setEdits((old) => {
       const base = old[id]?.base ?? current;
       const next = { ...(old[id]?.config ?? base.config), [key]: value };
+      if (
+        key === "nativeSkills" &&
+        !base.config.nativeSkills &&
+        Array.isArray(value) &&
+        !value.length
+      )
+        delete next.nativeSkills;
       if (JSON.stringify(next) === JSON.stringify(base.config)) {
         if (!old[id]) return old;
         const remaining = { ...old };
@@ -377,6 +384,7 @@ export function AssemblyWorkspace({
   const waiting = waitingForOptimization || operations.some(pendingOperation);
   const resourceCount =
     edit.config.skills.length +
+    (edit.config.nativeSkills?.length ?? 0) +
     edit.config.mcpTools.length +
     edit.config.capabilities.length +
     edit.config.datasetIds.length;
@@ -903,6 +911,8 @@ export function AssemblyWorkspace({
               <AssemblyTrials
                 key={id}
                 draft={detail.data}
+                nativeOptions={options.data?.nativeSkills}
+                revision={revision + tick}
                 forms={trialForms}
                 optimization={optimization}
                 selectedBuild={selectedBuild}

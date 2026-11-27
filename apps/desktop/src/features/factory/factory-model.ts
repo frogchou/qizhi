@@ -306,6 +306,12 @@ export type TaskDetail = {
       stage?: string;
       step?: number;
       datasetIds?: string[];
+      runtimeStage?: string;
+      stageLabel?: string;
+      message?: string;
+      threadId?: string;
+      turnId?: string;
+      itemId?: string;
     };
   }[];
   workflow?: {

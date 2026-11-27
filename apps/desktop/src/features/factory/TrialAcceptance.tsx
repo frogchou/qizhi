@@ -17,10 +17,26 @@ import {
   type TrialBlock,
 } from "./assembly-model";
 
-export function SampleReview({ run }: { run: AssemblyRun }) {
+export function SampleReview({
+  run,
+  requiresImage,
+}: {
+  run: AssemblyRun;
+  requiresImage?: boolean;
+}) {
   return (
     <>
       <h4>样例验收条件</h4>
+      {requiresImage && (
+        <p>
+          原生图片核验 ·{" "}
+          {run.hasRequiredNativeImage === true
+            ? "已核对本次生图回执与归档 PNG"
+            : run.hasRequiredNativeImage === false
+              ? "尚无与本次生图回执匹配的归档 PNG"
+              : "中台尚未报告结果"}
+        </p>
+      )}
       {run.reviewDecision === "accept" && run.state === "accepted" && (
         <p>
           工单第 {run.reviewRound} 轮已由人工验收通过

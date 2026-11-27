@@ -86,6 +86,49 @@ pub(super) fn save_skill_file(
     Ok(true)
 }
 
+fn artifact_response(
+    auth: Auth,
+    route: &str,
+    timeout: Duration,
+) -> Result<reqwest::blocking::Response, String> {
+    let client = Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .retry(reqwest::retry::never())
+        .connect_timeout(Duration::from_secs(6))
+        .timeout(timeout)
+        .build()
+        .map_err(|_| SAVE_FAILED)?;
+    let response = client
+        .get(format!("{}{route}", auth.endpoint))
+        .bearer_auth(auth.token)
+        .send()
+        .map_err(transport_error)?;
+    public_status(response.status())?;
+    Ok(response)
+}
+
+pub(super) fn preview_png(auth: Auth, task: &str, artifact: &str) -> Result<Vec<u8>, String> {
+    const LIMIT: u64 = 32 * 1024 * 1024;
+    const TOO_LARGE: &str = "图片较大，请下载原文件查看。";
+    let route = route::artifact(task, artifact)?;
+    let response = artifact_response(auth, &route, Duration::from_secs(45))?;
+    if response.content_length().is_some_and(|size| size > LIMIT) {
+        return Err(TOO_LARGE.into());
+    }
+    let mut bytes = Vec::new();
+    response
+        .take(LIMIT + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| "图片读取中断，请重新预览。")?;
+    if bytes.len() as u64 > LIMIT {
+        return Err(TOO_LARGE.into());
+    }
+    if !bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return Err("归档内容不是有效的 PNG 图片，可下载原文件核对。".into());
+    }
+    Ok(bytes)
+}
+
 pub(super) fn download(
     app: tauri::AppHandle,
     auth: Auth,
@@ -97,19 +140,7 @@ pub(super) fn download(
     let Some(path) = choose_destination(&app, &name)? else {
         return Ok(false);
     };
-    let client = Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .retry(reqwest::retry::never())
-        .connect_timeout(Duration::from_secs(6))
-        .timeout(Duration::from_secs(600))
-        .build()
-        .map_err(|_| SAVE_FAILED)?;
-    let response = client
-        .get(format!("{}{route}", auth.endpoint))
-        .bearer_auth(auth.token)
-        .send()
-        .map_err(transport_error)?;
-    public_status(response.status())?;
+    let response = artifact_response(auth, &route, Duration::from_secs(600))?;
     let size = response.content_length();
     write_to_destination(response, size, &path)?;
     Ok(true)
@@ -118,6 +149,68 @@ pub(super) fn download(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preview_and_download_read_the_same_authenticated_archive() {
+        use std::{
+            io::{BufRead, BufReader},
+            net::TcpListener,
+            thread,
+        };
+        let png = include_bytes!("../../icons/128x128.png").as_slice();
+        let server = TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = format!("http://{}", server.local_addr().unwrap());
+        let auth = || Auth {
+            endpoint: endpoint.clone(),
+            token: "test-only".into(),
+        };
+        let handle = thread::spawn(move || {
+            for (response_type, body) in [
+                ("image/png", png),
+                ("image/png", png),
+                ("text/html", b"<html>".as_slice()),
+            ] {
+                let (mut socket, _) = server.accept().unwrap();
+                let mut request = String::new();
+                let mut reader = BufReader::new(&socket);
+                loop {
+                    let mut line = String::new();
+                    reader.read_line(&mut line).unwrap();
+                    if line == "\r\n" || line.is_empty() {
+                        break;
+                    }
+                    request += &line;
+                }
+                assert!(request.starts_with("GET /v1/tasks/order/artifacts/painting HTTP/1.1"));
+                assert!(
+                    request
+                        .to_lowercase()
+                        .contains("authorization: bearer test-only\r\n")
+                );
+                write!(socket, "HTTP/1.1 200 OK\r\nContent-Type: {response_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).unwrap();
+                socket.write_all(body).unwrap();
+            }
+        });
+        assert!(preview_png(auth(), "order", "../painting").is_err());
+        assert_eq!(preview_png(auth(), "order", "painting").unwrap(), png);
+        let response = artifact_response(
+            auth(),
+            &route::artifact("order", "painting").unwrap(),
+            Duration::from_secs(5),
+        )
+        .unwrap();
+        let length = response.content_length();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("原图.png");
+        write_to_destination(response, length, &path).unwrap();
+        assert_eq!(std::fs::read(path).unwrap(), png);
+        assert!(
+            preview_png(auth(), "order", "painting")
+                .unwrap_err()
+                .contains("有效的 PNG")
+        );
+        handle.join().unwrap();
+    }
 
     #[test]
     fn only_a_safe_leaf_name_is_suggested_and_partial_download_does_not_replace_files() {

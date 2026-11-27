@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { useFeedback } from "../../components/FeedbackNotice";
 import { TrialReceipts } from "./AssemblyReceipts";
 import { SampleReview, TrialAcceptance } from "./TrialAcceptance";
@@ -17,13 +17,23 @@ import {
   useAction,
 } from "./FactoryControls";
 import { factoryApi } from "./factory-client";
+import { FactoryDelivery } from "./FactoryDelivery";
 import { useFactoryRead } from "./factory-feed";
-import { stateName, when, type Agent, type OpenTask } from "./factory-model";
+import {
+  stateName,
+  when,
+  type Agent,
+  type OpenTask,
+  type TaskDetail,
+} from "./factory-model";
 import {
   generationOptions,
+  assemblies,
   draftPath,
+  nativeRequirementLabel,
   useRequestId,
   type AssemblyDraft,
+  type AssemblyOptions,
   type Candidate,
   type CandidateSource,
   type TaskScope,
@@ -154,6 +164,10 @@ export function AssemblyReview({
       (r.packageDigest === undefined ||
         r.packageDigest === record.packageDigest),
   );
+  const options = useFactoryRead<AssemblyOptions>(
+    candidate?.config.nativeSkills?.length ? `${assemblies}/options` : null,
+    0,
+  );
   return (
     <section className="assembly-section">
       <h3>发布依据</h3>
@@ -177,7 +191,17 @@ export function AssemblyReview({
               ["业务流程", candidate.config.workflow],
               ["测试环境标识", candidate.buildEnvironment],
               ["验收条件", candidate.config.criteria.join("、")],
-              ["Skill", candidate.config.skills.join("、") || "未选用"],
+              [
+                "企业精选 Skill",
+                candidate.config.skills.join("、") || "未选用",
+              ],
+              [
+                "Codex 原生能力",
+                nativeRequirementLabel(
+                  candidate.config.nativeSkills,
+                  options.data?.nativeSkills,
+                ),
+              ],
               ["MCP 工具", candidate.config.mcpTools.join("、") || "未选用"],
               [
                 "知识库",
@@ -219,7 +243,12 @@ export function AssemblyReview({
               </li>
             ))}
           </ul>
-          <SampleReview run={run} />
+          <SampleReview
+            run={run}
+            requiresImage={candidate?.config.nativeSkills?.includes(
+              "codex.imagegen",
+            )}
+          />
           <TrialReceipts items={run.receipts} />
           <button
             type="button"
@@ -238,6 +267,8 @@ export function AssemblyReview({
 
 export function AssemblyTrials({
   draft,
+  nativeOptions,
+  revision = 0,
   forms,
   optimization,
   selectedBuild,
@@ -252,6 +283,8 @@ export function AssemblyTrials({
   onNewTask,
 }: {
   draft: AssemblyDraft;
+  nativeOptions?: AssemblyOptions["nativeSkills"];
+  revision?: number;
   forms: ReturnType<typeof useTrialInputs>;
   optimization: OptimizationActions;
   selectedBuild?: string;
@@ -396,7 +429,14 @@ export function AssemblyTrials({
             ["包摘要", <code>{candidate.packageDigest}</code>],
             ["测试环境标识", candidate.buildEnvironment],
             ["验收条件", candidate.config.criteria.join("、")],
-            ["Skill", candidate.config.skills.join("、") || "未选用"],
+            ["企业精选 Skill", candidate.config.skills.join("、") || "未选用"],
+            [
+              "Codex 原生能力",
+              nativeRequirementLabel(
+                candidate.config.nativeSkills,
+                nativeOptions,
+              ),
+            ],
             ["工具", candidate.config.mcpTools.join("、") || "未选用"],
             ["知识库", candidate.config.datasetIds.join("、") || "不用知识库"],
             ["业务能力", candidate.config.capabilities.join("、") || "未选用"],
@@ -413,6 +453,7 @@ export function AssemblyTrials({
       <TrialForm
         key={candidate.id}
         draft={draft}
+        revision={revision}
         candidate={candidate}
         form={forms.forBuild(draft.id, candidate.id)}
         optimization={optimization}
@@ -435,8 +476,55 @@ export function AssemblyTrials({
     </>
   );
 }
+function TrialDelivery({
+  taskId,
+  revision,
+  onTask,
+}: {
+  taskId: string;
+  revision: number;
+  onTask: OpenTask;
+}) {
+  const [open, setOpen] = useState(false);
+  const region = useId();
+  const read = useFactoryRead<TaskDetail>(
+    open ? `/v1/tasks/${encodeURIComponent(taskId)}` : null,
+    revision,
+  );
+  return (
+    <div>
+      <button
+        type="button"
+        className="ui-action ui-small"
+        aria-expanded={open}
+        aria-controls={region}
+        onClick={() => setOpen(!open)}
+      >
+        {open ? "收起测试产物" : "查看测试产物"}
+      </button>
+      <div id={region} hidden={!open}>
+        {open && (
+          <>
+            <ReadNotice read={read} />
+            {read.data && (
+              <FactoryDelivery detail={read.data} showReview={false} />
+            )}
+            <button
+              type="button"
+              className="ui-action ui-quiet ui-small"
+              onClick={() => onTask(taskId, "测试工单 " + taskId, "delivery")}
+            >
+              在工单中查看交付成果
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
 function TrialForm({
   draft,
+  revision,
   candidate,
   form,
   optimization,
@@ -450,6 +538,7 @@ function TrialForm({
   onTask,
 }: {
   draft: AssemblyDraft;
+  revision: number;
   candidate: Candidate;
   form: ReturnType<ReturnType<typeof useTrialInputs>["forBuild"]>;
   optimization: OptimizationActions;
@@ -605,15 +694,12 @@ function TrialForm({
                   打开测试工单 {run.taskId}
                 </button>
               </div>
-              <button
-                type="button"
-                className="ui-action ui-quiet ui-small"
-                onClick={() =>
-                  onTask(run.taskId, "测试工单 " + run.taskId, "delivery")
-                }
-              >
-                查看测试产物
-              </button>
+              <TrialDelivery
+                key={"delivery:" + run.id}
+                taskId={run.taskId}
+                revision={revision}
+                onTask={onTask}
+              />
               <h4>自动断言</h4>
               {run.assertions.length ? (
                 <ul className="assembly-assertions">
@@ -631,7 +717,12 @@ function TrialForm({
               ) : (
                 <p className="live-subtle">中台尚未返回断言记录。</p>
               )}
-              <SampleReview run={run} />
+              <SampleReview
+                run={run}
+                requiresImage={candidate.config.nativeSkills?.includes(
+                  "codex.imagegen",
+                )}
+              />
               <TrialReceipts items={run.receipts} />
               <TrialAcceptance
                 key={run.id}

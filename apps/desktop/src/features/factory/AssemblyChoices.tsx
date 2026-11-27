@@ -6,6 +6,7 @@ import {
 import { Badge } from "./FactoryControls";
 import {
   effectLabel,
+  nativeAvailability,
   type AssemblyOption,
   type AssemblyOptions,
   type ResourceSelection,
@@ -21,6 +22,8 @@ type ChoiceProps = {
   clearLabel?: string;
   disabled?: boolean;
   disclosureIcon?: ControlIconName;
+  nativeRequirements?: boolean;
+  nativeDirectoryMissing?: boolean;
   children?: ReactNode;
 };
 
@@ -33,6 +36,8 @@ export function ChoiceGroup({
   clearLabel,
   disabled = false,
   disclosureIcon,
+  nativeRequirements = false,
+  nativeDirectoryMissing = false,
   children,
 }: ChoiceProps) {
   const [expanded, setExpanded] = useState(false);
@@ -46,13 +51,17 @@ export function ChoiceGroup({
         id,
         label: id,
         available: false,
-        description: "已选记录已离开当前目录，仍可取消授权",
+        description: nativeRequirements
+          ? "已声明的能力不在当前目录中，可取消此要求。"
+          : "已选记录已离开当前目录，仍可取消授权",
       })),
   ];
   const selectedIds = new Set(selected);
   const suggestedIds = new Set(suggested);
   const checked = selected.map((id) => catalog.get(id)?.label || id);
-  const summary = checked.length ? checked.join("、") : clearLabel || "未选用";
+  const summary = checked.length
+    ? checked.join("、")
+    : clearLabel || (nativeRequirements ? "未声明" : "未选用");
   const suggestedCount = choices.filter(
     (item) => !selectedIds.has(item.id) && suggestedIds.has(item.id),
   ).length;
@@ -60,11 +69,16 @@ export function ChoiceGroup({
     (item) => selectedIds.has(item.id) && item.effect === "external_write",
   );
   const hasUnavailable = selected.some(
-    (id) => !catalog.has(id) || catalog.get(id)?.available === false,
+    (id) =>
+      catalog.get(id)?.available === false ||
+      (!nativeRequirements && !catalog.has(id)),
   );
   const caption = [
     hasWrite && "包含对外写入",
-    hasUnavailable && "含不可用资源",
+    hasUnavailable && (nativeRequirements ? "含不可用能力" : "含不可用资源"),
+    nativeRequirements &&
+      selected.some((id) => catalog.get(id)?.available === undefined) &&
+      "可用性未知",
     summary,
   ]
     .filter(Boolean)
@@ -80,6 +94,13 @@ export function ChoiceGroup({
     >
       {!disclosureIcon && <legend>{label}</legend>}
       <div className="assembly-choice-list">
+        {nativeRequirements && (
+          <p className="live-subtle">
+            {nativeDirectoryMissing
+              ? "当前中台未提供原生能力目录。"
+              : "勾选此版本运行时需要的 Codex 能力。可用性由中台所在节点报告。"}
+          </p>
+        )}
         {clearLabel && (
           <label className="assembly-choice">
             <input
@@ -93,12 +114,20 @@ export function ChoiceGroup({
         {choices.map((option) => {
           const isSelected = selectedIds.has(option.id);
           const metadata = [
-            !disclosureIcon && option.id !== option.label ? option.id : "",
+            (!disclosureIcon || nativeRequirements) &&
+            option.id !== option.label
+              ? option.id
+              : "",
             disclosureIcon && option.version ? "v" + option.version : "",
-            option.available === false ? "当前不可用" : "",
+            nativeRequirements
+              ? nativeAvailability(catalog.get(option.id)?.available)
+              : option.available === false
+                ? "当前不可用"
+                : "",
             effectLabel(option.effect),
             option.destination && "目的地 " + option.destination,
             option.description,
+            option.reason,
           ]
             .filter(Boolean)
             .join(" · ");
@@ -111,7 +140,11 @@ export function ChoiceGroup({
               <input
                 type="checkbox"
                 checked={isSelected}
-                disabled={option.available === false && !isSelected}
+                disabled={
+                  option.available === false &&
+                  !isSelected &&
+                  !(nativeRequirements && catalog.has(option.id))
+                }
                 onChange={(e) =>
                   onSelect(
                     e.target.checked
@@ -133,7 +166,9 @@ export function ChoiceGroup({
             </label>
           );
         })}
-        {!choices.length && <p className="live-subtle">目录中暂无可选项</p>}
+        {!choices.length && !nativeDirectoryMissing && (
+          <p className="live-subtle">目录中暂无可选项</p>
+        )}
       </div>
     </fieldset>
   );
@@ -162,11 +197,17 @@ export function ChoiceGroup({
         </span>
         <span className="studio-resource-count">
           {[
-            selected.length > 0 && "已选 " + selected.length,
+            selected.length > 0 &&
+              (nativeRequirements ? "已声明 " : "已选 ") + selected.length,
             suggestedCount > 0 && suggestedCount + " 项建议",
           ]
             .filter(Boolean)
-            .join(" · ") || options.length + " 项可选"}
+            .join(" · ") ||
+            (nativeRequirements
+              ? nativeDirectoryMissing
+                ? "未报告"
+                : options.filter((o) => o.available).length + " 项可用"
+              : options.length + " 项可选")}
         </span>
         <ControlIcon
           name="chevron"
@@ -207,9 +248,15 @@ export function ResourceChoices({
   }[] = [
     {
       key: "skills",
-      label: "精选 Skill",
+      label: "企业精选 Skill",
       icon: "file",
       options: options.skills,
+    },
+    {
+      key: "nativeSkills",
+      label: "Codex 原生能力",
+      icon: "terminal",
+      options: options.nativeSkills ?? [],
     },
     {
       key: "mcpTools",
@@ -246,17 +293,24 @@ export function ResourceChoices({
       }
     >
       {groups
-        .filter((g) => includeSkills || g.key !== "skills")
+        .filter(
+          (g) =>
+            includeSkills || (g.key !== "skills" && g.key !== "nativeSkills"),
+        )
         .map((g) => (
           <div key={g.key}>
             <ChoiceGroup
               label={g.label}
               options={g.options}
-              selected={selection[g.key]}
+              selected={selection[g.key] ?? []}
               suggested={suggestions?.[g.key]}
               onSelect={(ids) => onEdit(g.key, ids)}
               disabled={disabled}
               disclosureIcon={collapsible ? g.icon : undefined}
+              nativeRequirements={g.key === "nativeSkills"}
+              nativeDirectoryMissing={
+                g.key === "nativeSkills" && !options.nativeSkills
+              }
               clearLabel={g.key === "datasetIds" ? "不用知识库" : undefined}
             >
               {g.key === "datasetIds" && !connectionIssue && connection}
