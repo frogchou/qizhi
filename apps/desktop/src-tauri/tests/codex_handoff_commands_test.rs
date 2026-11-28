@@ -132,7 +132,7 @@ impl Fixture {
             value_statuses: HashMap::new(),
         })
         .unwrap();
-        let query_id = queries.insert(tree, WorkspaceSort::NameAsc).unwrap();
+        let query_id = queries.insert(tree, WorkspaceSort::NameAsc, None).unwrap();
         let project_files = CodexProjectFiles::new(root.join("projects"));
         let service = CodexHandoffService::new(
             database.clone(),
@@ -153,6 +153,7 @@ impl Fixture {
         let state = AppState {
             database,
             scan_rules: rules,
+            file_index: Default::default(),
             today_scan_progress: TodayScanProgress::new(),
             logger: AppLogger::new(&root),
             workspace_queries: queries,

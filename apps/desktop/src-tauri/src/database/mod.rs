@@ -15,6 +15,9 @@ pub enum AppError {
     InvalidConfig,
     #[error("storage operation failed")]
     Storage,
+    #[cfg(target_os = "macos")]
+    #[error("unable to access the login Keychain")]
+    KeychainUnavailable,
     #[error("file discovery is unavailable")]
     DiscoveryUnavailable,
     #[error("file discovery returned invalid data")]
@@ -26,6 +29,8 @@ impl AppError {
         match self {
             Self::InvalidConfig => "invalid_config",
             Self::Storage => "storage_error",
+            #[cfg(target_os = "macos")]
+            Self::KeychainUnavailable => "keychain_unavailable",
             Self::DiscoveryUnavailable => "discovery_unavailable",
             Self::DiscoveryInvalidData => "discovery_invalid_data",
         }

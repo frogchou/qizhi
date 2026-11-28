@@ -27,3 +27,29 @@ jobs:
       - run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
       - run: pnpm --filter @qizhi/desktop exec playwright install chromium
       - run: pnpm --filter @qizhi/desktop e2e
+
+  verify-macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.7.0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @qizhi/desktop check
+      - run: pnpm --filter @qizhi/desktop exec vitest run
+      - run: cargo fmt --check --manifest-path apps/desktop/src-tauri/Cargo.toml
+      - run: cargo clippy --locked --manifest-path apps/desktop/src-tauri/Cargo.toml -- -D warnings
+      - run: cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml
+      - run: pnpm --filter @qizhi/desktop exec playwright install chromium
+      - run: pnpm --filter @qizhi/desktop e2e
+      - run: pnpm --filter @qizhi/desktop tauri build --ci --debug
+        env:
+          APPLE_SIGNING_IDENTITY: "-"

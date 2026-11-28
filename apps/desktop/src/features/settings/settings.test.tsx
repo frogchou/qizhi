@@ -57,6 +57,34 @@ function commandsForSummarySettings(): QizhiCommands {
 }
 
 describe("SettingsPage", () => {
+  it("selects and resets the Codex executable on a Mac", async () => {
+    const path = "/opt/homebrew/bin/codex";
+    const saveCodexExecutablePath = vi.fn(
+      async (value: string | null) => value,
+    );
+    render(
+      <SettingsPage
+        commands={{
+          ...commandsForSummarySettings(),
+          desktopPlatform: "macos",
+          getCodexExecutablePath: vi.fn().mockResolvedValue(null),
+          pickCodexExecutable: vi.fn().mockResolvedValue(path),
+          saveCodexExecutablePath,
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Codex 工作" }));
+    fireEvent.click(screen.getByRole("button", { name: "选择 Codex 程序" }));
+    expect(await screen.findByText(`Codex 程序 · ${path}`)).toBeVisible();
+    expect(saveCodexExecutablePath).toHaveBeenCalledWith(path);
+    fireEvent.click(screen.getByRole("button", { name: "恢复自动查找" }));
+    expect(
+      await screen.findByText("Codex 程序 · 从本机自动查找"),
+    ).toBeVisible();
+    expect(saveCodexExecutablePath).toHaveBeenLastCalledWith(null);
+  });
+
   it("shows one settings category at a time and marks the active navigation item", async () => {
     render(<SettingsPage commands={commandsForSummarySettings()} />);
 

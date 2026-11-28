@@ -10,9 +10,9 @@ use tauri::State;
 use super::today::WorkspaceScope;
 use crate::{
     app_state::AppState,
-    config::secret_store::WindowsCredentialStore,
+    config::secret_store::SystemCredentialStore,
     contracts::{FileRecord, FileValueAssessmentInput, JevValuePolicy, JevValuePolicyInput},
-    jev::{JevClient, ValueDocument, extract_value_text},
+    jev::{JevClient, ValueDocument},
     scan::{file_filter::FileTypeFilter, policy::ScanPolicy},
 };
 
@@ -172,7 +172,7 @@ pub fn workspace_evaluation_candidate_ids(
             continue;
         };
         let path = Path::new(&file.canonical_path);
-        if configured.allows(path) && documents.allows(path) && policy.is_allowed(path) {
+        if configured.allows(path) && documents.allows(path) && policy.is_allowed_record(&file) {
             candidates.push(id);
         }
     }
@@ -268,7 +268,7 @@ fn evaluate(state: &AppState, file_ids: Vec<i64>) -> Result<Vec<FileValueOutput>
         };
         if !configured_filter.allows(Path::new(&file.canonical_path))
             || !document_filter.allows(Path::new(&file.canonical_path))
-            || !policy.is_allowed(Path::new(&file.canonical_path))
+            || !policy.is_allowed_record(&file)
         {
             continue;
         }
@@ -290,7 +290,17 @@ fn evaluate(state: &AppState, file_ids: Vec<i64>) -> Result<Vec<FileValueOutput>
             ));
             continue;
         }
-        match extract_value_text(Path::new(&file.canonical_path)) {
+        let path = Path::new(&file.canonical_path);
+        #[cfg(target_os = "macos")]
+        let extraction = {
+            let Ok(source) = state.scan_rules.open_indexed_record(&file) else {
+                continue;
+            };
+            crate::jev::extract_open_value_text(path, source)
+        };
+        #[cfg(not(target_os = "macos"))]
+        let extraction = crate::jev::extract_value_text(path);
+        match extraction {
             Ok(content) => {
                 if !claim_value_assessment(&file) {
                     continue;
@@ -337,28 +347,28 @@ fn evaluate(state: &AppState, file_ids: Vec<i64>) -> Result<Vec<FileValueOutput>
         "jev",
         &format!("JEV value assessment started for {} files", pending.len()),
     );
-    let client =
-        match JevClient::from_saved_config(state.database.configs(), WindowsCredentialStore) {
-            Ok(client) => client,
-            Err(message) => {
-                state.logger.error(
-                    "jev",
-                    &format!("JEV client initialization failed: {message}"),
-                );
-                for (file, _) in pending {
-                    save_result(state, &file, "error", None, None, Some(message.clone()))?;
-                    release_value_assessment(&file);
-                    outputs.push(FileValueOutput {
-                        file_id: file.id,
-                        status: "评估失败".to_owned(),
-                        score: None,
-                        confidence: None,
-                        message: Some(message.clone()),
-                    });
-                }
-                return Ok(outputs);
+    let client = match JevClient::from_saved_config(state.database.configs(), SystemCredentialStore)
+    {
+        Ok(client) => client,
+        Err(message) => {
+            state.logger.error(
+                "jev",
+                &format!("JEV client initialization failed: {message}"),
+            );
+            for (file, _) in pending {
+                save_result(state, &file, "error", None, None, Some(message.clone()))?;
+                release_value_assessment(&file);
+                outputs.push(FileValueOutput {
+                    file_id: file.id,
+                    status: "评估失败".to_owned(),
+                    score: None,
+                    confidence: None,
+                    message: Some(message.clone()),
+                });
             }
-        };
+            return Ok(outputs);
+        }
+    };
 
     for batch in pending.chunks(VALUE_BATCH_SIZE) {
         let documents = batch

@@ -13,15 +13,52 @@ pub trait ProcessLauncher: Send + Sync {
     fn launch(&self, program: &str, args: &[String]) -> Result<(), AppError>;
 }
 
-pub struct WindowsProcessLauncher;
+pub struct SystemProcessLauncher;
 
-impl ProcessLauncher for WindowsProcessLauncher {
+impl ProcessLauncher for SystemProcessLauncher {
     fn launch(&self, program: &str, args: &[String]) -> Result<(), AppError> {
+        #[cfg(target_os = "macos")]
+        return Command::new(program)
+            .args(args)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .ok()
+            .filter(std::process::ExitStatus::success)
+            .map(|_| ())
+            .ok_or(AppError::Storage);
+        #[cfg(not(target_os = "macos"))]
         Command::new(program)
             .args(args)
             .spawn()
             .map(|_| ())
             .map_err(|_| AppError::Storage)
+    }
+}
+
+pub(crate) enum FileAction {
+    Open,
+    Reveal,
+    EditText,
+}
+
+pub(crate) fn file_command(action: FileAction, path: &Path) -> (&'static str, Vec<String>) {
+    let path = path.to_string_lossy().into_owned();
+    #[cfg(target_os = "macos")]
+    return (
+        "/usr/bin/open",
+        match action {
+            FileAction::Open => vec![path],
+            FileAction::Reveal => vec!["-R".to_owned(), path],
+            FileAction::EditText => vec!["-a".to_owned(), "TextEdit".to_owned(), path],
+        },
+    );
+    #[cfg(not(target_os = "macos"))]
+    match action {
+        FileAction::Open => ("explorer.exe", vec![path]),
+        FileAction::Reveal => ("explorer.exe", vec![format!("/select,{path}")]),
+        FileAction::EditText => ("notepad.exe", vec![path]),
     }
 }
 
@@ -46,30 +83,24 @@ impl ExplorerLauncher {
 
     pub fn reveal(&self, file_id: i64) -> Result<(), AppError> {
         let file = self.allowed_path(file_id)?;
-        self.process.launch(
-            "explorer.exe",
-            &[format!("/select,{}", file.to_string_lossy())],
-        )
+        self.launch_file(FileAction::Reveal, &file)
     }
 
     pub fn open(&self, file_id: i64) -> Result<(), AppError> {
         let file = self.allowed_path(file_id)?;
-        self.process
-            .launch("explorer.exe", &[file.to_string_lossy().to_string()])
+        self.launch_file(FileAction::Open, &file)
     }
 
     pub fn open_in_text_editor(&self, file_id: i64) -> Result<(), AppError> {
         let file = self.allowed_path(file_id)?;
-        self.process
-            .launch("notepad.exe", &[file.to_string_lossy().to_string()])
+        self.launch_file(FileAction::EditText, &file)
     }
 
     pub fn open_directory_path(&self, path: &Path) -> Result<(), AppError> {
         if !self.policy.is_allowed_directory(path) {
             return Err(AppError::InvalidConfig);
         }
-        self.process
-            .launch("explorer.exe", &[path.to_string_lossy().to_string()])
+        self.launch_file(FileAction::Open, path)
     }
 
     pub fn copy_to_clipboard(&self, file_id: i64) -> Result<(), AppError> {
@@ -79,6 +110,9 @@ impl ExplorerLauncher {
 
     pub fn delete(&self, file_id: i64) -> Result<(), AppError> {
         let file = self.allowed_path(file_id)?;
+        #[cfg(target_os = "macos")]
+        trash_file(&file)?;
+        #[cfg(not(target_os = "macos"))]
         std::fs::remove_file(file).map_err(|_| AppError::Storage)?;
         self.files.delete_by_id(file_id)
     }
@@ -88,11 +122,16 @@ impl ExplorerLauncher {
             .files
             .get_by_id(file_id)?
             .ok_or(AppError::InvalidConfig)?;
-        let path = PathBuf::from(file.canonical_path);
-        if !path.is_file() || !self.policy.is_allowed(&path) {
+        let path = PathBuf::from(&file.canonical_path);
+        if !path.is_file() || !self.policy.is_allowed_record(&file) {
             return Err(AppError::InvalidConfig);
         }
         Ok(path)
+    }
+
+    fn launch_file(&self, action: FileAction, path: &Path) -> Result<(), AppError> {
+        let (program, arguments) = file_command(action, path);
+        self.process.launch(program, &arguments)
     }
 }
 
@@ -171,7 +210,88 @@ fn set_file_drop_clipboard(path: &Path) -> Result<(), AppError> {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "macos")]
+pub(crate) fn set_file_drop_clipboard(path: &Path) -> Result<(), AppError> {
+    use objc2_app_kit::NSPasteboard;
+
+    objc2::rc::autoreleasepool(|_| {
+        write_file_to_pasteboard(path, &NSPasteboard::generalPasteboard())
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn write_file_to_pasteboard(
+    path: &Path,
+    pasteboard: &objc2_app_kit::NSPasteboard,
+) -> Result<(), AppError> {
+    use objc2::runtime::ProtocolObject;
+    use objc2_foundation::{NSArray, NSString, NSURL};
+
+    let path = path.to_str().ok_or(AppError::InvalidConfig)?;
+    let url = NSURL::fileURLWithPath_isDirectory(&NSString::from_str(path), false);
+    let objects = NSArray::from_slice(&[ProtocolObject::from_ref(&*url)]);
+    pasteboard.clearContents();
+    pasteboard
+        .writeObjects(&objects)
+        .then_some(())
+        .ok_or(AppError::Storage)
+}
+
+#[cfg(target_os = "macos")]
+fn trash_file(path: &Path) -> Result<(), AppError> {
+    use objc2_foundation::{NSFileManager, NSString, NSURL};
+
+    let path = path.to_str().ok_or(AppError::InvalidConfig)?;
+    objc2::rc::autoreleasepool(|_| {
+        let url = NSURL::fileURLWithPath_isDirectory(&NSString::from_str(path), false);
+        NSFileManager::defaultManager()
+            .trashItemAtURL_resultingItemURL_error(&url, None)
+            .map_err(|_| AppError::Storage)
+    })
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 fn set_file_drop_clipboard(_path: &Path) -> Result<(), AppError> {
     Err(AppError::Storage)
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod macos_tests {
+    use super::*;
+    use objc2_app_kit::{NSPasteboard, NSPasteboardTypeFileURL};
+
+    #[test]
+    fn macos_copy_writes_a_finder_file_url_to_an_isolated_pasteboard() {
+        let directory = tempfile::tempdir().unwrap();
+        let file = directory.path().join("文件 名.md");
+        std::fs::write(&file, "fixture").unwrap();
+        objc2::rc::autoreleasepool(|_| {
+            let pasteboard = NSPasteboard::pasteboardWithUniqueName();
+            write_file_to_pasteboard(&file, &pasteboard).unwrap();
+            let file_type = unsafe { NSPasteboardTypeFileURL };
+            let stored = pasteboard
+                .stringForType(file_type)
+                .expect("file URL pasteboard type");
+            let url = url::Url::parse(&stored.to_string()).unwrap();
+            assert_eq!(url.to_file_path().unwrap(), file);
+        });
+    }
+
+    #[test]
+    #[ignore = "moves a unique generated test fixture to the login user's Trash"]
+    fn macos_trash_moves_only_the_selected_fixture() {
+        let directory = tempfile::tempdir().unwrap();
+        let name = format!("qizhi-trash-smoke-{}.md", uuid::Uuid::new_v4());
+        let file = directory.path().canonicalize().unwrap().join(&name);
+        std::fs::write(&file, &name).unwrap();
+        trash_file(&file).unwrap();
+        assert!(!file.exists());
+
+        if let Some(home) = std::env::home_dir() {
+            let trash = home.join(".Trash").join(&name);
+            if std::fs::read_to_string(&trash).is_ok_and(|contents| contents == name) {
+                std::fs::remove_file(trash).unwrap();
+            }
+        }
+    }
 }

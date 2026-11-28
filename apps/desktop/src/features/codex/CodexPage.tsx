@@ -48,6 +48,12 @@ export function CodexPage({
     events: CodexTurnEvent[];
     running: boolean;
   };
+  type PendingHandoffSnapshot = {
+    conversationId: string;
+    navigationNonce: number | null;
+    status: "loading" | "ready" | "failed";
+    handoffs: CodexHandoffDetails[];
+  };
   const [projects, setProjects] = useState<CodexProject[]>([]);
   const [conversations, setConversations] = useState<CodexConversation[]>([]);
   const [projectId, setProjectId] = useState<string | null>(null);
@@ -58,9 +64,8 @@ export function CodexPage({
     CodexMaterialSourceStatus[]
   >([]);
   const [artifacts, setArtifacts] = useState<CodexArtifact[]>([]);
-  const [pendingHandoffs, setPendingHandoffs] = useState<CodexHandoffDetails[]>(
-    [],
-  );
+  const [handoffSnapshot, setHandoffSnapshot] =
+    useState<PendingHandoffSnapshot | null>(null);
   const [artifactUploadTarget, setArtifactUploadTarget] =
     useState<CodexArtifact | null>(null);
   const [liveTurns, setLiveTurns] = useState<Record<string, LiveTurnState>>({});
@@ -89,6 +94,8 @@ export function CodexPage({
   );
   const selectedConversationRef = useRef<string | null>(null);
   const selectedProjectRef = useRef<string | null>(null);
+  const handoffNavigationRef = useRef(navigationTarget);
+  const projectRequestRef = useRef(0);
   const pendingHandoffRequestRef = useRef(0);
   const basketReceipts = useRef(new Map<string, Set<string>>());
   const [basketBusy, setBasketBusy] = useState<Record<string, boolean>>({});
@@ -115,18 +122,26 @@ export function CodexPage({
   useEffect(() => {
     selectedConversationRef.current = conversationId;
     setHistory(null);
-    setPendingHandoffs([]);
     if (conversationId) {
       void loadConversation(conversationId);
       void loadPendingHandoffs(conversationId);
     }
   }, [conversationId]);
   useEffect(() => {
+    handoffNavigationRef.current = navigationTarget;
     if (!navigationTarget) return;
     selectedProjectRef.current = navigationTarget.projectId;
     selectedConversationRef.current = navigationTarget.conversationId;
     setProjectId(navigationTarget.projectId);
     setConversationId(navigationTarget.conversationId);
+    if (
+      projectId === navigationTarget.projectId &&
+      !conversations.some(
+        (value) => value.id === navigationTarget.conversationId,
+      )
+    ) {
+      void loadProject(navigationTarget.projectId);
+    }
     void loadPendingHandoffs(navigationTarget.conversationId);
     void loadConversation(navigationTarget.conversationId);
   }, [navigationTarget?.nonce]);
@@ -141,6 +156,8 @@ export function CodexPage({
     }
   }
   async function loadProject(id: string) {
+    if (selectedProjectRef.current !== id) return;
+    const request = ++projectRequestRef.current;
     try {
       const [nextConversations, nextMaterials, nextArtifacts, nextStatuses] =
         await Promise.all([
@@ -149,7 +166,11 @@ export function CodexPage({
           commands.listCodexArtifacts?.(id) ?? [],
           commands.inspectCodexMaterialSources?.(id) ?? [],
         ]);
-      if (selectedProjectRef.current !== id) return;
+      if (
+        selectedProjectRef.current !== id ||
+        projectRequestRef.current !== request
+      )
+        return;
       setConversations(nextConversations);
       setMaterials(nextMaterials);
       setMaterialStatuses(nextStatuses);
@@ -157,11 +178,20 @@ export function CodexPage({
       if (
         !nextConversations.some(
           (value) => value.id === selectedConversationRef.current,
+        ) &&
+        !(
+          handoffNavigationRef.current?.projectId === id &&
+          handoffNavigationRef.current.conversationId ===
+            selectedConversationRef.current
         )
       )
         setConversationId(nextConversations[0]?.id ?? null);
     } catch (reason) {
-      notify(message(reason));
+      if (
+        selectedProjectRef.current === id &&
+        projectRequestRef.current === request
+      )
+        notify(message(reason));
     }
   }
   async function loadConversation(id: string) {
@@ -173,16 +203,31 @@ export function CodexPage({
     }
   }
   async function loadPendingHandoffs(id: string) {
+    if (selectedConversationRef.current !== id) return;
     const request = ++pendingHandoffRequestRef.current;
+    const target = handoffNavigationRef.current;
+    const navigationNonce = target?.conversationId === id ? target.nonce : null;
+    const scope = { conversationId: id, navigationNonce };
+    setHandoffSnapshot((current) => ({
+      ...scope,
+      status: "loading",
+      handoffs: current?.conversationId === id ? current.handoffs : [],
+    }));
     try {
       const value = (await commands.listPendingCodexHandoffs?.(id)) ?? [];
       if (
         selectedConversationRef.current === id &&
         pendingHandoffRequestRef.current === request
       )
-        setPendingHandoffs(value);
+        setHandoffSnapshot({ ...scope, status: "ready", handoffs: value });
     } catch (reason) {
-      notify(message(reason));
+      if (
+        selectedConversationRef.current === id &&
+        pendingHandoffRequestRef.current === request
+      ) {
+        setHandoffSnapshot({ ...scope, status: "failed", handoffs: [] });
+        notify(message(reason));
+      }
     }
   }
   async function onBasketAttached(result: CodexHandoffResult) {
@@ -292,7 +337,7 @@ export function CodexPage({
           setConversationId(null);
           setConversations([]);
           setHistory(null);
-          setPendingHandoffs([]);
+          setHandoffSnapshot(null);
           setMaterials([]);
           setMaterialStatuses([]);
           setArtifacts([]);
@@ -310,7 +355,7 @@ export function CodexPage({
           pendingHandoffRequestRef.current += 1;
           setConversationId(nextConversationId);
           setHistory(null);
-          setPendingHandoffs([]);
+          setHandoffSnapshot(null);
         }
       }
       setDeleteTarget(null);
@@ -503,10 +548,15 @@ export function CodexPage({
       for (const id of targetHandoffIds)
         basketReceipts.current.get(targetConversationId)?.delete(id);
       if (selectedConversationRef.current === targetConversationId) {
-        setPendingHandoffs((current) =>
-          current.filter(
-            (handoff) => !targetHandoffIds.includes(handoff.handoff.id),
-          ),
+        setHandoffSnapshot((current) =>
+          current?.conversationId === targetConversationId
+            ? {
+                ...current,
+                handoffs: current.handoffs.filter(
+                  (handoff) => !targetHandoffIds.includes(handoff.handoff.id),
+                ),
+              }
+            : current,
         );
         void loadPendingHandoffs(targetConversationId);
       }
@@ -555,9 +605,24 @@ export function CodexPage({
   }
 
   const selectedProject = projects.find((value) => value.id === projectId);
-  const selectedConversation = conversations.find(
-    (value) => value.id === conversationId,
-  );
+  const historyConversation = history?.conversation;
+  const selectedConversation =
+    conversations.find(
+      (value) => value.id === conversationId && value.projectId === projectId,
+    ) ??
+    (historyConversation?.id === conversationId &&
+    historyConversation.projectId === projectId
+      ? historyConversation
+      : undefined);
+  const selectedHandoffs =
+    handoffSnapshot?.conversationId === conversationId &&
+    handoffSnapshot.navigationNonce ===
+      (navigationTarget?.conversationId === conversationId
+        ? navigationTarget.nonce
+        : null)
+      ? handoffSnapshot
+      : null;
+  const pendingHandoffs = selectedHandoffs?.handoffs ?? [];
   const currentLive = conversationId ? liveTurns[conversationId] : undefined;
   const projectHasRunningTurn =
     selectedProject?.status === "running" ||
@@ -636,6 +701,21 @@ export function CodexPage({
           </div>
         </header>
         <FeedbackNotice message={runtimeStatus && runtimeMessage} />
+        {selectedHandoffs?.status === "failed" && conversationId ? (
+          <div className="codex-handoff-retry">
+            <span role="status">待用资料加载失败。</span>
+            <button
+              type="button"
+              className="button secondary"
+              onClick={() => {
+                notify("");
+                void loadPendingHandoffs(conversationId);
+              }}
+            >
+              重试加载待用资料
+            </button>
+          </div>
+        ) : null}
         {projects.length ? (
           <ConversationPane
             history={history}
@@ -645,6 +725,12 @@ export function CodexPage({
             events={currentLive?.events ?? []}
             running={currentLive?.running ?? projectHasRunningTurn}
             disabledReason={runtimeMessage}
+            conversationReady={
+              !!selectedConversation &&
+              !!commands.startCodexTurn &&
+              (!commands.listPendingCodexHandoffs ||
+                selectedHandoffs?.status === "ready")
+            }
             onSend={send}
             onStop={stop}
             onResolveApproval={resolveApproval}

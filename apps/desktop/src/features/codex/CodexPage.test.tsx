@@ -1,5 +1,5 @@
 import { render } from "../../test/render";
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -95,20 +95,45 @@ describe("CodexPage", () => {
 
   it("sends on Enter and streams the Codex answer", async () => {
     const client = commands();
+    let finishLoading!: (conversations: (typeof conversation)[]) => void;
+    client.listCodexConversations = vi.fn().mockImplementation(
+      () =>
+        new Promise<(typeof conversation)[]>((resolve) => {
+          finishLoading = resolve;
+        }),
+    );
     render(<CodexPage commands={client} />);
     const composer = await screen.findByPlaceholderText(/Enter 发送/);
     fireEvent.change(composer, { target: { value: "请起草报告" } });
     fireEvent.keyDown(composer, { key: "Enter", shiftKey: false });
+
+    expect(composer).toHaveValue("请起草报告");
+    expect(screen.getByRole("button", { name: "发送任务" })).toBeDisabled();
+    expect(client.startCodexTurn).not.toHaveBeenCalled();
+
+    finishLoading([conversation]);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "发送任务" })).toBeEnabled(),
+    );
+    fireEvent.keyDown(composer, { key: "Enter", shiftKey: false });
     expect(await screen.findByText("请起草报告")).toBeInTheDocument();
     expect(await screen.findByText("已生成报告")).toBeInTheDocument();
-    await waitFor(() => expect(client.startCodexTurn).toHaveBeenCalled());
+    expect(client.startCodexTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: project.id,
+        conversationId: conversation.id,
+      }),
+      expect.any(Function),
+    );
   });
 
   it("keeps received materials attached to the destination conversation and consumes them with the next turn", async () => {
     const client = commands();
-    client.listPendingCodexHandoffs = vi
-      .fn()
-      .mockResolvedValue([pendingHandoff]);
+    let finishLoading!: (handoffs: (typeof pendingHandoff)[]) => void;
+    const handoffs = new Promise<(typeof pendingHandoff)[]>((resolve) => {
+      finishLoading = resolve;
+    });
+    client.listPendingCodexHandoffs = vi.fn().mockReturnValue(handoffs);
     client.dismissCodexHandoffItem = vi.fn().mockResolvedValue(undefined);
     render(
       <CodexPage
@@ -122,9 +147,15 @@ describe("CodexPage", () => {
       />,
     );
 
-    expect(await screen.findByText("年度经营计划.docx")).toBeInTheDocument();
+    await screen.findByRole("heading", { name: "起草报告" });
     const composer = screen.getByPlaceholderText(/Enter 发送/);
     fireEvent.change(composer, { target: { value: "据此整理计划" } });
+    fireEvent.keyDown(composer, { key: "Enter", shiftKey: false });
+
+    expect(composer).toHaveValue("据此整理计划");
+    expect(client.startCodexTurn).not.toHaveBeenCalled();
+    finishLoading([pendingHandoff]);
+    expect(await screen.findByText("年度经营计划.docx")).toBeInTheDocument();
     fireEvent.keyDown(composer, { key: "Enter", shiftKey: false });
 
     await waitFor(() =>
@@ -132,6 +163,105 @@ describe("CodexPage", () => {
         expect.objectContaining({ handoffIds: ["handoff-1"] }),
         expect.any(Function),
       ),
+    );
+  });
+
+  it.each([false, true])(
+    "can send a handoff to a newly created conversation in the current project when a sidebar read fails: %s",
+    async (sidebarFails) => {
+      const destination = {
+        ...conversation,
+        id: "conversation-new",
+        title: "新建交接会话",
+      };
+      const client = commands();
+      client.listCodexConversations = vi
+        .fn()
+        .mockResolvedValueOnce([conversation])
+        .mockResolvedValue([conversation, destination]);
+      client.readCodexConversation = vi.fn().mockImplementation(async (id) => ({
+        conversation: id === destination.id ? destination : conversation,
+        turns: [],
+      }));
+      if (sidebarFails) {
+        client.inspectCodexMaterialSources = vi
+          .fn()
+          .mockResolvedValueOnce([])
+          .mockRejectedValueOnce(new Error("暂时无法检查资料来源"))
+          .mockResolvedValue([]);
+      }
+      client.listPendingCodexHandoffs = vi
+        .fn()
+        .mockImplementation(async (id) =>
+          id === destination.id
+            ? [
+                {
+                  ...pendingHandoff,
+                  handoff: {
+                    ...pendingHandoff.handoff,
+                    conversationId: destination.id,
+                  },
+                },
+              ]
+            : [],
+        );
+      const { rerender } = render(<CodexPage commands={client} />);
+      await screen.findByRole("heading", { name: conversation.title });
+      rerender(
+        <CodexPage
+          commands={client}
+          navigationTarget={{
+            projectId: project.id,
+            conversationId: destination.id,
+            handoffId: pendingHandoff.handoff.id,
+            nonce: 12,
+          }}
+        />,
+      );
+
+      await screen.findByText("年度经营计划.docx");
+      const composer = screen.getByPlaceholderText(/Enter 发送/);
+      fireEvent.change(composer, { target: { value: "处理交接资料" } });
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "发送任务" })).toBeEnabled(),
+      );
+      fireEvent.keyDown(composer, { key: "Enter", shiftKey: false });
+      expect(client.startCodexTurn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          conversationId: destination.id,
+          handoffIds: [pendingHandoff.handoff.id],
+        }),
+        expect.any(Function),
+      );
+    },
+  );
+
+  it("keeps a draft and offers a retry when pending materials cannot load", async () => {
+    const client = commands();
+    client.listPendingCodexHandoffs = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("无法读取待用资料"))
+      .mockResolvedValue([pendingHandoff]);
+    render(<CodexPage commands={client} />);
+
+    const retry = await screen.findByRole("button", {
+      name: "重试加载待用资料",
+    });
+    const composer = screen.getByPlaceholderText(/Enter 发送/);
+    fireEvent.change(composer, { target: { value: "处理待用资料" } });
+    fireEvent.keyDown(composer, { key: "Enter", shiftKey: false });
+    expect(composer).toHaveValue("处理待用资料");
+    expect(client.startCodexTurn).not.toHaveBeenCalled();
+
+    fireEvent.click(retry);
+    await screen.findByText("年度经营计划.docx");
+    fireEvent.keyDown(composer, { key: "Enter", shiftKey: false });
+    expect(client.startCodexTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: "处理待用资料",
+        handoffIds: [pendingHandoff.handoff.id],
+      }),
+      expect.any(Function),
     );
   });
 
@@ -182,41 +312,99 @@ describe("CodexPage", () => {
     ).toBeInTheDocument();
   });
 
-  it("reloads pending materials when the same conversation receives another handoff", async () => {
+  it.each([false, true])(
+    "keeps the new handoff when an older read settles late with an error: %s",
+    async (olderFails) => {
+      const client = commands();
+      let delivered = false;
+      let settleOlder!: () => void;
+      const older = new Promise<(typeof pendingHandoff)[]>(
+        (resolve, reject) => {
+          settleOlder = olderFails
+            ? () => reject(new Error("较早的待用资料读取失败"))
+            : () => resolve([]);
+        },
+      );
+      client.listPendingCodexHandoffs = vi
+        .fn()
+        .mockImplementation(() =>
+          delivered ? Promise.resolve([pendingHandoff]) : older,
+        );
+      const { rerender } = render(
+        <CodexPage
+          commands={client}
+          navigationTarget={{
+            projectId: project.id,
+            conversationId: conversation.id,
+            handoffId: "first-handoff",
+            nonce: 21,
+          }}
+        />,
+      );
+      await waitFor(() =>
+        expect(client.listPendingCodexHandoffs).toHaveBeenCalled(),
+      );
+
+      delivered = true;
+      rerender(
+        <CodexPage
+          commands={client}
+          navigationTarget={{
+            projectId: project.id,
+            conversationId: conversation.id,
+            handoffId: pendingHandoff.handoff.id,
+            nonce: 22,
+          }}
+        />,
+      );
+
+      expect(await screen.findByText("年度经营计划.docx")).toBeInTheDocument();
+      await act(async () => settleOlder());
+      expect(screen.getByText("年度经营计划.docx")).toBeInTheDocument();
+      expect(
+        screen.queryByText("较早的待用资料读取失败"),
+      ).not.toBeInTheDocument();
+      const composer = screen.getByPlaceholderText(/Enter 发送/);
+      fireEvent.change(composer, { target: { value: "处理新到的资料" } });
+      fireEvent.keyDown(composer, { key: "Enter", shiftKey: false });
+      expect(client.startCodexTurn).toHaveBeenCalledWith(
+        expect.objectContaining({ handoffIds: [pendingHandoff.handoff.id] }),
+        expect.any(Function),
+      );
+    },
+  );
+
+  it("ignores a failed project load after selecting another project", async () => {
+    const otherProject = { ...project, id: "project-other", name: "目标项目" };
+    const otherConversation = {
+      ...conversation,
+      id: "conversation-other",
+      projectId: otherProject.id,
+      title: "目标会话",
+    };
+    let rejectOlder!: () => void;
+    const older = new Promise<(typeof conversation)[]>((_, reject) => {
+      rejectOlder = () => reject(new Error("较早的项目读取失败"));
+    });
     const client = commands();
-    let delivered = false;
-    client.listPendingCodexHandoffs = vi
+    client.listCodexProjects = vi
       .fn()
-      .mockImplementation(async () => (delivered ? [pendingHandoff] : []));
-    const { rerender } = render(
-      <CodexPage
-        commands={client}
-        navigationTarget={{
-          projectId: project.id,
-          conversationId: conversation.id,
-          handoffId: "first-handoff",
-          nonce: 21,
-        }}
-      />,
-    );
+      .mockResolvedValue([project, otherProject]);
+    client.listCodexConversations = vi
+      .fn()
+      .mockImplementation((id) =>
+        id === project.id ? older : Promise.resolve([otherConversation]),
+      );
+    render(<CodexPage commands={client} />);
     await waitFor(() =>
-      expect(client.listPendingCodexHandoffs).toHaveBeenCalled(),
+      expect(client.listCodexConversations).toHaveBeenCalledWith(project.id),
     );
-
-    delivered = true;
-    rerender(
-      <CodexPage
-        commands={client}
-        navigationTarget={{
-          projectId: project.id,
-          conversationId: conversation.id,
-          handoffId: pendingHandoff.handoff.id,
-          nonce: 22,
-        }}
-      />,
-    );
-
-    expect(await screen.findByText("年度经营计划.docx")).toBeInTheDocument();
+    fireEvent.click(screen.getByText(otherProject.name));
+    expect(
+      await screen.findByRole("heading", { name: otherConversation.title }),
+    ).toBeInTheDocument();
+    await act(async () => rejectOlder());
+    expect(screen.queryByText("较早的项目读取失败")).not.toBeInTheDocument();
   });
 
   it("dismisses only the selected pending material", async () => {
@@ -386,6 +574,9 @@ describe("CodexPage", () => {
 
     const composer = await screen.findByPlaceholderText(/Enter 发送/);
     fireEvent.change(composer, { target: { value: "生成报告" } });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "发送任务" })).toBeEnabled(),
+    );
     fireEvent.keyDown(composer, { key: "Enter", shiftKey: false });
     fireEvent.click(await screen.findByRole("button", { name: "允许一次" }));
 
@@ -458,6 +649,9 @@ describe("CodexPage", () => {
     render(<CodexPage commands={client} />);
     const composer = await screen.findByPlaceholderText(/Enter 发送/);
     fireEvent.change(composer, { target: { value: "只属于第一个会话" } });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "发送任务" })).toBeEnabled(),
+    );
     fireEvent.keyDown(composer, { key: "Enter", shiftKey: false });
     expect(await screen.findByText("只属于第一个会话")).toBeInTheDocument();
     fireEvent.click(await screen.findByText("另一个会话"));

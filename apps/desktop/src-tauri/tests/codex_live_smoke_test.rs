@@ -21,24 +21,72 @@ fn connects_to_the_local_codex_account_without_a_second_login() {
         )
         .expect("account/read");
     assert!(account.get("requiresOpenaiAuth").is_some());
-    let sandbox = server
+    let models = server
         .request(
-            "windowsSandbox/readiness",
-            json!({}),
+            "model/list",
+            json!({"limit":100,"includeHidden":false}),
             Duration::from_secs(10),
         )
-        .expect("sandbox readiness");
-    assert!(sandbox.get("status").is_some());
-    let project_root = std::env::temp_dir().join("qizhi-codex-live-smoke-project");
+        .expect("load the current account's model catalog");
+    let model = models["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|model| model["isDefault"] == true)
+        .and_then(|model| model["id"].as_str())
+        .expect("the account catalog has a default model");
+    #[cfg(windows)]
+    {
+        let sandbox = server
+            .request(
+                "windowsSandbox/readiness",
+                json!({}),
+                Duration::from_secs(10),
+            )
+            .expect("sandbox readiness");
+        assert!(sandbox.get("status").is_some());
+    }
+    let fixture = tempfile::tempdir().expect("isolated project directory");
+    let project_root = fixture.path().canonicalize().unwrap();
     let workspace = project_root.join("workspace");
     let materials = project_root.join("materials");
     std::fs::create_dir_all(&workspace).unwrap();
     std::fs::create_dir_all(&materials).unwrap();
+    #[cfg(target_os = "macos")]
+    std::fs::write(materials.join("input.txt"), "QIZHI_SMOKE_MATERIAL_418").unwrap();
+    #[cfg(target_os = "macos")]
+    {
+        let outside = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(outside.path(), "outside fixture").unwrap();
+        let exec = |command: serde_json::Value| {
+            server.request("command/exec", json!({
+                "command": command, "cwd": project_root, "permissionProfile": "qizhi-project", "timeoutMs": 10000,
+            }), Duration::from_secs(15)).expect("run a fixture under the project permission profile")
+        };
+        let written = exec(json!([
+            "/bin/sh",
+            "-c",
+            "/bin/cat \"$1\" > \"$2\"",
+            "qizhi-smoke",
+            materials.join("input.txt"),
+            workspace.join("output.txt")
+        ]));
+        assert_eq!(
+            written["exitCode"], 0,
+            "could not write a generated fixture: {written}"
+        );
+        assert_ne!(exec(json!(["/bin/cat", outside.path()]))["exitCode"], 0);
+        assert_eq!(
+            std::fs::read_to_string(workspace.join("output.txt")).unwrap(),
+            "QIZHI_SMOKE_MATERIAL_418"
+        );
+    }
     let thread = server
         .request(
             "thread/start",
             json!({
                 "cwd": workspace,
+                "model": model,
                 "approvalPolicy": "on-request",
                 "approvalsReviewer": "user",
                 "permissions": "qizhi-project",
@@ -79,6 +127,7 @@ fn connects_to_the_local_codex_account_without_a_second_login() {
                 "threadId": thread_id,
                 "input": [{"type":"text","text":"只回复：栖知连接正常。"}],
                 "cwd": workspace,
+                "model": model,
                 "approvalPolicy": "on-request",
                 "permissions": "qizhi-project",
                 "runtimeWorkspaceRoots": [project_root]

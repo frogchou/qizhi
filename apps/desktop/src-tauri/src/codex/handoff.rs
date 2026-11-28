@@ -21,7 +21,7 @@ use crate::{
     scan::{
         configuration::ScanRuleStore,
         file_filter::FileTypeFilter,
-        policy::{ScanPolicy, active_roots},
+        policy::{ScanPolicy, live_scan_roots},
     },
     today_workspace::WorkspaceQueryStore,
 };
@@ -193,7 +193,7 @@ impl CodexHandoffService {
                 .map_err(|_| CodexHandoffServiceError::Unavailable)?
                 .ok_or(CodexHandoffServiceError::SourceUnavailable)?;
             let path = PathBuf::from(&record.canonical_path);
-            if !policy.is_allowed(&path) || !filter.allows(&path) {
+            if !policy.is_allowed_record(&record) || !filter.allows(&path) {
                 return Err(CodexHandoffServiceError::SourceUnavailable);
             }
             let metadata =
@@ -303,6 +303,36 @@ impl CodexHandoffService {
             return Err(CodexHandoffServiceError::Unavailable);
         }
         let sources = self.revalidate_sources(&preparation.files)?;
+        #[cfg(target_os = "macos")]
+        let staged = {
+            self.files.stage_handoff_files_using(
+                &input.project_id,
+                &input.preparation_id,
+                &sources,
+                input.confirm_large_files,
+                input.confirm_original_only,
+                |index| {
+                    let prepared = &preparation.files[index];
+                    let record = self
+                        .database
+                        .files()
+                        .get_by_id(prepared.file_id)
+                        .map_err(|_| ProjectFileError::Io)?
+                        .ok_or(ProjectFileError::SourceChanged)?;
+                    if record.file_identity != prepared.file_identity
+                        || Path::new(&record.canonical_path) != prepared.canonical_path
+                    {
+                        return Err(ProjectFileError::SourceChanged);
+                    }
+                    self.scan_rules
+                        .open_indexed_record(&record)
+                        .map(Some)
+                        .map_err(|_| ProjectFileError::SourceChanged)
+                },
+            )
+        }
+        .map_err(map_project_file_error)?;
+        #[cfg(not(target_os = "macos"))]
         let staged = self
             .files
             .stage_handoff_files(
@@ -397,7 +427,7 @@ impl CodexHandoffService {
             .into_iter()
             .map(PathBuf::from)
             .collect::<Vec<_>>();
-        let roots = active_roots(&rules.allowed_roots, &exclusions)
+        let roots = live_scan_roots(&rules.allowed_roots, &exclusions)
             .map_err(|_| CodexHandoffServiceError::Unavailable)?;
         Ok((
             ScanPolicy::for_roots(exclusions, roots),
@@ -421,7 +451,7 @@ impl CodexHandoffService {
                     .ok_or(CodexHandoffServiceError::SourceUnavailable)?;
                 if Path::new(&record.canonical_path) != source.canonical_path
                     || record.file_identity != source.file_identity
-                    || !policy.is_allowed(&source.canonical_path)
+                    || !policy.is_allowed_record(&record)
                     || !filter.allows(&source.canonical_path)
                 {
                     return Err(CodexHandoffServiceError::SourceUnavailable);

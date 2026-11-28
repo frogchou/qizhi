@@ -8,10 +8,36 @@ import type {
   MaskedServiceConfig,
   ServiceConfigurationInput,
 } from "./contracts";
-import { Channel, invoke } from "@tauri-apps/api/core";
+import { Channel, invoke, isTauri } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 
+export type FileSearchAction = "open" | "reveal" | "copy" | "addToBasket";
+export type FileSearchResult = {
+  recordKey: string;
+  name: string;
+  path: string;
+  sizeBytes: number;
+  modifiedAtUtcMs: number;
+};
+export type FileSearchPageData = {
+  files: FileSearchResult[];
+  nextCursor: string | null;
+  coverage: {
+    path: string;
+    state: "building" | "ready" | "partial" | "unavailable" | "retrying";
+  }[];
+};
+
 export interface QizhiCommands {
+  readonly desktopPlatform?: "macos" | "windows";
+  searchLocalFiles?(input: {
+    query: string;
+    cursor: string | null;
+  }): Promise<FileSearchPageData>;
+  actOnSearchResult?(
+    recordKey: string,
+    action: FileSearchAction,
+  ): Promise<void>;
   listBasket?(): Promise<BasketItem[]>;
   addToBasket?(source: BasketSource): Promise<BasketResult[]>;
   pickBasketLocal?(): Promise<BasketResult[]>;
@@ -22,6 +48,9 @@ export interface QizhiCommands {
   refreshCodexStatus?(): Promise<CodexRuntimeStatus>;
   listCodexModels?(): Promise<CodexModelOption[]>;
   getCodexPreferences?(): Promise<CodexPreferences>;
+  getCodexExecutablePath?(): Promise<string | null>;
+  pickCodexExecutable?(): Promise<string | null>;
+  saveCodexExecutablePath?(path: string | null): Promise<string | null>;
   saveCodexPreferences?(
     model: string,
     reasoningEffort: string,
@@ -620,11 +649,17 @@ export type WorkSummaryStreamEvent =
     }
   | { kind: "completed"; truncated: boolean };
 
+export type MacRootCoverage = {
+  path: string;
+  state: "building" | "ready" | "partial" | "unavailable" | "retrying";
+};
+
 export type TodaySnapshot =
   | {
       state: "ready";
       files: TodayFile[];
       clusters: { label: string; fileIds: number[] }[];
+      coverage?: MacRootCoverage[];
     }
   | {
       state: "unavailable";
@@ -807,16 +842,32 @@ export const unavailableCommands: QizhiCommands = {
 };
 
 export const tauriCommands: QizhiCommands = {
+  get desktopPlatform() {
+    if (!isTauri()) return undefined;
+    if (navigator.userAgent.includes("Macintosh")) return "macos";
+    if (navigator.userAgent.includes("Windows")) return "windows";
+    return undefined;
+  },
   listBasket: () => invoke("basket_list"),
   addToBasket: (source) => invoke("basket_add", { source }),
   pickBasketLocal: () => invoke("basket_pick_local"),
   removeFromBasket: (itemIds) => invoke("basket_remove", { itemIds }),
   clearBasket: () => invoke("basket_clear"),
   attachBasketToCodex: (input) => invoke("basket_attach_codex", { ...input }),
+  searchLocalFiles: (input) => invoke("search_local_files", { input }),
+  actOnSearchResult: (recordKey, action) =>
+    invoke("act_on_search_result", { recordKey, action }),
   getCodexStatus: () => invoke("get_codex_status"),
   refreshCodexStatus: () => invoke("refresh_codex_status"),
   listCodexModels: () => invoke("list_codex_models"),
   getCodexPreferences: () => invoke("get_codex_preferences"),
+  getCodexExecutablePath: () => invoke("get_codex_executable_path"),
+  pickCodexExecutable: async () => {
+    const selected = await open({ multiple: false, directory: false });
+    return typeof selected === "string" ? selected : null;
+  },
+  saveCodexExecutablePath: (path) =>
+    invoke("save_codex_executable_path", { path }),
   saveCodexPreferences: (model, reasoningEffort) =>
     invoke("save_codex_preferences", { model, reasoningEffort }),
   listCodexProjects: (includeArchived = false) =>

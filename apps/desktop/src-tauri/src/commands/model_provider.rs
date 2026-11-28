@@ -7,7 +7,7 @@ use crate::{
     app_state::AppState,
     config::{
         ModelProviderSaveInput, ModelProviderService, model_provider_presets,
-        secret_store::WindowsCredentialStore,
+        secret_store::SystemCredentialStore,
     },
     contracts::ModelProviderConfig,
     network::http::HttpClient,
@@ -47,8 +47,8 @@ pub struct ModelProviderConnectionStatus {
     pub message: String,
 }
 
-fn service(state: &AppState) -> ModelProviderService<WindowsCredentialStore> {
-    ModelProviderService::new(state.database.model_providers(), WindowsCredentialStore)
+fn service(state: &AppState) -> ModelProviderService<SystemCredentialStore> {
+    ModelProviderService::new(state.database.model_providers(), SystemCredentialStore)
 }
 
 #[tauri::command]

@@ -4,18 +4,15 @@ use tauri::State;
 
 use crate::{
     app_state::AppState,
-    config::{ConfigService, ServiceConfigurationInput, secret_store::WindowsCredentialStore},
+    config::{ConfigService, ServiceConfigurationInput, secret_store::SystemCredentialStore},
+    file_index::IndexStatus,
     network::http::HttpClient,
-    ntfs::{
-        ipc::{INDEXER_PROTOCOL_VERSION, IndexerRequest, IndexerRequestKind},
-        pipe::call_indexer_service,
-    },
     scan::{
         configuration::{
             ScanRules, default_directory_group_threshold, validate_directory_group_threshold,
         },
         file_filter::{FileCategory, default_file_categories},
-        policy::{ScanPolicy, active_roots, display_path},
+        policy::{active_roots, display_path},
     },
 };
 
@@ -60,7 +57,7 @@ pub fn save_settings(
     state: State<'_, AppState>,
     input: SaveSettingsInput,
 ) -> Result<MaskedSettingsOutput, String> {
-    let service = ConfigService::new(state.database.configs(), WindowsCredentialStore);
+    let service = ConfigService::new(state.database.configs(), SystemCredentialStore);
     service
         .save_masked(ServiceConfigurationInput {
             service: input.service,
@@ -78,63 +75,14 @@ pub struct ConnectionStatus {
 }
 
 #[tauri::command]
-pub fn get_ntfs_indexer_status() -> ConnectionStatus {
-    let request = IndexerRequest {
-        protocol_version: INDEXER_PROTOCOL_VERSION,
-        request_id: format!("desktop-health-{}", chrono::Utc::now().timestamp_millis()),
-        kind: IndexerRequestKind::Health,
-    };
-    local_indexer_connection_status(call_indexer_service(&request))
-}
-
-fn local_indexer_connection_status(
-    result: Result<crate::ntfs::ipc::IndexerResponse, String>,
-) -> ConnectionStatus {
-    match result {
-        Ok(response) if response.status == "ready" => ConnectionStatus {
-            available: true,
-            message: "本地 NTFS 索引服务已连接。".to_owned(),
-        },
-        Ok(response) => ConnectionStatus {
+pub async fn get_ntfs_indexer_status(state: State<'_, AppState>) -> Result<IndexStatus, String> {
+    let index = state.file_index.clone();
+    Ok(tauri::async_runtime::spawn_blocking(move || index.status())
+        .await
+        .unwrap_or_else(|_| IndexStatus {
             available: false,
-            message: response
-                .message
-                .unwrap_or_else(|| "本地 NTFS 索引服务暂不可用。".to_owned()),
-        },
-        Err(message) => ConnectionStatus {
-            available: false,
-            message,
-        },
-    }
-}
-
-fn configure_local_indexer(rules: &ScanRules) -> Result<(), String> {
-    let exclusions = rules
-        .custom_exclusions
-        .iter()
-        .map(std::path::PathBuf::from)
-        .collect::<Vec<_>>();
-    let roots = active_roots(&rules.allowed_roots, &exclusions)
-        .map_err(|_| "扫描目录无效，请在设置中重新保存。".to_owned())?;
-    let request = IndexerRequest {
-        protocol_version: INDEXER_PROTOCOL_VERSION,
-        request_id: format!(
-            "desktop-configure-{}",
-            chrono::Utc::now().timestamp_millis()
-        ),
-        kind: IndexerRequestKind::Configure {
-            allowed_roots: roots.iter().map(|root| display_path(&root.0)).collect(),
-            excluded_roots: rules.custom_exclusions.clone(),
-            file_categories: rules.file_categories.clone(),
-        },
-    };
-    match call_indexer_service(&request) {
-        Ok(response) if response.status == "ready" => Ok(()),
-        Ok(response) => Err(response
-            .message
-            .unwrap_or_else(|| "本地 NTFS 索引服务拒绝了扫描范围".to_owned())),
-        Err(message) => Err(message),
-    }
+            message: "无法读取本地文件索引状态。".to_owned(),
+        }))
 }
 
 #[tauri::command]
@@ -236,10 +184,7 @@ fn connection_is_usable(service: &str, status: &str, body: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        connection_failure_message, connection_is_usable, local_indexer_connection_status,
-    };
-    use crate::ntfs::ipc::{INDEXER_PROTOCOL_VERSION, IndexerResponse};
+    use super::{connection_failure_message, connection_is_usable};
 
     #[test]
     fn connection_tests_do_not_delegate_http_to_curl() {
@@ -273,26 +218,6 @@ mod tests {
             connection_failure_message("jev", 451),
             "JEV 价值评估请求被拒绝（HTTP 451）。请确认网络或代理允许访问 TypeSafe AI 的 /v1/systemone 接口。"
         );
-    }
-
-    #[test]
-    fn reports_a_healthy_local_indexer_without_falling_back_to_file_scanning() {
-        let status = local_indexer_connection_status(Ok(IndexerResponse {
-            protocol_version: INDEXER_PROTOCOL_VERSION,
-            request_id: "health-1".to_owned(),
-            status: "ready".to_owned(),
-            message: None,
-            candidates: vec![],
-        }));
-        assert!(status.available);
-        assert!(status.message.contains("NTFS"));
-    }
-
-    #[test]
-    fn scan_scope_sync_uses_the_local_indexer_protocol_instead_of_a_shell() {
-        let source = include_str!("settings.rs").to_ascii_lowercase();
-        assert!(source.contains("indexerrequestkind::configure"));
-        assert!(!source.contains(&["power", "shell.exe"].concat()));
     }
 }
 
@@ -347,15 +272,8 @@ pub fn save_scan_rules(
         .scan_rules
         .get()
         .map_err(|error| error.code().to_owned())?;
-    let policy = ScanPolicy::new(vec![]);
-    let roots = input
-        .allowed_roots
-        .iter()
-        .map(std::path::PathBuf::from)
-        .map(|root| policy.validate_root(&root))
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| error.code().to_owned())?;
-    if roots.is_empty() {
+    let roots = active_roots(&input.allowed_roots, &[]).map_err(|error| error.code().to_owned())?;
+    if !cfg!(target_os = "macos") && roots.is_empty() {
         return Err("invalid_config".to_owned());
     }
     let saved = state
@@ -371,7 +289,7 @@ pub fn save_scan_rules(
         })
         .map_err(|error| error.code().to_owned())?;
     if indexer_fields_changed(&previous, &saved) {
-        match configure_local_indexer(&saved) {
+        match state.file_index.configure(&saved) {
             Ok(()) => state
                 .logger
                 .info("ntfs-indexer", "scan scope synchronized to local indexer"),

@@ -15,7 +15,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     contracts::FileRecord,
-    scan::file_filter::{FileCategory, FileTypeFilter},
+    scan::{
+        configuration::ScanRules,
+        file_filter::{FileCategory, FileTypeFilter},
+    },
 };
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -164,8 +167,8 @@ impl WorkspaceTree {
             .allowed_roots
             .into_iter()
             .map(|root| {
-                let display = visible_windows_path(&root);
-                (normalize_windows_path(&display), display)
+                let display = visible_workspace_path(&root);
+                (workspace_path_key(&display), display)
             })
             .filter(|(normalized, _)| !normalized.is_empty())
             .collect::<Vec<_>>();
@@ -185,11 +188,11 @@ impl WorkspaceTree {
         };
         let mut deduplicated = HashMap::<String, FileRecord>::new();
         for mut record in input.files {
-            record.canonical_path = visible_windows_path(&record.canonical_path);
+            record.canonical_path = visible_workspace_path(&record.canonical_path);
             if !filter.allows(Path::new(&record.canonical_path)) {
                 continue;
             }
-            let key = normalize_windows_path(&record.canonical_path);
+            let key = workspace_path_key(&record.canonical_path);
             match deduplicated.get(&key) {
                 Some(existing) if existing.modified_at_utc_ms >= record.modified_at_utc_ms => {}
                 _ => {
@@ -213,7 +216,7 @@ impl WorkspaceTree {
             .collect::<HashSet<_>>();
 
         for record in deduplicated.into_values() {
-            let normalized_path = normalize_windows_path(&record.canonical_path);
+            let normalized_path = workspace_path_key(&record.canonical_path);
             let Some((root_key, _)) = roots
                 .iter()
                 .filter(|(root, _)| is_same_or_descendant(&normalized_path, root))
@@ -227,7 +230,7 @@ impl WorkspaceTree {
             else {
                 continue;
             };
-            let normalized_parent = normalize_windows_path(&parent_display);
+            let normalized_parent = workspace_path_key(&parent_display);
             ensure_directory_chain(
                 &mut directories,
                 &parent_display,
@@ -565,6 +568,7 @@ struct StoredWorkspaceQuery {
     created_at: Instant,
     tree: WorkspaceTree,
     sort: WorkspaceSort,
+    scan_rules: Option<ScanRules>,
 }
 
 impl Default for WorkspaceQueryStore {
@@ -589,7 +593,12 @@ impl WorkspaceQueryStore {
         }
     }
 
-    pub fn insert(&self, tree: WorkspaceTree, sort: WorkspaceSort) -> Result<String, String> {
+    pub fn insert(
+        &self,
+        tree: WorkspaceTree,
+        sort: WorkspaceSort,
+        scan_rules: Option<ScanRules>,
+    ) -> Result<String, String> {
         let sequence = self.shared.next_id.fetch_add(1, AtomicOrdering::Relaxed);
         let epoch = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -607,6 +616,7 @@ impl WorkspaceQueryStore {
             created_at: Instant::now(),
             tree,
             sort,
+            scan_rules,
         });
         while entries.len() > self.shared.maximum_queries {
             entries.pop_front();
@@ -619,12 +629,18 @@ impl WorkspaceQueryStore {
         query_id: &str,
         parent_id: Option<&str>,
         cursor: usize,
+        current_scan_rules: Option<&ScanRules>,
     ) -> Result<WorkspacePage, String> {
         self.with_query(query_id, |query| {
+            if let Some(current) = current_scan_rules
+                && query.scan_rules.as_ref() != Some(current)
+            {
+                return Err("扫描规则已变更，请刷新文件列表。".to_owned());
+            }
             let mut page = query.tree.page(parent_id, cursor, 200, query.sort);
             page.query_id = query.id.clone();
-            page
-        })
+            Ok(page)
+        })?
     }
 
     pub fn resolve(
@@ -706,7 +722,7 @@ fn ensure_directory_chain(
             break;
         };
         display = parent.to_string_lossy().to_string();
-        normalized = normalize_windows_path(&display);
+        normalized = workspace_path_key(&display);
     }
     chain.reverse();
     let mut parent = root.to_owned();
@@ -769,15 +785,17 @@ fn directory_id(path: &str) -> String {
     format!("d:{:016x}", hasher.finish())
 }
 
-fn visible_windows_path(path: &str) -> String {
+#[cfg(windows)]
+fn visible_workspace_path(path: &str) -> String {
     if let Some(value) = path.strip_prefix("\\\\?\\UNC\\") {
         return format!("\\\\{value}");
     }
     path.strip_prefix("\\\\?\\").unwrap_or(path).to_owned()
 }
 
-fn normalize_windows_path(path: &str) -> String {
-    let visible = visible_windows_path(path).replace('/', "\\");
+#[cfg(windows)]
+fn workspace_path_key(path: &str) -> String {
+    let visible = visible_workspace_path(path).replace('/', "\\");
     let trimmed = if visible.len() > 3 {
         visible.trim_end_matches('\\')
     } else {
@@ -786,6 +804,7 @@ fn normalize_windows_path(path: &str) -> String {
     trimmed.to_lowercase()
 }
 
+#[cfg(windows)]
 fn is_same_or_descendant(path: &str, root: &str) -> bool {
     path == root
         || if root.ends_with('\\') {
@@ -797,6 +816,30 @@ fn is_same_or_descendant(path: &str, root: &str) -> bool {
             path.strip_prefix(root)
                 .is_some_and(|suffix| suffix.starts_with('\\'))
         }
+}
+
+#[cfg(not(windows))]
+fn visible_workspace_path(path: &str) -> String {
+    path.to_owned()
+}
+
+#[cfg(not(windows))]
+fn workspace_path_key(path: &str) -> String {
+    Path::new(path)
+        .components()
+        .collect::<std::path::PathBuf>()
+        .to_string_lossy()
+        .into_owned()
+}
+
+#[cfg(not(windows))]
+fn is_same_or_descendant(path: &str, root: &str) -> bool {
+    let path = Path::new(path);
+    path.is_absolute()
+        && !path
+            .components()
+            .any(|part| part == std::path::Component::ParentDir)
+        && path.starts_with(root)
 }
 
 fn wildcard_matches(value: &str, pattern: &str) -> bool {
@@ -833,10 +876,18 @@ mod tests {
     };
     use crate::contracts::FileRecord;
 
+    #[cfg(windows)]
+    const WORK_ROOT: &str = r"D:\Work";
+    #[cfg(not(windows))]
+    const WORK_ROOT: &str = "/Users/test/工作";
+
     fn record(id: i64, name: &str) -> FileRecord {
         FileRecord {
             id,
-            canonical_path: format!(r"D:\Work\{name}"),
+            canonical_path: std::path::Path::new(WORK_ROOT)
+                .join(name)
+                .to_string_lossy()
+                .into_owned(),
             file_identity: format!("file-{id}"),
             modified_at_utc_ms: id,
             size_bytes: 10,
@@ -852,7 +903,7 @@ mod tests {
                 record(3, "diagram.png"),
                 record(4, "legacy.bmp"),
             ],
-            allowed_roots: vec![r"D:\Work".to_owned()],
+            allowed_roots: vec![WORK_ROOT.to_owned()],
             threshold: 5,
             category,
             search: String::new(),
@@ -881,5 +932,39 @@ mod tests {
         assert!(wildcard_matches("测试测试1124.docx", "测试"));
         assert!(wildcard_matches("周报.docx", "周*.docx"));
         assert!(!wildcard_matches("周报.docx", "报告"));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_grouping_preserves_case_and_component_boundaries() {
+        let records = [
+            "/Users/test/工作/Drafts/一.md",
+            "/Users/test/工作/Drafts/二.md",
+            "/Users/test/工作/drafts/一.md",
+            "/Users/test/工作/drafts/二.md",
+            "/Users/test/工作旧/drafts/一.md",
+        ];
+        let tree = WorkspaceTree::build(WorkspaceBuildInput {
+            files: records
+                .into_iter()
+                .enumerate()
+                .map(|(id, path)| FileRecord {
+                    canonical_path: path.to_owned(),
+                    ..record(id as i64 + 1, "")
+                })
+                .collect(),
+            allowed_roots: vec!["/Users/test/工作".to_owned()],
+            threshold: 2,
+            category: WorkspaceCategory::All,
+            search: String::new(),
+            value_statuses: HashMap::new(),
+        })
+        .expect("workspace tree");
+
+        let page = tree.page(None, 0, 200, WorkspaceSort::NameAsc);
+        assert_eq!(page.total_file_count, 4);
+        assert_eq!(page.entries.len(), 2);
+        assert!(page.entries.iter().all(|entry| entry.file_count == 2));
+        assert_ne!(page.entries[0].id, page.entries[1].id);
     }
 }

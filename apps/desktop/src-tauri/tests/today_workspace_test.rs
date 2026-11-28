@@ -7,10 +7,17 @@ use qizhi_desktop_lib::{
     },
 };
 
+fn fixture_path(windows_path: &str) -> String {
+    #[cfg(windows)]
+    return windows_path.to_owned();
+    #[cfg(not(windows))]
+    return format!("/{}", windows_path.replace('\\', "/"));
+}
+
 fn file(id: i64, path: &str, modified_at_utc_ms: i64) -> FileRecord {
     FileRecord {
         id,
-        canonical_path: path.to_owned(),
+        canonical_path: fixture_path(path),
         file_identity: format!("identity-{id}"),
         modified_at_utc_ms,
         size_bytes: 10,
@@ -27,7 +34,7 @@ fn build(
 ) -> WorkspaceTree {
     WorkspaceTree::build(WorkspaceBuildInput {
         files,
-        allowed_roots: roots.iter().map(|value| (*value).to_owned()).collect(),
+        allowed_roots: roots.iter().map(|value| fixture_path(value)).collect(),
         threshold,
         category,
         search: search.to_owned(),
@@ -43,7 +50,7 @@ fn directory_rows_aggregate_persisted_value_states() {
         .collect();
     let tree = WorkspaceTree::build(WorkspaceBuildInput {
         files,
-        allowed_roots: vec![r"D:\Work".to_owned()],
+        allowed_roots: vec![fixture_path(r"D:\Work")],
         threshold: 5,
         category: WorkspaceCategory::Documents,
         search: String::new(),
@@ -207,6 +214,7 @@ fn longest_matching_root_owns_each_file_once() {
     assert_ne!(page.entries[0].name, "Desktop");
 }
 
+#[cfg(windows)]
 #[test]
 fn equivalent_extended_and_case_variant_paths_are_deduplicated() {
     let tree = build(

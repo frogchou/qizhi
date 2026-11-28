@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
+    #[cfg(windows)]
     match qizhi_desktop_lib::ntfs::windows_service::handle_process_command() {
         Ok(true) => return,
         Ok(false) => {}

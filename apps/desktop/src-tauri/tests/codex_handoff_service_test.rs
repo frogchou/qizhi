@@ -118,7 +118,9 @@ impl Fixture {
             value_statuses: HashMap::new(),
         })
         .unwrap();
-        self.queries.insert(tree, WorkspaceSort::NameAsc).unwrap()
+        self.queries
+            .insert(tree, WorkspaceSort::NameAsc, None)
+            .unwrap()
     }
 
     fn commit_input(&self, preparation_id: &str, request_id: &str) -> CommitCodexHandoffInput {

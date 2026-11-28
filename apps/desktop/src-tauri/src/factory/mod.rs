@@ -4,7 +4,7 @@ pub(crate) use download::suggested_name;
 mod route;
 pub(crate) mod upload;
 
-use crate::{config::secret_store::WindowsCredentialStore, database::Database};
+use crate::{config::secret_store::SystemCredentialStore, database::Database};
 use connection::{Auth, ConnectionInput, ConnectionStore, Settings};
 use futures_util::future::{AbortHandle, Abortable};
 use reqwest::{Client, Method, StatusCode, header};
@@ -17,7 +17,7 @@ const WIRE_ERROR: &str = "工厂服务返回了无效数据，请检查控制面
 const MAX_JSON: usize = 16 * 1024 * 1024;
 
 pub struct FactoryBridge {
-    connection: ConnectionStore<WindowsCredentialStore>,
+    connection: ConnectionStore<SystemCredentialStore>,
     client: Client,
     reads: Mutex<HashMap<Uuid, AbortHandle>>,
 }
@@ -30,7 +30,7 @@ impl FactoryBridge {
             .connect_timeout(Duration::from_secs(6))
             .build()?;
         Ok(Self {
-            connection: ConnectionStore::new(database, WindowsCredentialStore),
+            connection: ConnectionStore::new(database, SystemCredentialStore),
             client,
             reads: Mutex::new(HashMap::new()),
         })

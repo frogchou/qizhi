@@ -14,6 +14,7 @@ import { AppSidebar, type AppRoute } from "./components/AppSidebar";
 import { SettingsPage } from "./features/settings/SettingsPage";
 import { KnowledgePage } from "./features/knowledge/KnowledgePage";
 import { TodayPage } from "./features/today/TodayPage";
+import { FileSearchPage } from "./features/file-search/FileSearchPage";
 import { CodexPage } from "./features/codex/CodexPage";
 import {
   unavailableCommands,
@@ -87,6 +88,7 @@ function App({ commands = unavailableCommands }: { commands?: QizhiCommands }) {
             active={route}
             onNavigate={navigate}
             onOpenBasket={() => setBasketOpen(true)}
+            showFileSearch={commands.desktopPlatform === "macos"}
           />
           <div
             className={
@@ -109,6 +111,11 @@ function App({ commands = unavailableCommands }: { commands?: QizhiCommands }) {
                   commands={commands}
                   onOpenCodex={openCommittedCodexHandoff}
                 />
+              </FeedbackScope>
+            )}
+            {route === "file-search" && (
+              <FeedbackScope active>
+                <FileSearchPage commands={commands} />
               </FeedbackScope>
             )}
             {settingsMounted && (

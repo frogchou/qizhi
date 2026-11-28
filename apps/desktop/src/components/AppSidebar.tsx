@@ -5,10 +5,17 @@ import { getVersion } from "@tauri-apps/api/app";
 import { useEffect, useState } from "react";
 
 export type AppRoute =
-  "today" | "knowledge" | "codex" | "factory" | "assembly" | "settings";
+  | "today"
+  | "file-search"
+  | "knowledge"
+  | "codex"
+  | "factory"
+  | "assembly"
+  | "settings";
 type IconName = AppRoute;
 const items: { route: AppRoute; label: string; icon: IconName }[] = [
   { route: "today", label: "今日", icon: "today" },
+  { route: "file-search", label: "快速查找", icon: "file-search" },
   { route: "knowledge", label: "知识库", icon: "knowledge" },
   { route: "codex", label: "Codex 工作", icon: "codex" },
   { route: "factory", label: "智能工厂", icon: "factory" },
@@ -17,6 +24,7 @@ const items: { route: AppRoute; label: string; icon: IconName }[] = [
 ];
 
 function NavIcon({ name }: { name: IconName }) {
+  if (name === "file-search") return <ControlIcon name="search" size={18} />;
   if (name === "assembly") return <ControlIcon name="layers" size={17} />;
   if (name === "factory")
     return (
@@ -57,10 +65,12 @@ export function AppSidebar({
   active,
   onNavigate,
   onOpenBasket,
+  showFileSearch = false,
 }: {
   active: AppRoute;
   onNavigate: (route: AppRoute) => void;
   onOpenBasket?: () => void;
+  showFileSearch?: boolean;
 }) {
   const basket = useMaterialBasket();
   const [version, setVersion] = useState("0.1.9");
@@ -79,20 +89,22 @@ export function AppSidebar({
         <span>栖知</span>
       </div>
       <nav aria-label="主导航">
-        {items.map((item) => (
-          <button
-            key={item.route}
-            type="button"
-            aria-label={item.label}
-            title={item.label}
-            aria-current={active === item.route ? "page" : undefined}
-            className={active === item.route ? "nav-item active" : "nav-item"}
-            onClick={() => onNavigate(item.route)}
-          >
-            <NavIcon name={item.icon} />
-            <span className="nav-label">{item.label}</span>
-          </button>
-        ))}
+        {items
+          .filter((item) => showFileSearch || item.route !== "file-search")
+          .map((item) => (
+            <button
+              key={item.route}
+              type="button"
+              aria-label={item.label}
+              title={item.label}
+              aria-current={active === item.route ? "page" : undefined}
+              className={active === item.route ? "nav-item active" : "nav-item"}
+              onClick={() => onNavigate(item.route)}
+            >
+              <NavIcon name={item.icon} />
+              <span className="nav-label">{item.label}</span>
+            </button>
+          ))}
       </nav>
       <div className="sidebar-footer">
         {onOpenBasket && (

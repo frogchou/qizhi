@@ -1,4 +1,7 @@
-use crate::{config::SecretStore, database::Database};
+use crate::{
+    config::{SecretStore, secret_store::credential_message},
+    database::Database,
+};
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
@@ -88,7 +91,10 @@ impl<S: SecretStore> ConnectionStore<S> {
         let _guard = self.lock.lock().map_err(|_| STORAGE)?;
         let current = self.read()?;
         let has_token = match current.reference {
-            Some(reference) => self.secrets.exists(&reference).map_err(|_| STORAGE)?,
+            Some(reference) => self
+                .secrets
+                .exists(&reference)
+                .map_err(|error| credential_message(error, STORAGE))?,
             None => false,
         };
         Ok(Settings {
@@ -119,7 +125,9 @@ impl<S: SecretStore> ConnectionStore<S> {
             }
             validate_token(token)?;
             let key = format!("qizhi/factory/{}", Uuid::new_v4());
-            self.secrets.put(&key, token).map_err(|_| STORAGE)?;
+            self.secrets
+                .put(&key, token)
+                .map_err(|error| credential_message(error, STORAGE))?;
             new_key = Some(key);
             new_key.as_deref()
         } else {
@@ -133,7 +141,9 @@ impl<S: SecretStore> ConnectionStore<S> {
             }
             true
         } else if let Some(key) = reference {
-            self.secrets.exists(key).map_err(|_| STORAGE)?
+            self.secrets
+                .exists(key)
+                .map_err(|error| credential_message(error, STORAGE))?
         } else {
             false
         };
@@ -170,7 +180,9 @@ impl<S: SecretStore> ConnectionStore<S> {
             return Err(TOKEN.to_owned());
         }
         let reference = current.reference.as_deref().ok_or(TOKEN)?;
-        self.secrets.get(reference).map_err(|_| TOKEN.to_owned())
+        self.secrets
+            .get(reference)
+            .map_err(|error| credential_message(error, TOKEN))
     }
 
     pub fn for_test(&self, input: ConnectionInput) -> Result<Auth, String> {

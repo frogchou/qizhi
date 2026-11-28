@@ -4,7 +4,10 @@ use serde_json::Value;
 use url::Url;
 
 use crate::{
-    config::{ModelProviderService, SecretStore, secret_store::WindowsCredentialStore},
+    config::{
+        ModelProviderService, SecretStore,
+        secret_store::{SystemCredentialStore, credential_message},
+    },
     database::repositories::{ConfigRepository, ModelProviderRepository},
     network::http::HttpClient,
 };
@@ -39,16 +42,16 @@ pub struct OpenAiClient {
 impl OpenAiClient {
     pub fn from_saved_config(
         configs: ConfigRepository,
-        secrets: WindowsCredentialStore,
+        secrets: SystemCredentialStore,
         model: String,
     ) -> Result<Self, String> {
         let config = configs
             .find("openai")
             .map_err(|_| "无法读取 OpenAI 设置。".to_owned())?
             .ok_or_else(|| "请先在设置中保存 OpenAI Base URL 和 API Key。".to_owned())?;
-        let api_key = secrets
-            .get(&config.credential_reference)
-            .map_err(|_| "无法读取 OpenAI API Key，请在设置中重新保存。".to_owned())?;
+        let api_key = secrets.get(&config.credential_reference).map_err(|error| {
+            credential_message(error, "无法读取 OpenAI API Key，请在设置中重新保存。")
+        })?;
         Self::new(&config.endpoint, api_key, model)
     }
 
@@ -58,16 +61,16 @@ impl OpenAiClient {
 
     pub fn from_active_provider(
         repository: ModelProviderRepository,
-        secrets: WindowsCredentialStore,
+        secrets: SystemCredentialStore,
     ) -> Result<Self, String> {
         let service = ModelProviderService::new(repository, secrets);
         let config = service
             .active()
             .map_err(|_| "无法读取当前模型服务商。".to_owned())?
             .ok_or_else(|| "请先在设置中保存并启用一个模型服务商。".to_owned())?;
-        let api_key = service
-            .resolve_api_key(&config)
-            .map_err(|_| "无法读取模型服务商的 API Key，请在设置中重新保存。".to_owned())?;
+        let api_key = service.resolve_api_key(&config).map_err(|error| {
+            credential_message(error, "无法读取模型服务商的 API Key，请在设置中重新保存。")
+        })?;
         Self::new_provider(
             &config.endpoint,
             api_key,

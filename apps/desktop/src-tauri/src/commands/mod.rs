@@ -1,6 +1,7 @@
 pub mod codex;
 pub mod codex_artifacts;
 pub mod codex_handoff;
+pub mod file_search;
 pub mod knowledge;
 pub mod model_provider;
 pub mod settings;

@@ -34,6 +34,27 @@ pub struct CommitHandoffMaterialInput {
 }
 
 impl CodexRepository {
+    #[cfg(target_os = "macos")]
+    pub fn executable_path(&self) -> Result<Option<String>, AppError> {
+        self.database.with_connection(|connection| {
+            connection.query_row(
+                "SELECT executable_path FROM codex_preferences WHERE id=1",
+                [],
+                |row| row.get(0),
+            )
+        })
+    }
+
+    #[cfg(target_os = "macos")]
+    pub fn save_executable_path(&self, executable: Option<&str>) -> Result<(), AppError> {
+        self.database.with_connection(|connection| {
+            connection.execute(
+                "UPDATE codex_preferences SET executable_path=?1 WHERE id=1",
+                [executable],
+            )?;
+            Ok(())
+        })
+    }
     pub(crate) fn new(database: Database) -> Self {
         Self { database }
     }

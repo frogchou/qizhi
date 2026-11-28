@@ -30,7 +30,7 @@ import {
 import { WorkspaceTreeTable } from "./WorkspaceTreeTable";
 
 function filename(path: string) {
-  const parts = path.replace(/\//g, "\\").split("\\");
+  const parts = path.startsWith("/") ? path.split("/") : path.split(/[/\\]/);
   return parts[parts.length - 1] ?? path;
 }
 function formatTime(epoch: number) {
@@ -202,6 +202,14 @@ function emptyWorkspaceMessage(
     : "过去五天内没有发现符合规则的工作文件。";
 }
 
+const rootCoverageLabels = {
+  building: "正在建立索引",
+  ready: "已完成",
+  partial: "部分文件夹无法访问",
+  unavailable: "无法访问或不支持",
+  retrying: "更新未完成，等待重试",
+} as const;
+
 export function TodayPage({
   commands,
   onOpenCodex,
@@ -209,8 +217,13 @@ export function TodayPage({
   commands: QizhiCommands;
   onOpenCodex?: (result: CodexHandoffResult) => void;
 }) {
+  const isMac = commands.desktopPlatform === "macos";
   const [snapshot, setSnapshot] = useState<TodaySnapshot | null>(null);
   const [view, setView] = useState<WorkspaceView>("today");
+  const coverage = snapshot?.state === "ready" ? snapshot.coverage : undefined;
+  const indexBuilding = coverage?.some((root) => root.state === "building");
+  const indexPending =
+    indexBuilding || coverage?.some((root) => root.state === "retrying");
   const [selected, setSelected] = useState<number | null>(null);
   const [selectedFileIds, setSelectedFileIds] = useState<Set<number>>(
     new Set(),
@@ -317,14 +330,16 @@ export function TodayPage({
         if (viewRef.current === "today") setSnapshot(cachedSnapshot);
         void refresh("today");
       })
-      .catch(() =>
-        setSnapshot({
-          state: "unavailable",
-          remediation: "无法读取本地今日记录。",
-          files: [],
-          clusters: [],
-        }),
-      );
+      .catch((error: unknown) => {
+        if (viewRef.current === "today") {
+          setSnapshot({
+            state: "unavailable",
+            remediation: readableError(error, "无法读取本地今日记录。"),
+            files: [],
+            clusters: [],
+          });
+        }
+      });
   }, [commands]);
   useEffect(() => {
     commands
@@ -332,6 +347,32 @@ export function TodayPage({
       .then((settings) => setSummaryTemplates(settings.templates))
       .catch(() => undefined);
   }, [commands]);
+  useEffect(() => {
+    if (!indexPending) return;
+    let live = true;
+    let polling = false;
+    const timer = window.setInterval(() => {
+      if (polling) return;
+      const read =
+        view === "today"
+          ? commands.getTodaySnapshot()
+          : commands.getRecentSnapshot?.(5);
+      if (!read) return;
+      polling = true;
+      void read
+        .then((value) => {
+          if (live && viewRef.current === view) setSnapshot(value);
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          polling = false;
+        });
+    }, 900);
+    return () => {
+      live = false;
+      window.clearInterval(timer);
+    };
+  }, [commands, indexPending, view]);
   useEffect(() => {
     if (!snapshot || snapshot.state !== "ready") return;
     const existing = new Set(snapshot.files.map((file) => file.id));
@@ -560,6 +601,20 @@ export function TodayPage({
         followExistingScan = true;
         setFollowingExistingScan(true);
         notify("另一轮扫描正在进行，完成后将自动更新。");
+      } else if (
+        isMac &&
+        viewRef.current === target &&
+        error &&
+        typeof error === "object" &&
+        "state" in error &&
+        error.state === "unavailable"
+      ) {
+        setSnapshot({
+          state: "unavailable",
+          remediation: message,
+          files: [],
+          clusters: [],
+        });
       } else {
         notifyError(message);
       }
@@ -577,8 +632,23 @@ export function TodayPage({
     setSelectedDirectoryIds(new Set());
     setWorkspacePage(null);
     if (next === "today") {
-      const todaySnapshot = await commands.getTodaySnapshot();
-      if (viewRef.current === next) setSnapshot(todaySnapshot);
+      try {
+        const todaySnapshot = await commands.getTodaySnapshot();
+        if (viewRef.current === next) setSnapshot(todaySnapshot);
+      } catch (error) {
+        if (viewRef.current !== next) return;
+        const remediation = readableError(error, "无法读取本地今日记录。");
+        if (isMac) {
+          setSnapshot({
+            state: "unavailable",
+            remediation,
+            files: [],
+            clusters: [],
+          });
+        } else {
+          notifyError(remediation);
+        }
+      }
       return;
     }
     if (!commands.getRecentSnapshot) {
@@ -590,12 +660,16 @@ export function TodayPage({
 
   function scanNotice() {
     if (scanStatus?.state === "scanning") {
-      return "正在建立或同步本地 NTFS 索引；不会递归遍历文件夹。";
+      return isMac
+        ? "正在更新本地文件索引。"
+        : "正在建立或同步本地 NTFS 索引；不会递归遍历文件夹。";
     }
     if (scanStatus?.state === "failed") {
       return scanStatus.message ?? "扫描未完成，请检查扫描范围和文件访问权限。";
     }
-    return "正在准备本地 NTFS 索引；你仍可浏览已发现的文件。";
+    return isMac
+      ? "正在准备本地文件索引；你仍可浏览已发现的文件。"
+      : "正在准备本地 NTFS 索引；你仍可浏览已发现的文件。";
   }
 
   const visibleFiles = useMemo(() => {
@@ -874,11 +948,26 @@ export function TodayPage({
       if (action === "reveal") await commands.revealInExplorer(id);
       if (action === "copy") await commands.copyFileToClipboard(id);
       if (action === "delete") {
-        if (!window.confirm("确定要永久删除这个文件吗？此操作无法撤销。"))
+        if (
+          !window.confirm(
+            isMac
+              ? "确定将这个文件移到废纸篓吗？"
+              : "确定要永久删除这个文件吗？此操作无法撤销。",
+          )
+        )
           return;
         await commands.deleteFile(id);
         setSelected(null);
-        setSnapshot(await commands.getTodaySnapshot());
+        if (isMac) {
+          const target = viewRef.current;
+          const updated =
+            target === "recent"
+              ? await commands.getRecentSnapshot?.(5)
+              : await commands.getTodaySnapshot();
+          if (updated && viewRef.current === target) setSnapshot(updated);
+        } else {
+          setSnapshot(await commands.getTodaySnapshot());
+        }
       }
       notify(
         action === "open"
@@ -886,16 +975,22 @@ export function TodayPage({
           : action === "text"
             ? "已使用文本编辑器打开文件。"
             : action === "reveal"
-              ? "已在资源管理器中定位文件。"
+              ? isMac
+                ? "已在 Finder 中显示文件。"
+                : "已在资源管理器中定位文件。"
               : action === "copy"
                 ? "文件已复制到剪贴板。"
-                : "文件已删除。",
+                : isMac
+                  ? "文件已移到废纸篓。"
+                  : "文件已删除。",
         "success",
       );
     } catch {
       notifyError(
         action === "delete"
-          ? "无法删除该文件，它可能已移动、被占用或不再允许访问。"
+          ? isMac
+            ? "无法将文件移到废纸篓，它可能已移动、被占用或不再允许访问。"
+            : "无法删除该文件，它可能已移动、被占用或不再允许访问。"
           : "无法完成文件操作，它可能已移动或不再允许访问。",
       );
     }
@@ -970,6 +1065,29 @@ export function TodayPage({
     ? (snapshot?.files.find((file) => file.id === uploadDialog.fileId) ?? null)
     : null;
 
+  const workspaceTabs = (
+    <div className="workspace-tabs" role="tablist" aria-label="工作文件范围">
+      <button
+        aria-selected={view === "today"}
+        disabled={summaryBusy || manualEvaluationBusy}
+        onClick={() => void switchView("today")}
+        role="tab"
+        type="button"
+      >
+        今日
+      </button>
+      <button
+        aria-selected={view === "recent"}
+        disabled={summaryBusy || manualEvaluationBusy}
+        onClick={() => void switchView("recent")}
+        role="tab"
+        type="button"
+      >
+        过去
+      </button>
+    </div>
+  );
+
   if (!snapshot)
     return (
       <section className="page loading">
@@ -982,12 +1100,13 @@ export function TodayPage({
         <header className="page-header">
           <div>
             <p className="eyebrow">今日工作空间</p>
-            <h1>今天有变动的文件</h1>
+            <h1>{view === "today" ? "今天有变动的文件" : "过去的工作文件"}</h1>
           </div>
           <button className="button secondary" onClick={() => void refresh()}>
             重新检测
           </button>
         </header>
+        {isMac ? workspaceTabs : null}
         <p className="empty">{snapshot.remediation}</p>
       </section>
     );
@@ -999,7 +1118,9 @@ export function TodayPage({
           <h1>{view === "today" ? "今天有变动的文件" : "过去的工作文件"}</h1>
           <p className="muted">
             {view === "today"
-              ? "基于 NTFS 变更记录发现今天新建或修改的文件，内容尚未分析。"
+              ? isMac
+                ? "查看允许扫描的工作文件夹中今天有变动的文件。"
+                : "基于 NTFS 变更记录发现今天新建或修改的文件，内容尚未分析。"
               : "按修改时间发现，内容尚未分析。"}
           </p>
         </div>
@@ -1090,26 +1211,23 @@ export function TodayPage({
           </div>
         </div>
       </header>
-      <div className="workspace-tabs" role="tablist" aria-label="工作文件范围">
-        <button
-          aria-selected={view === "today"}
-          disabled={summaryBusy || manualEvaluationBusy}
-          onClick={() => void switchView("today")}
-          role="tab"
-          type="button"
-        >
-          今日
-        </button>
-        <button
-          aria-selected={view === "recent"}
-          disabled={summaryBusy || manualEvaluationBusy}
-          onClick={() => void switchView("recent")}
-          role="tab"
-          type="button"
-        >
-          过去
-        </button>
-      </div>
+      {workspaceTabs}
+      {coverage?.some((root) => root.state !== "ready") ? (
+        <details className="workspace-coverage">
+          <summary>
+            {indexBuilding
+              ? "正在为部分工作文件夹建立索引"
+              : "部分工作文件夹未能完整索引"}
+          </summary>
+          <ul>
+            {coverage.map((root) => (
+              <li key={root.path}>
+                {root.path} · {rootCoverageLabels[root.state]}
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
       <FeedbackNotice
         message={busy ? scanNotice() : null}
         tone={scanStatus?.state === "failed" ? "error" : "info"}
@@ -1452,7 +1570,7 @@ export function TodayPage({
             role="menuitem"
             onClick={() => void fileAction("delete", fileMenu.id)}
           >
-            删除文件
+            {isMac ? "移到废纸篓" : "删除文件"}
           </button>
         </div>
       ) : null}

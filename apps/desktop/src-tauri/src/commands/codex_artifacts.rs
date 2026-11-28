@@ -6,7 +6,7 @@ use tauri::State;
 use crate::{
     app_state::AppState,
     codex::{ArtifactUploadError, ArtifactUploadRequest, CodexArtifactUploadService},
-    config::secret_store::WindowsCredentialStore,
+    config::secret_store::SystemCredentialStore,
     contracts::CodexArtifactUpload,
     ragflow::client::RagflowClient,
 };
@@ -40,7 +40,7 @@ pub async fn upload_codex_artifact(
             .reserve_artifact_upload(&artifact.project_id)
             .map_err(|_| user_error(ArtifactUploadError::ActiveTurn))?;
         let client =
-            RagflowClient::from_saved_config(state.database.configs(), WindowsCredentialStore)?;
+            RagflowClient::from_saved_config(state.database.configs(), SystemCredentialStore)?;
         let service = CodexArtifactUploadService::new(
             state.database.clone(),
             state.codex_runtime.project_files().clone(),

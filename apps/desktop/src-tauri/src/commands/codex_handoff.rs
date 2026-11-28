@@ -4,7 +4,7 @@ use tauri::State;
 use crate::{
     app_state::AppState,
     codex::CodexHandoffServiceError,
-    config::secret_store::WindowsCredentialStore,
+    config::secret_store::SystemCredentialStore,
     contracts::{
         CodexHandoffDetails, CodexHandoffPreview, CodexHandoffResult, CodexRagflowAnswerInput,
         CodexRagflowChunkInput, CodexRagflowDocumentInput, CommitCodexHandoffInput,
@@ -145,7 +145,7 @@ pub fn commit_handoff(
         .map_err(|_| "该 Codex 项目正在执行任务，请在当前任务结束后再发送资料。".to_owned())?;
     if input.source_kind.starts_with("ragflow_") {
         let client =
-            RagflowClient::from_saved_config(state.database.configs(), WindowsCredentialStore)
+            RagflowClient::from_saved_config(state.database.configs(), SystemCredentialStore)
                 .map_err(|_| "无法读取 RAGFlow 连接设置，请在设置中检查后重试。".to_owned())?;
         state
             .codex_handoffs

@@ -10,7 +10,7 @@ use tauri::{State, ipc::Channel};
 
 use crate::{
     app_state::AppState,
-    config::secret_store::WindowsCredentialStore,
+    config::secret_store::SystemCredentialStore,
     ragflow::client::{
         RagflowAgent, RagflowAgentReference, RagflowAgentSource, RagflowAgentStep,
         RagflowAgentStreamEvent, RagflowAnswer, RagflowChat, RagflowChunk, RagflowClient,
@@ -18,7 +18,7 @@ use crate::{
     },
     scan::{
         file_filter::FileTypeFilter,
-        policy::{ScanPolicy, active_roots},
+        policy::{ScanPolicy, live_scan_roots},
     },
 };
 
@@ -245,7 +245,7 @@ impl From<RagflowChunk> for RagflowChunkOutput {
 }
 
 fn client(state: &AppState) -> Result<RagflowClient, String> {
-    RagflowClient::from_saved_config(state.database.configs(), WindowsCredentialStore)
+    RagflowClient::from_saved_config(state.database.configs(), SystemCredentialStore)
 }
 
 pub(crate) fn upload_policy(state: &AppState) -> Result<(ScanPolicy, FileTypeFilter), String> {
@@ -258,7 +258,7 @@ pub(crate) fn upload_policy(state: &AppState) -> Result<(ScanPolicy, FileTypeFil
         .iter()
         .map(PathBuf::from)
         .collect::<Vec<_>>();
-    let roots = active_roots(&rules.allowed_roots, &exclusions)
+    let roots = live_scan_roots(&rules.allowed_roots, &exclusions)
         .map_err(|_| "扫描目录无效，请在设置中重新保存。".to_owned())?;
     if rules.allowed_roots.is_empty() {
         return Err("请先在设置中添加允许扫描的工作目录。".to_owned());
@@ -275,7 +275,7 @@ fn ensure_upload_candidate(
     file_filter: &FileTypeFilter,
 ) -> Result<PathBuf, String> {
     let path = PathBuf::from(&file.canonical_path);
-    if !policy.is_allowed(&path) {
+    if !policy.is_allowed_record(file) {
         return Err("该文件已不在允许扫描范围内，无法上传。".to_owned());
     }
     if !crate::commands::today::is_visible_today_file(file, file_filter, policy) {
@@ -746,20 +746,35 @@ pub async fn upload_today_file(
                 .get_by_id(input.file_id)
                 .map_err(|_| "无法读取所选文件。".to_owned())?
                 .ok_or_else(|| "所选文件已不在今日列表中。".to_owned())?;
+            #[cfg(target_os = "macos")]
+            let client = client(&state)?;
             let (policy, file_filter) = upload_policy(&state)?;
             let file_path = ensure_upload_candidate(&file, &policy, &file_filter)?;
+            #[cfg(target_os = "macos")]
+            let upload = client.upload_open_document(
+                &file_path,
+                state
+                    .scan_rules
+                    .open_indexed_record(&file)
+                    .map_err(|_| "所选文件已移动、变更或无法访问。".to_owned())?,
+                input.dataset_id.trim(),
+                input.parent_path.as_deref(),
+                input.start_parsing,
+            );
+            #[cfg(not(target_os = "macos"))]
+            let upload = client(&state)?.upload_document(
+                &file_path,
+                input.dataset_id.trim(),
+                input.parent_path.as_deref(),
+                input.start_parsing,
+            );
             let RagflowUpload {
                 document_ids,
                 document_count,
                 parsing_started,
                 parsing_error,
                 ..
-            } = client(&state)?.upload_document(
-                &file_path,
-                input.dataset_id.trim(),
-                input.parent_path.as_deref(),
-                input.start_parsing,
-            )?;
+            } = upload?;
             Ok(RagflowUploadOutput {
                 document_ids,
                 document_count,

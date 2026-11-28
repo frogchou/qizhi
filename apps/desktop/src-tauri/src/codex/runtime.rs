@@ -202,10 +202,20 @@ impl CodexRuntime {
         }
         let client = self.ensure_started()?;
         let account = client.request("account/read", json!({"refreshToken":false}))?;
+        #[cfg(not(target_os = "macos"))]
         let sandbox = client.request("windowsSandbox/readiness", json!({}))?;
+        #[cfg(not(target_os = "macos"))]
+        let sandbox = sandbox
+            .pointer("/status")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown")
+            .to_owned();
+        #[cfg(target_os = "macos")]
+        let sandbox = "project_scope".to_owned();
+        let executable = self.configured_executable()?;
         let status = CodexRuntimeStatus {
             installation: "ready".to_owned(),
-            version: CodexInstallationProbe::detect().version,
+            version: CodexInstallationProbe::detect_configured(executable.as_deref()).version,
             account: if account.get("account").is_some_and(|value| !value.is_null())
                 || account.get("requiresOpenaiAuth") == Some(&Value::Bool(false))
             {
@@ -214,11 +224,7 @@ impl CodexRuntime {
                 "login_required"
             }
             .to_owned(),
-            sandbox: sandbox
-                .pointer("/status")
-                .and_then(Value::as_str)
-                .unwrap_or("unknown")
-                .to_owned(),
+            sandbox,
             server: "ready".to_owned(),
         };
         self.state
@@ -307,14 +313,16 @@ impl CodexRuntime {
             self.initialize_if_needed(&client)?;
             return Ok(client);
         }
-        match CodexInstallationProbe::detect().state {
+        let executable = self.configured_executable()?;
+        match CodexInstallationProbe::detect_configured(executable.as_deref()).state {
             CodexInstallationState::Missing => return Err(CodexRuntimeError::NotInstalled),
             CodexInstallationState::Unsupported => {
                 return Err(CodexRuntimeError::UnsupportedVersion);
             }
             CodexInstallationState::Ready => {}
         }
-        let candidate: Arc<dyn AppServerClient> = Arc::new(AppServerProcess::spawn()?);
+        let candidate: Arc<dyn AppServerClient> =
+            Arc::new(AppServerProcess::spawn_configured(executable.as_deref())?);
         let client = {
             let mut state = self
                 .state
@@ -330,6 +338,17 @@ impl CodexRuntime {
         };
         self.initialize_if_needed(&client)?;
         Ok(client)
+    }
+
+    fn configured_executable(&self) -> Result<Option<String>, CodexRuntimeError> {
+        #[cfg(target_os = "macos")]
+        return self
+            .database
+            .codex()
+            .executable_path()
+            .map_err(|_| CodexRuntimeError::RequestFailed);
+        #[cfg(not(target_os = "macos"))]
+        Ok(None)
     }
 
     pub fn start_conversation_thread(

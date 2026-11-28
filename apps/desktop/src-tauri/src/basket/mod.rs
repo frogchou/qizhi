@@ -5,7 +5,7 @@ pub use store::{Basket, BasketItem, BasketResult};
 
 use crate::{
     app_state::AppState, commands::knowledge::upload_policy,
-    config::secret_store::WindowsCredentialStore, contracts::CodexHandoffResult,
+    config::secret_store::SystemCredentialStore, contracts::CodexHandoffResult,
     ragflow::client::RagflowClient,
 };
 use serde::Deserialize;
@@ -88,9 +88,20 @@ fn add_workspace(
                     .unwrap_or("本地文件")
                     .to_owned();
                 let path = std::path::PathBuf::from(&record.canonical_path);
-                if !policy.is_allowed(&path) || !filter.allows(&path) {
+                if !policy.is_allowed_record(&record) || !filter.allows(&path) {
                     return Err("文件已不在允许的范围内，请重新选择。".into());
                 }
+                #[cfg(target_os = "macos")]
+                return basket.local_snapshot(
+                    kind,
+                    label,
+                    &path,
+                    state
+                        .scan_rules
+                        .open_indexed_record(&record)
+                        .map_err(|_| store::SOURCE)?,
+                );
+                #[cfg(not(target_os = "macos"))]
                 basket.local(kind, label, &path)
             })();
             result.unwrap_or_else(|e| BasketResult::failed(id.to_string(), name, e))
@@ -187,7 +198,7 @@ fn add_source(
             documents,
         } => {
             let client =
-                RagflowClient::from_saved_config(state.database.configs(), WindowsCredentialStore);
+                RagflowClient::from_saved_config(state.database.configs(), SystemCredentialStore);
             let mut seen = HashSet::new();
             Ok(documents
                 .into_iter()

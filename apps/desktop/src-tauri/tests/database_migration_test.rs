@@ -30,7 +30,7 @@ fn migrates_a_fresh_database_and_upserts_one_file_identity() {
     repository.upsert(&record).expect("first upsert succeeds");
     repository.upsert(&record).expect("second upsert succeeds");
 
-    assert_eq!(database.schema_version().expect("schema version reads"), 15);
+    assert_eq!(database.schema_version().expect("schema version reads"), 17);
     assert_eq!(repository.count().expect("record count reads"), 1);
 
     let _ = std::fs::remove_file(path);
@@ -75,7 +75,7 @@ fn migrates_existing_database_to_the_ntfs_index_schema() {
     let path = temporary_database_path("ntfs-index");
     let database = Database::open(&path).expect("database opens");
 
-    assert_eq!(database.schema_version().expect("schema version"), 15);
+    assert_eq!(database.schema_version().expect("schema version"), 17);
 
     drop(database);
     let _ = std::fs::remove_file(path);
@@ -143,5 +143,5 @@ fn basket_upgrade_preserves_existing_codex_handoffs_and_foreign_keys() {
         .unwrap();
     assert_eq!(references, 0);
     drop(reopened);
-    assert_eq!(Database::open(&path).unwrap().schema_version().unwrap(), 15);
+    assert_eq!(Database::open(&path).unwrap().schema_version().unwrap(), 17);
 }

@@ -139,6 +139,7 @@ pub fn inspect_volume(mount_path: &str) -> QualifiedVolume {
     }
 }
 
+#[cfg(windows)]
 fn normalize_mount_path(value: &str) -> String {
     let normalized = value.replace('/', "\\");
     if normalized.len() == 2 && normalized.as_bytes()[1] == b':' {
@@ -164,19 +165,28 @@ fn string_from_wide_null(value: &[u16]) -> String {
 
 #[cfg(all(test, windows))]
 mod tests {
-    use super::inspect_volume;
+    use super::{VolumeQualification, inspect_volume};
 
     #[test]
     fn directory_root_resolves_to_its_volume_mount_point() {
-        let directory = std::env::temp_dir();
-        let inspected = inspect_volume(&directory.to_string_lossy());
+        let workspace = std::env::current_dir().expect("test working directory");
+        let fixture = tempfile::tempdir_in(&workspace).expect("test fixture directory");
+        let work_root = fixture.path().join("工作资料");
+        std::fs::create_dir(&work_root).expect("nested working directory");
+        let directory = work_root.to_str().expect("UTF-8 test path");
+        let inspected = inspect_volume(directory);
+        let volume = inspect_volume(&inspected.mount_path);
 
-        assert!(inspected.mount_path.ends_with('\\'));
+        assert_eq!(inspected.qualification, VolumeQualification::Indexable);
+        assert!(!directory.eq_ignore_ascii_case(inspected.mount_path.trim_end_matches('\\')));
+        assert!(!inspected.volume_guid.is_empty());
+        assert_eq!(inspected.volume_guid, volume.volume_guid);
+        assert_eq!(inspected.serial_number, volume.serial_number);
         assert!(
-            directory
-                .to_string_lossy()
-                .to_ascii_lowercase()
-                .starts_with(&inspected.mount_path.to_ascii_lowercase())
+            inspected.mount_path.ends_with('\\')
+                && directory
+                    .to_ascii_lowercase()
+                    .starts_with(&inspected.mount_path.to_ascii_lowercase())
         );
     }
 }

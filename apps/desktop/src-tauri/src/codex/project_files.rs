@@ -258,6 +258,25 @@ impl CodexProjectFiles {
         confirm_large_files: bool,
         confirm_original_only: bool,
     ) -> Result<Vec<StagedHandoffFile>, ProjectFileError> {
+        self.stage_handoff_files_using(
+            project_id,
+            staging_id,
+            sources,
+            confirm_large_files,
+            confirm_original_only,
+            |_| Ok(None),
+        )
+    }
+
+    pub(crate) fn stage_handoff_files_using(
+        &self,
+        project_id: &str,
+        staging_id: &str,
+        sources: &[HandoffFileSource],
+        confirm_large_files: bool,
+        confirm_original_only: bool,
+        mut opened: impl FnMut(usize) -> Result<Option<fs::File>, ProjectFileError>,
+    ) -> Result<Vec<StagedHandoffFile>, ProjectFileError> {
         Uuid::parse_str(staging_id).map_err(|_| ProjectFileError::UnsafePath)?;
         let layout = self.create_layout(project_id)?;
         let staging = layout.staging.join(staging_id);
@@ -269,7 +288,11 @@ impl CodexProjectFiles {
             let mut staged = Vec::with_capacity(sources.len());
             for (index, source) in sources.iter().enumerate() {
                 ensure_regular_source(&source.source_path)?;
-                let before = fs::metadata(&source.source_path).map_err(|_| ProjectFileError::Io)?;
+                let mut opened_source = opened(index)?;
+                let before = opened_source
+                    .as_ref()
+                    .map_or_else(|| fs::metadata(&source.source_path), fs::File::metadata)
+                    .map_err(|_| ProjectFileError::Io)?;
                 if before.len() != source.expected_size_bytes
                     || metadata_modified_ms(&before) != source.expected_modified_at_utc_ms
                 {
@@ -293,22 +316,32 @@ impl CodexProjectFiles {
                     .and_then(|value| value.to_str())
                     .unwrap_or("material");
                 let original = staging.join(format!("{index:04}-original-{name}"));
-                atomic_copy(&source.source_path, &original)?;
-                let after = fs::metadata(&source.source_path).map_err(|_| ProjectFileError::Io)?;
+                let extraction_path = if let Some(file) = opened_source.as_mut() {
+                    let mut destination =
+                        fs::File::create(&original).map_err(|_| ProjectFileError::Io)?;
+                    std::io::copy(file, &mut destination).map_err(|_| ProjectFileError::Io)?;
+                    &original
+                } else {
+                    atomic_copy(&source.source_path, &original)?;
+                    &source.source_path
+                };
+                let after = opened_source
+                    .as_ref()
+                    .map_or_else(|| fs::metadata(&source.source_path), fs::File::metadata)
+                    .map_err(|_| ProjectFileError::Io)?;
                 if after.len() != before.len()
                     || metadata_modified_ms(&after) != metadata_modified_ms(&before)
                 {
                     return Err(ProjectFileError::SourceChanged);
                 }
                 let hash = sha256_file(&original)?;
-                let extraction =
-                    extract_document_text(&source.source_path, CODEX_DERIVED_MAX_CHARS);
+                let extraction = extract_document_text(extraction_path, CODEX_DERIVED_MAX_CHARS);
                 let text = match extraction {
                     Ok(text) => Some(text),
                     Err(ExtractionError::UnsupportedFormat(_))
                         if !EXTRACTABLE_DOCUMENT_EXTENSIONS.contains(&extension.as_str()) =>
                     {
-                        extract_utf8_project_text(&source.source_path, before.len())?
+                        extract_utf8_project_text(extraction_path, before.len())?
                     }
                     Err(ExtractionError::Empty)
                         if !EXTRACTABLE_DOCUMENT_EXTENSIONS.contains(&extension.as_str()) =>

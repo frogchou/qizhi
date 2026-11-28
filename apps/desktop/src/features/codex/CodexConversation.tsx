@@ -19,6 +19,7 @@ export function CodexConversation({
   events,
   running,
   disabledReason,
+  conversationReady = true,
   onSend,
   onStop,
   onResolveApproval,
@@ -34,6 +35,7 @@ export function CodexConversation({
   events: CodexTurnEvent[];
   running: boolean;
   disabledReason?: string;
+  conversationReady?: boolean;
   onSend: (value: string) => Promise<void>;
   onStop: () => Promise<void>;
   onResolveApproval: (
@@ -74,10 +76,16 @@ export function CodexConversation({
       notify("复制失败，请手动选择文本。", "error");
     }
   }
+  const canSubmit =
+    conversationReady &&
+    !!draft.trim() &&
+    !running &&
+    !submitting &&
+    !attachingBasket &&
+    !disabledReason;
   async function submit() {
+    if (!canSubmit) return;
     const value = draft.trim();
-    if (!value || running || submitting || attachingBasket || disabledReason)
-      return;
     setSubmitting(true);
     shouldFollow.current = true;
     setDraft("");
@@ -308,12 +316,7 @@ export function CodexConversation({
                   type="button"
                   className="codex-send"
                   onClick={() => void submit()}
-                  disabled={
-                    !draft.trim() ||
-                    submitting ||
-                    attachingBasket ||
-                    Boolean(disabledReason)
-                  }
+                  disabled={!canSubmit}
                   aria-label="发送任务"
                 >
                   <svg
