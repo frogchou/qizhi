@@ -80,6 +80,7 @@ function PathList({
 }
 
 export function SettingsPage({ commands, initialCategory }: SettingsPageProps) {
+  const isMac = commands.desktopPlatform === "macos";
   const [activeCategory, setActiveCategory] = useState<SettingsCategory>(
     initialCategory ?? "privacy",
   );
@@ -179,8 +180,12 @@ export function SettingsPage({ commands, initialCategory }: SettingsPageProps) {
       setJevSaved(result);
       setJevApiKey("");
       serviceFeedback("JEV 设置已保存。", "success");
-    } catch {
-      serviceFeedback("JEV 设置未保存，请检查服务地址和凭据。");
+    } catch (error) {
+      serviceFeedback(
+        error === "keychain_unavailable"
+          ? "无法访问登录钥匙串，请解锁后重试。"
+          : "JEV 设置未保存，请检查服务地址和凭据。",
+      );
     }
   }
 
@@ -286,8 +291,12 @@ export function SettingsPage({ commands, initialCategory }: SettingsPageProps) {
         "RAGFlow 设置已保存，可前往知识库加载机器人。",
         "success",
       );
-    } catch {
-      serviceFeedback("RAGFlow 设置未保存，请检查 Base URL 和本机凭据服务。");
+    } catch (error) {
+      serviceFeedback(
+        error === "keychain_unavailable"
+          ? "无法访问登录钥匙串，请解锁后重试。"
+          : "RAGFlow 设置未保存，请检查 Base URL 和本机凭据服务。",
+      );
       setRagflowApiKey("");
     }
   }
@@ -335,7 +344,9 @@ export function SettingsPage({ commands, initialCategory }: SettingsPageProps) {
               <div>
                 <h2 id="privacy-title">扫描与隐私</h2>
                 <p>
-                  仅扫描你允许的文件夹；系统目录、AppData、回收站、网络路径与重解析点始终被排除。
+                  {isMac
+                    ? "仅扫描你允许的工作文件夹。系统目录、符号链接和你指定的排除目录不会纳入。"
+                    : "仅扫描你允许的文件夹；系统目录、AppData、回收站、网络路径与重解析点始终被排除。"}
                 </p>
               </div>
               <div className="path-columns">
@@ -351,8 +362,9 @@ export function SettingsPage({ commands, initialCategory }: SettingsPageProps) {
                     </button>
                   </div>
                   <p>
-                    首次已预填用户目录、桌面、文档、图片和非 C
-                    盘磁盘；可按需移除。
+                    {isMac
+                      ? "请添加允许扫描的工作文件夹。留空时没有扫描范围。"
+                      : "首次已预填用户目录、桌面、文档、图片和非 C 盘磁盘；可按需移除。"}
                   </p>
                   <PathList
                     paths={roots}
@@ -492,7 +504,11 @@ export function SettingsPage({ commands, initialCategory }: SettingsPageProps) {
             >
               <div>
                 <h2 id="services-title">连接服务</h2>
-                <p>凭据保存在 Windows 凭据管理器中，界面只显示掩码。</p>
+                <p>
+                  {isMac
+                    ? "凭据保存在 macOS 钥匙串中，界面只显示掩码。"
+                    : "凭据保存在 Windows 凭据管理器中，界面只显示掩码。"}
+                </p>
               </div>
               <article className="service-card">
                 <div className="service-name">
@@ -500,9 +516,15 @@ export function SettingsPage({ commands, initialCategory }: SettingsPageProps) {
                     <ControlIcon name="search" size={18} />
                   </span>
                   <div>
-                    <h3>本地 NTFS 索引器</h3>
-                    <p>内置服务使用 NTFS 元数据和变更日志发现工作文件。</p>
-                    <p>无需启动或安装 Everything。</p>
+                    <h3>{isMac ? "本地文件索引" : "本地 NTFS 索引器"}</h3>
+                    {isMac ? (
+                      <p>从设置中允许的工作文件夹发现本机文件。</p>
+                    ) : (
+                      <>
+                        <p>内置服务使用 NTFS 元数据和变更日志发现工作文件。</p>
+                        <p>无需启动或安装 Everything。</p>
+                      </>
+                    )}
                   </div>
                 </div>
                 <p
@@ -512,7 +534,11 @@ export function SettingsPage({ commands, initialCategory }: SettingsPageProps) {
                       : "service-state"
                   }
                 >
-                  {ntfsIndexer?.available ? "索引服务已连接" : "索引服务待安装"}
+                  {isMac
+                    ? (ntfsIndexer?.message ?? "正在检查索引状态…")
+                    : ntfsIndexer?.available
+                      ? "索引服务已连接"
+                      : "索引服务待安装"}
                 </p>
               </article>
               <FeedbackScope active={activeCategory === "services"}>

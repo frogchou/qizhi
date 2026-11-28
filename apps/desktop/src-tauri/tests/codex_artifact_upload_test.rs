@@ -1,7 +1,4 @@
-use std::{
-    sync::{Arc, Mutex},
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::sync::{Arc, Mutex};
 
 use qizhi_desktop_lib::{
     codex::{
@@ -46,12 +43,11 @@ fn fixture(
     CodexArtifactUploadService,
     Arc<FakeUploader>,
 ) {
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
+    let root = tempfile::Builder::new()
+        .prefix("qizhi-artifact-upload-")
+        .tempdir()
         .unwrap()
-        .as_nanos();
-    let root = std::env::temp_dir().join(format!("qizhi-artifact-upload-{nonce}"));
-    std::fs::create_dir_all(&root).unwrap();
+        .keep();
     let database = Database::open(&root.join("qizhi.db")).unwrap();
     let files = CodexProjectFiles::new(root.join("projects"));
     let project = database

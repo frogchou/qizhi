@@ -68,7 +68,7 @@ impl IndexerControlPlane {
                     .into_iter()
                     .filter(|candidate| {
                         let path = std::path::Path::new(&candidate.canonical_path);
-                        visibility.is_cached_path_allowed(path) && type_filter.allows(path)
+                        visibility.is_windows_cached_path_allowed(path) && type_filter.allows(path)
                     })
                     .collect()
             })

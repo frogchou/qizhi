@@ -1,8 +1,4 @@
-use std::{
-    fs,
-    path::{Path, PathBuf},
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
+use std::{fs, path::Path, time::Duration};
 
 use qizhi_desktop_lib::{
     app_state::AppState,
@@ -25,24 +21,19 @@ use qizhi_desktop_lib::{
 
 struct Fixture {
     state: AppState,
-    root: PathBuf,
-}
-
-impl Drop for Fixture {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.root);
-    }
+    root: tempfile::TempDir,
 }
 
 fn fixture() -> Fixture {
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("clock")
-        .as_nanos();
-    let root = std::env::current_dir()
+    let target = std::env::current_dir()
         .expect("current directory")
-        .join("target")
-        .join(format!("qizhi-workspace-command-{nonce}"));
+        .join("target");
+    fs::create_dir_all(&target).expect("test target directory");
+    let directory = tempfile::Builder::new()
+        .prefix("qizhi-workspace-command-")
+        .tempdir_in(target)
+        .expect("unique workspace fixture");
+    let root = directory.path();
     let project = root.join("ProjectA").join("src");
     fs::create_dir_all(&project).expect("fixture directories");
     let database = Database::open(&root.join("qizhi.db")).expect("database");
@@ -85,15 +76,16 @@ fn fixture() -> Fixture {
         state: AppState {
             database,
             scan_rules: rules,
+            file_index: Default::default(),
             today_scan_progress: TodayScanProgress::new(),
-            logger: AppLogger::new(&root),
+            logger: AppLogger::new(root),
             workspace_queries,
             codex_runtime,
             codex_handoffs,
             knowledge_selections:
                 qizhi_desktop_lib::knowledge_selection::KnowledgeSelectionStore::default(),
         },
-        root,
+        root: directory,
     }
 }
 
@@ -137,17 +129,138 @@ fn root_query_expands_and_mixed_selection_is_deduplicated() {
     assert_eq!(selected.file_ids.len(), 3);
 }
 
+#[cfg(target_os = "macos")]
+#[test]
+fn macos_expansion_rejects_a_query_created_before_a_directory_was_excluded() {
+    let fixture = fixture();
+    let root = query_workspace(&fixture.state, query_input()).expect("initial query");
+    let parent_id = &root.entries[0].id;
+    assert!(
+        !expand_workspace_query(&fixture.state, &root.query_id, parent_id, 0)
+            .expect("initial expansion")
+            .entries
+            .is_empty()
+    );
+
+    let mut rules = fixture.state.scan_rules.get().expect("read rules");
+    rules.custom_exclusions.push(
+        fixture
+            .root
+            .path()
+            .join("ProjectA/src")
+            .to_string_lossy()
+            .into_owned(),
+    );
+    fixture
+        .state
+        .scan_rules
+        .save(rules)
+        .expect("exclude nested directory");
+
+    assert!(expand_workspace_query(&fixture.state, &root.query_id, parent_id, 0).is_err());
+    assert_eq!(
+        query_workspace(&fixture.state, query_input())
+            .unwrap()
+            .total_file_count,
+        0
+    );
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn macos_expansion_rechecks_directory_permissions_after_the_query() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let fixture = fixture();
+    let page = query_workspace(&fixture.state, query_input()).unwrap();
+    let child =
+        expand_workspace_query(&fixture.state, &page.query_id, &page.entries[0].id, 0).unwrap();
+    let blocked = fixture.root.path().join("ProjectA/src");
+    let permissions = fs::metadata(&blocked).unwrap().permissions();
+    fs::set_permissions(&blocked, fs::Permissions::from_mode(0o111)).unwrap();
+    let result = expand_workspace_query(&fixture.state, &page.query_id, &child.entries[0].id, 0);
+    let selected = resolve_workspace_selection(
+        &fixture.state,
+        WorkspaceSelectionInput {
+            query_id: page.query_id.clone(),
+            file_ids: vec![],
+            directory_ids: vec![child.entries[0].id.clone()],
+        },
+    );
+    fs::set_permissions(&blocked, permissions).unwrap();
+    assert!(result.is_err());
+    assert!(selected.unwrap().file_ids.is_empty());
+
+    let work_root = fixture.root.path();
+    let permissions = fs::metadata(work_root).unwrap().permissions();
+    fs::set_permissions(work_root, fs::Permissions::from_mode(0o111)).unwrap();
+    let root_expansion =
+        expand_workspace_query(&fixture.state, &page.query_id, &page.entries[0].id, 0);
+    let root_selection = resolve_workspace_selection(
+        &fixture.state,
+        WorkspaceSelectionInput {
+            query_id: page.query_id,
+            file_ids: vec![],
+            directory_ids: vec![page.entries[0].id.clone()],
+        },
+    );
+    fs::set_permissions(work_root, permissions).unwrap();
+    assert!(root_expansion.is_err());
+    assert!(root_selection.unwrap().file_ids.is_empty());
+}
+
+#[test]
+fn searches_chinese_fragments_and_wildcards_in_a_nested_work_root() {
+    let fixture = fixture();
+    let work_root = fixture.root.path().join("ProjectA").join("src");
+    let mut rules = fixture.state.scan_rules.get().expect("scan rules");
+    rules.allowed_roots = vec![work_root.to_string_lossy().into_owned()];
+    fixture.state.scan_rules.save(rules).expect("set work root");
+    let (start, _) = qizhi_desktop_lib::commands::today::current_day_bounds();
+    for name in ["测试测试1124.docx", "周报.docx"] {
+        let path = work_root.join(name);
+        fs::write(&path, b"test").expect("write fixture");
+        fixture
+            .state
+            .database
+            .files()
+            .upsert(&FileRecordInput {
+                canonical_path: path.to_string_lossy().into_owned(),
+                file_identity: name.to_owned(),
+                modified_at_utc_ms: start + 10,
+                size_bytes: 4,
+                source: "本机 NTFS 索引".to_owned(),
+            })
+            .expect("index fixture");
+    }
+
+    for (search, expected) in [("测试", "测试测试1124.docx"), ("周*.docx", "周报.docx")] {
+        let page = query_workspace(
+            &fixture.state,
+            WorkspaceQueryInput {
+                search: search.to_owned(),
+                ..query_input()
+            },
+        )
+        .expect("search indexed work files");
+        assert_eq!(page.total_file_count, 1);
+        assert_eq!(page.entries.len(), 1);
+        assert_eq!(page.entries[0].name, expected);
+    }
+}
+
 #[test]
 fn selection_rechecks_deleted_and_newly_excluded_files() {
     let fixture = fixture();
     let root = query_workspace(&fixture.state, query_input()).expect("root query");
     let parent = &root.entries[0];
 
-    fs::remove_file(fixture.root.join("ProjectA/src/one.md")).expect("delete fixture");
+    fs::remove_file(fixture.root.path().join("ProjectA/src/one.md")).expect("delete fixture");
     let mut rules = fixture.state.scan_rules.get().expect("rules");
     rules.custom_exclusions = vec![
         fixture
             .root
+            .path()
             .join("ProjectA/src")
             .to_string_lossy()
             .to_string(),
@@ -193,7 +306,7 @@ fn opening_paths_never_requires_a_visible_scan_root_node() {
     assert!(
         root.entries
             .iter()
-            .all(|entry| Path::new(&entry.canonical_path) != fixture.root)
+            .all(|entry| Path::new(&entry.canonical_path) != fixture.root.path())
     );
 }
 

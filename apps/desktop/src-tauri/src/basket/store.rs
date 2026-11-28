@@ -224,6 +224,16 @@ impl Basket {
         path: &Path,
     ) -> Result<BasketResult, String> {
         let source = safe_open(path)?;
+        self.local_snapshot(kind, label, path, source)
+    }
+
+    pub(crate) fn local_snapshot(
+        &self,
+        kind: &str,
+        label: &str,
+        path: &Path,
+        source: File,
+    ) -> Result<BasketResult, String> {
         let canonical = path.canonicalize().map_err(|_| SOURCE)?;
         let mut identity = canonical.to_string_lossy().into_owned();
         if cfg!(windows) {

@@ -15,6 +15,8 @@ export function CodexSettingsSection({
   commands: QizhiCommands;
 }) {
   const [status, setStatus] = useState<CodexRuntimeStatus | null>(null);
+  const [executable, setExecutable] = useState<string | null>(null);
+  const isMac = commands.desktopPlatform === "macos";
   const [preferences, setPreferences] = useState<CodexPreferences>({
     model: "",
     reasoningEffort: "medium",
@@ -52,7 +54,27 @@ export function CodexSettingsSection({
       .getCodexPreferences?.()
       .then(setPreferences)
       .catch(() => undefined);
+    if (isMac) {
+      commands
+        .getCodexExecutablePath?.()
+        .then(setExecutable)
+        .catch(() => undefined);
+    }
   }, []);
+
+  async function changeExecutable(chooseFile: boolean) {
+    if (!commands.saveCodexExecutablePath) return;
+    try {
+      const selection = chooseFile
+        ? await commands.pickCodexExecutable?.()
+        : null;
+      if (chooseFile && !selection) return;
+      setExecutable(await commands.saveCodexExecutablePath(selection ?? null));
+      notify("Codex 程序设置已保存，重启栖知后生效。", "success");
+    } catch (error) {
+      notify(error instanceof Error ? error.message : String(error));
+    }
+  }
 
   async function save() {
     if (!commands.saveCodexPreferences) return;
@@ -109,10 +131,35 @@ export function CodexSettingsSection({
             <strong>
               {status?.sandbox === "ready"
                 ? "可用"
-                : (status?.sandbox ?? "检测中")}
+                : status?.sandbox === "project_scope"
+                  ? "使用项目权限"
+                  : (status?.sandbox ?? "检测中")}
             </strong>
           </span>
         </div>
+        {isMac &&
+        commands.pickCodexExecutable &&
+        commands.saveCodexExecutablePath ? (
+          <div>
+            <p>Codex 程序 · {executable ?? "从本机自动查找"}</p>
+            <button
+              type="button"
+              className="button secondary"
+              onClick={() => void changeExecutable(true)}
+            >
+              选择 Codex 程序
+            </button>
+            {executable ? (
+              <button
+                type="button"
+                className="button secondary"
+                onClick={() => void changeExecutable(false)}
+              >
+                恢复自动查找
+              </button>
+            ) : null}
+          </div>
+        ) : null}
         <label>
           默认模型
           <select

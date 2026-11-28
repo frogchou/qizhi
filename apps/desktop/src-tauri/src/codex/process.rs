@@ -69,7 +69,11 @@ pub struct CodexInstallationProbe;
 
 impl CodexInstallationProbe {
     pub fn detect() -> CodexInstallationStatus {
-        let Some((program, prefix)) = codex_invocation() else {
+        Self::detect_configured(None)
+    }
+
+    pub(crate) fn detect_configured(selected: Option<&str>) -> CodexInstallationStatus {
+        let Some((program, prefix)) = configured_invocation(selected) else {
             return missing_installation();
         };
         Self::detect_command(&program, &prefix)
@@ -81,6 +85,8 @@ impl CodexInstallationProbe {
 
     fn detect_command(executable: &Path, prefix: &[String]) -> CodexInstallationStatus {
         let mut command = Command::new(executable);
+        #[cfg(target_os = "macos")]
+        configure_macos_child_path(&mut command, executable);
         command
             .args(prefix)
             .arg("--version")
@@ -133,7 +139,12 @@ pub struct AppServerProcess {
 
 impl AppServerProcess {
     pub fn spawn() -> Result<Self, CodexRuntimeError> {
-        let (program, mut arguments) = codex_invocation().ok_or(CodexRuntimeError::NotInstalled)?;
+        Self::spawn_configured(None)
+    }
+
+    pub(crate) fn spawn_configured(selected: Option<&str>) -> Result<Self, CodexRuntimeError> {
+        let (program, mut arguments) =
+            configured_invocation(selected).ok_or(CodexRuntimeError::NotInstalled)?;
         arguments.extend([
             "-c".to_owned(),
             "default_permissions=\"qizhi-project\"".to_owned(),
@@ -148,6 +159,8 @@ impl AppServerProcess {
 
     pub fn spawn_at(executable: &Path, arguments: &[&str]) -> Result<Self, CodexRuntimeError> {
         let mut command = Command::new(executable);
+        #[cfg(target_os = "macos")]
+        configure_macos_child_path(&mut command, executable);
         command
             .args(arguments)
             .stdin(Stdio::piped())
@@ -406,11 +419,72 @@ fn codex_invocation() -> Option<(std::path::PathBuf, Vec<String>)> {
     executable_on_path("codex.exe").map(|program| (program, Vec::new()))
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos")))]
 fn codex_invocation() -> Option<(std::path::PathBuf, Vec<String>)> {
     executable_on_path("codex").map(|program| (program, Vec::new()))
 }
 
+fn configured_invocation(selected: Option<&str>) -> Option<(std::path::PathBuf, Vec<String>)> {
+    #[cfg(target_os = "macos")]
+    if let Some(path) = selected {
+        return macos_executable(path.into()).map(|program| (program, Vec::new()));
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = selected;
+    codex_invocation()
+}
+
+#[cfg(target_os = "macos")]
+fn codex_invocation() -> Option<(std::path::PathBuf, Vec<String>)> {
+    macos_search_path(None)
+        .into_iter()
+        .map(|path| path.join("codex"))
+        .find_map(macos_executable)
+        .map(|program| (program, Vec::new()))
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn macos_executable(path: std::path::PathBuf) -> Option<std::path::PathBuf> {
+    use std::os::unix::fs::PermissionsExt;
+
+    (path.is_absolute()
+        && std::fs::metadata(&path)
+            .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0))
+    .then_some(path)
+}
+
+#[cfg(target_os = "macos")]
+fn macos_search_path(executable: Option<&Path>) -> Vec<std::path::PathBuf> {
+    let mut paths = Vec::new();
+    if let Some(parent) = executable.and_then(Path::parent) {
+        paths.push(parent.to_path_buf());
+    }
+    if let Some(path) = std::env::var_os("PATH") {
+        paths.extend(std::env::split_paths(&path).filter(|path| path.is_absolute()));
+    }
+    paths.extend(
+        ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"]
+            .into_iter()
+            .map(std::path::PathBuf::from),
+    );
+    if let Some(home) = std::env::home_dir() {
+        paths.extend([
+            home.join(".local/bin"),
+            home.join(".npm-global/bin"),
+            home.join(".cargo/bin"),
+        ]);
+    }
+    paths
+}
+
+#[cfg(target_os = "macos")]
+fn configure_macos_child_path(command: &mut Command, executable: &Path) {
+    if let Ok(path) = std::env::join_paths(macos_search_path(Some(executable))) {
+        command.env("PATH", path);
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
 fn executable_on_path(name: &str) -> Option<std::path::PathBuf> {
     std::env::var_os("PATH").and_then(|paths| {
         std::env::split_paths(&paths)

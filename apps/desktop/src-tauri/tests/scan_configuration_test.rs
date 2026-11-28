@@ -17,6 +17,7 @@ fn temporary_rules_path() -> std::path::PathBuf {
 }
 
 #[test]
+#[cfg(not(target_os = "macos"))]
 fn fills_default_roots_for_an_existing_empty_configuration() {
     let path = temporary_rules_path();
     fs::write(
@@ -37,6 +38,32 @@ fn fills_default_roots_for_an_existing_empty_configuration() {
     assert_eq!(rules.allowed_roots, vec![r"D:\Work"]);
     assert_eq!(rules.custom_exclusions, vec![r"D:\Private"]);
     fs::remove_file(path).expect("remove temporary rules");
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn reopening_an_explicitly_empty_macos_scan_scope_keeps_it_empty() {
+    let temporary = tempfile::tempdir().expect("test directory");
+    let path = temporary.path().join("scan-rules.json");
+    let defaults = ScanRules {
+        allowed_roots: vec![temporary.path().to_string_lossy().into_owned()],
+        ..ScanRules::default()
+    };
+    ScanRuleStore::open(&path, defaults.clone())
+        .expect("open rules")
+        .save(ScanRules::default())
+        .expect("save an empty scan scope");
+
+    let rules = ScanRuleStore::open(&path, defaults)
+        .expect("reopen rules")
+        .get()
+        .expect("read rules");
+    assert!(rules.allowed_roots.is_empty());
+    assert!(
+        ScanRules::defaults_for_current_user()
+            .allowed_roots
+            .is_empty()
+    );
 }
 
 #[test]

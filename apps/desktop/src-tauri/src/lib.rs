@@ -6,6 +6,7 @@ pub mod config;
 pub mod contracts;
 pub mod database;
 pub mod factory;
+pub mod file_index;
 pub mod jev;
 pub mod knowledge_selection;
 pub mod network;
@@ -57,9 +58,14 @@ pub fn run() {
             let basket = basket::Basket::new(database.clone(), data_dir.join("material-basket"));
             let _ = basket.purge_orphans();
             app.manage(basket);
+            #[cfg(target_os = "macos")]
+            let index = file_index::WorkspaceFileIndex::open(&data_dir, scan_rules.clone());
+            #[cfg(not(target_os = "macos"))]
+            let index = file_index::WorkspaceFileIndex::default();
             app.manage(app_state::AppState {
                 database,
                 scan_rules,
+                file_index: index,
                 today_scan_progress: scan::progress::TodayScanProgress::new(),
                 logger: telemetry::AppLogger::new(&data_dir),
                 workspace_queries,
@@ -69,12 +75,24 @@ pub fn run() {
             });
             Ok(())
         })
+        .on_window_event(|window, event| {
+            #[cfg(target_os = "macos")]
+            if matches!(event, tauri::WindowEvent::Focused(true))
+                && let Some(state) = window.try_state::<app_state::AppState>()
+            {
+                state.file_index.recheck();
+            }
+            #[cfg(not(target_os = "macos"))]
+            let _ = (window, event);
+        })
         .invoke_handler(tauri::generate_handler![
             commands::codex::get_codex_status,
             commands::codex::refresh_codex_status,
             commands::codex::list_codex_models,
             commands::codex::get_codex_preferences,
             commands::codex::save_codex_preferences,
+            commands::codex::get_codex_executable_path,
+            commands::codex::save_codex_executable_path,
             commands::codex::list_codex_projects,
             commands::codex::create_codex_project,
             commands::codex::rename_codex_project,
@@ -131,6 +149,8 @@ pub fn run() {
             commands::settings::list_scan_rules,
             commands::settings::save_scan_rules,
             commands::today::get_today_snapshot,
+            commands::file_search::search_local_files,
+            commands::file_search::act_on_search_result,
             commands::today::get_recent_snapshot,
             commands::today::get_today_scan_status,
             commands::today::refresh_today,

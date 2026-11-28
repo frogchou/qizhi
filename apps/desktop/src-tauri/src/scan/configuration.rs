@@ -1,8 +1,10 @@
+#[cfg(not(target_os = "macos"))]
+use crate::scan::policy::ScanPolicy;
 use crate::{
     database::AppError,
     scan::{
         file_filter::{FileCategory, default_file_categories},
-        policy::{ScanPolicy, display_path},
+        policy::display_path,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -13,11 +15,37 @@ use std::{
 };
 
 /// Non-removable roots are denied before any local discovery call.
+#[cfg(not(target_os = "macos"))]
 pub const LOCKED_EXCLUSIONS: &[&str] = &[
     r"C:\Windows",
     r"C:\Program Files",
     r"C:\Program Files (x86)",
     r"C:\$Recycle.Bin",
+];
+
+#[cfg(target_os = "macos")]
+pub(crate) fn macos_locked_exclusions() -> Vec<PathBuf> {
+    let mut paths = LOCKED_EXCLUSIONS
+        .iter()
+        .map(PathBuf::from)
+        .collect::<Vec<_>>();
+    if let Some(home) = std::env::home_dir() {
+        paths.push(home.join("Library"));
+    }
+    paths
+}
+
+#[cfg(target_os = "macos")]
+pub const LOCKED_EXCLUSIONS: &[&str] = &[
+    "/System",
+    "/Library",
+    "/Applications",
+    "/bin",
+    "/sbin",
+    "/usr",
+    "/dev",
+    "/private/etc",
+    "/private/var/db",
 ];
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -54,6 +82,12 @@ impl Default for ScanRules {
 }
 
 impl ScanRules {
+    #[cfg(target_os = "macos")]
+    pub fn defaults_for_current_user() -> Self {
+        Self::default()
+    }
+
+    #[cfg(not(target_os = "macos"))]
     pub fn defaults_for_current_user() -> Self {
         let mut allowed_roots = Vec::new();
         if let Some(profile) = std::env::var_os("USERPROFILE").map(PathBuf::from) {
@@ -78,10 +112,19 @@ impl ScanRules {
             ..Self::default()
         }
     }
+    #[cfg(not(target_os = "macos"))]
     pub fn locked_exclusions(&self) -> Vec<String> {
         LOCKED_EXCLUSIONS
             .iter()
             .map(|value| (*value).to_owned())
+            .collect()
+    }
+
+    #[cfg(target_os = "macos")]
+    pub fn locked_exclusions(&self) -> Vec<String> {
+        macos_locked_exclusions()
+            .iter()
+            .map(|path| display_path(path))
             .collect()
     }
 
@@ -100,6 +143,8 @@ impl ScanRules {
 pub struct ScanRuleStore {
     path: PathBuf,
     rules: Arc<Mutex<ScanRules>>,
+    #[cfg(target_os = "macos")]
+    workspace_publication: Arc<Mutex<()>>,
 }
 
 impl ScanRuleStore {
@@ -108,7 +153,7 @@ impl ScanRuleStore {
             .ok()
             .and_then(|value| serde_json::from_str(&value).ok())
             .unwrap_or_else(|| defaults.clone());
-        if rules.allowed_roots.is_empty() {
+        if !cfg!(target_os = "macos") && rules.allowed_roots.is_empty() {
             rules.allowed_roots = defaults.allowed_roots;
         }
         let original_rules = rules.clone();
@@ -120,7 +165,51 @@ impl ScanRuleStore {
         Ok(Self {
             path: path.to_path_buf(),
             rules: Arc::new(Mutex::new(rules)),
+            #[cfg(target_os = "macos")]
+            workspace_publication: Arc::new(Mutex::new(())),
         })
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(crate) fn workspace_publication(&self) -> Result<std::sync::MutexGuard<'_, ()>, AppError> {
+        self.workspace_publication
+            .lock()
+            .map_err(|_| AppError::Storage)
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(crate) fn with_rules<T>(
+        &self,
+        action: impl FnOnce(&ScanRules) -> T,
+    ) -> Result<T, AppError> {
+        let rules = self.rules.lock().map_err(|_| AppError::Storage)?;
+        Ok(action(&rules))
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(crate) fn open_indexed_record(
+        &self,
+        record: &crate::contracts::FileRecord,
+    ) -> Result<fs::File, AppError> {
+        use super::{
+            file_filter::FileTypeFilter,
+            policy::{ScanPolicy, live_scan_roots},
+        };
+
+        self.with_rules(|rules| {
+            if !FileTypeFilter::new(rules.file_categories.clone())
+                .allows(Path::new(&record.canonical_path))
+            {
+                return Err(AppError::InvalidConfig);
+            }
+            let exclusions = rules
+                .custom_exclusions
+                .iter()
+                .map(PathBuf::from)
+                .collect::<Vec<_>>();
+            let roots = live_scan_roots(&rules.allowed_roots, &exclusions)?;
+            ScanPolicy::for_roots(exclusions, roots).open_record(record)
+        })?
     }
     pub fn get(&self) -> Result<ScanRules, AppError> {
         self.rules
@@ -132,8 +221,11 @@ impl ScanRuleStore {
         validate_directory_group_threshold(rules.directory_group_threshold)?;
         rules.normalize_user_paths();
         let text = serde_json::to_string(&rules).map_err(|_| AppError::Storage)?;
+        #[cfg(target_os = "macos")]
+        let _publication = self.workspace_publication()?;
+        let mut current = self.rules.lock().map_err(|_| AppError::Storage)?;
         fs::write(&self.path, text).map_err(|_| AppError::Storage)?;
-        *self.rules.lock().map_err(|_| AppError::Storage)? = rules.clone();
+        *current = rules.clone();
         Ok(rules)
     }
 }
@@ -157,7 +249,7 @@ fn non_system_drive_roots() -> Vec<String> {
         .collect()
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos")))]
 fn non_system_drive_roots() -> Vec<String> {
     vec![]
 }

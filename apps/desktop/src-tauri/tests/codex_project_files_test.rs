@@ -45,8 +45,9 @@ fn creates_an_isolated_layout_and_rejects_untrusted_project_ids_and_paths() {
         files.resolve_workspace_path(project_id, Path::new("../outside")),
         Err(ProjectFileError::UnsafePath)
     ));
+    let outside_project = std::env::current_dir().expect("absolute path outside the project");
     assert!(matches!(
-        files.resolve_material_path(project_id, Path::new("C:\\Windows")),
+        files.resolve_material_path(project_id, &outside_project),
         Err(ProjectFileError::UnsafePath)
     ));
     let _ = fs::remove_dir_all(root);

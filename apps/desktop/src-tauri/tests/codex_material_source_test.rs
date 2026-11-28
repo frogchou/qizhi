@@ -1,9 +1,4 @@
-use std::{
-    fs,
-    io::Read,
-    path::PathBuf,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::{fs, io::Read, path::PathBuf};
 
 use qizhi_desktop_lib::{
     app_state::AppState,
@@ -29,30 +24,23 @@ use qizhi_desktop_lib::{
 use sha2::{Digest, Sha256};
 
 struct Fixture {
-    root: PathBuf,
     state: AppState,
     project_id: String,
     source: PathBuf,
     material_id: String,
     first_version_id: String,
-}
-
-impl Drop for Fixture {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.root);
-    }
+    root: tempfile::TempDir,
 }
 
 impl Fixture {
     fn new() -> Self {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let root = std::env::current_dir()
-            .unwrap()
-            .join("target")
-            .join(format!("qizhi-material-source-{nonce}"));
+        let target = std::env::current_dir().unwrap().join("target");
+        fs::create_dir_all(&target).unwrap();
+        let temporary = tempfile::Builder::new()
+            .prefix("qizhi-material-source-")
+            .tempdir_in(target)
+            .unwrap();
+        let root = temporary.path();
         let sources = root.join("sources");
         fs::create_dir_all(&sources).unwrap();
         let source = sources.join("report.md");
@@ -125,6 +113,7 @@ impl Fixture {
         let state = AppState {
             database,
             scan_rules: rules,
+            file_index: Default::default(),
             today_scan_progress: TodayScanProgress::new(),
             logger: AppLogger::new(&root),
             workspace_queries: queries,
@@ -133,7 +122,7 @@ impl Fixture {
             knowledge_selections: KnowledgeSelectionStore::default(),
         };
         Self {
-            root,
+            root: temporary,
             state,
             project_id: project.id,
             source,
@@ -141,6 +130,79 @@ impl Fixture {
             first_version_id: first_version.id,
         }
     }
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn indexed_material_loses_original_access_after_exclusion_or_same_path_replacement() {
+    use qizhi_desktop_lib::{contracts::LocalDayRange, file_index::macos::MacWorkspaceIndex};
+    use std::{
+        thread,
+        time::{Duration, Instant},
+    };
+
+    let fixture = Fixture::new();
+    let index = MacWorkspaceIndex::open(fixture.root.path(), fixture.state.scan_rules.clone());
+    let deadline = Instant::now() + Duration::from_secs(8);
+    let record = loop {
+        let snapshot = index
+            .snapshot(LocalDayRange::new(0, i64::MAX), true)
+            .unwrap();
+        if let Some(record) = snapshot.records.into_iter().next() {
+            break record;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "wait for the native index to record the fixture"
+        );
+        thread::sleep(Duration::from_millis(75));
+    };
+    fixture.state.database.files().upsert(&record).unwrap();
+    let material = fixture
+        .state
+        .database
+        .codex()
+        .create_material_with_metadata(
+            &fixture.project_id,
+            "local",
+            "indexed.md",
+            Some("local:1:mac-fixture"),
+            Some(
+                &serde_json::json!({"fileId": 1, "fileIdentity": record.file_identity}).to_string(),
+            ),
+            200,
+        )
+        .unwrap();
+    let inspect = || {
+        inspect_codex_material_sources_with_state(&fixture.project_id, &fixture.state)
+            .unwrap()
+            .into_iter()
+            .find(|status| status.material_id == material.id)
+            .unwrap()
+    };
+    assert!(inspect().revealable);
+    let rules = fixture.state.scan_rules.get().unwrap();
+    let mut excluded = rules.clone();
+    excluded.custom_exclusions = rules.allowed_roots.clone();
+    fixture.state.scan_rules.save(excluded).unwrap();
+    assert!(!inspect().refreshable);
+    assert!(
+        refresh_codex_material_with_state(&fixture.project_id, &material.id, &fixture.state)
+            .is_err()
+    );
+
+    fixture.state.scan_rules.save(rules).unwrap();
+    fs::rename(
+        &fixture.source,
+        fixture.source.with_file_name("previous.md"),
+    )
+    .unwrap();
+    fs::write(&fixture.source, "unrelated replacement").unwrap();
+    assert!(!inspect().revealable);
+    assert!(
+        refresh_codex_material_with_state(&fixture.project_id, &material.id, &fixture.state)
+            .is_err()
+    );
 }
 
 #[test]
@@ -250,7 +312,11 @@ fn reports_missing_snapshot_only_original_only_and_busy_states() {
             130,
         )
         .unwrap();
-    let docx = fixture.root.join("sources").join("original-only.docx");
+    let docx = fixture
+        .root
+        .path()
+        .join("sources")
+        .join("original-only.docx");
     fs::write(&docx, b"not-a-real-archive").unwrap();
     let docx_material = fixture
         .state

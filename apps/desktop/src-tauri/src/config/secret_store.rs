@@ -12,33 +12,61 @@ pub trait SecretStore: Clone + Send + Sync + 'static {
 }
 
 #[derive(Clone, Default)]
-pub struct WindowsCredentialStore;
+pub struct SystemCredentialStore;
 
-impl WindowsCredentialStore {
+impl SystemCredentialStore {
     fn entry(reference: &str) -> Result<keyring::Entry, AppError> {
-        keyring::Entry::new("qizhi", reference).map_err(|_| AppError::Storage)
+        keyring::Entry::new("qizhi", reference).map_err(credential_error)
     }
 }
 
-impl SecretStore for WindowsCredentialStore {
+impl SecretStore for SystemCredentialStore {
     fn put(&self, reference: &str, secret: &str) -> Result<(), AppError> {
         Self::entry(reference)?
             .set_password(secret)
-            .map_err(|_| AppError::Storage)
+            .map_err(credential_error)
     }
     fn get(&self, reference: &str) -> Result<String, AppError> {
         Self::entry(reference)?
             .get_password()
-            .map_err(|_| AppError::Storage)
+            .map_err(credential_error)
     }
     fn delete(&self, reference: &str) -> Result<(), AppError> {
         Self::entry(reference)?
             .delete_credential()
-            .map_err(|_| AppError::Storage)
+            .map_err(credential_error)
     }
     fn exists(&self, reference: &str) -> Result<bool, AppError> {
+        #[cfg(target_os = "macos")]
+        return match Self::entry(reference)?.get_password() {
+            Ok(_) => Ok(true),
+            Err(keyring::Error::NoEntry) => Ok(false),
+            Err(error) => Err(credential_error(error)),
+        };
+        #[cfg(not(target_os = "macos"))]
         Ok(Self::entry(reference)?.get_password().is_ok())
     }
+}
+
+fn credential_error(error: keyring::Error) -> AppError {
+    #[cfg(target_os = "macos")]
+    if matches!(
+        error,
+        keyring::Error::NoStorageAccess(_) | keyring::Error::PlatformFailure(_)
+    ) {
+        return AppError::KeychainUnavailable;
+    }
+    let _ = error;
+    AppError::Storage
+}
+
+pub(crate) fn credential_message(error: AppError, fallback: &str) -> String {
+    #[cfg(target_os = "macos")]
+    if matches!(error, AppError::KeychainUnavailable) {
+        return "无法访问登录钥匙串，请解锁或允许栖知访问后重试。".to_owned();
+    }
+    let _ = error;
+    fallback.to_owned()
 }
 
 #[derive(Clone, Default)]

@@ -11,7 +11,10 @@ use serde_json::Value;
 use url::Url;
 
 use crate::{
-    config::{SecretStore, secret_store::WindowsCredentialStore},
+    config::{
+        SecretStore,
+        secret_store::{SystemCredentialStore, credential_message},
+    },
     database::repositories::ConfigRepository,
     network::http::HttpClient,
 };
@@ -254,15 +257,15 @@ impl RagflowClient {
 
     pub fn from_saved_config(
         configs: ConfigRepository,
-        secrets: WindowsCredentialStore,
+        secrets: SystemCredentialStore,
     ) -> Result<Self, String> {
         let config = configs
             .find("ragflow")
             .map_err(|_| "无法读取 RAGFlow 设置。".to_owned())?
             .ok_or_else(|| "请先在设置中保存 RAGFlow Base URL 和 API Key。".to_owned())?;
-        let api_key = secrets
-            .get(&config.credential_reference)
-            .map_err(|_| "无法读取 RAGFlow API Key，请在设置中重新保存。".to_owned())?;
+        let api_key = secrets.get(&config.credential_reference).map_err(|error| {
+            credential_message(error, "无法读取 RAGFlow API Key，请在设置中重新保存。")
+        })?;
         Self::new(&config.endpoint, api_key)
     }
 
@@ -445,6 +448,35 @@ impl RagflowClient {
         parent_path: Option<&str>,
         start_parsing: bool,
     ) -> Result<RagflowUpload, RagflowUploadFailure> {
+        self.upload_document_source(file_path, dataset_id, parent_path, start_parsing, || {
+            File::open(file_path)
+                .map_err(|_| "无法读取要上传的文件，它可能已移动或没有访问权限。".to_owned())
+        })
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(crate) fn upload_open_document(
+        &self,
+        file_path: &Path,
+        file: File,
+        dataset_id: &str,
+        parent_path: Option<&str>,
+        start_parsing: bool,
+    ) -> Result<RagflowUpload, String> {
+        self.upload_document_source(file_path, dataset_id, parent_path, start_parsing, || {
+            Ok(file)
+        })
+        .map_err(RagflowUploadFailure::message)
+    }
+
+    fn upload_document_source(
+        &self,
+        file_path: &Path,
+        dataset_id: &str,
+        parent_path: Option<&str>,
+        start_parsing: bool,
+        open: impl FnOnce() -> Result<File, String>,
+    ) -> Result<RagflowUpload, RagflowUploadFailure> {
         if !is_resource_id(dataset_id) {
             return Err(RagflowUploadFailure::BeforeRequest(
                 "目标知识库无效。".to_owned(),
@@ -467,9 +499,9 @@ impl RagflowClient {
             ));
         }
         let boundary = upload_boundary();
-        let (body, content_length) =
-            build_upload_body(&boundary, file_name, file_path, parent_path)
-                .map_err(RagflowUploadFailure::BeforeRequest)?;
+        let file = open().map_err(RagflowUploadFailure::BeforeRequest)?;
+        let (body, content_length) = build_upload_body(&boundary, file_name, file, parent_path)
+            .map_err(RagflowUploadFailure::BeforeRequest)?;
         let url = self
             .api_url(&format!("/api/v1/datasets/{dataset_id}/documents"))
             .map_err(RagflowUploadFailure::BeforeRequest)?;
@@ -1296,11 +1328,9 @@ fn push_multipart_text(
 fn build_upload_body(
     boundary: &str,
     file_name: &str,
-    file_path: &Path,
+    file: File,
     parent_path: Option<&str>,
 ) -> Result<(MultipartUploadBody, u64), String> {
-    let file = File::open(file_path)
-        .map_err(|_| "无法读取要上传的文件，它可能已移动或没有访问权限。".to_owned())?;
     let file_size = file
         .metadata()
         .map_err(|_| "无法读取要上传的文件，它可能已移动或没有访问权限。".to_owned())?
@@ -1419,9 +1449,13 @@ mod transport_tests {
         ));
         std::fs::write(&path, b"file body").expect("write fixture");
 
-        let (mut body, length) =
-            build_upload_body("boundary", "fixture.txt", &path, Some("项目/资料"))
-                .expect("build streaming multipart body");
+        let (mut body, length) = build_upload_body(
+            "boundary",
+            "fixture.txt",
+            std::fs::File::open(&path).unwrap(),
+            Some("项目/资料"),
+        )
+        .expect("build streaming multipart body");
         let mut bytes = Vec::new();
         body.read_to_end(&mut bytes).expect("read body");
         let text = String::from_utf8(bytes).expect("utf8 fixture body");

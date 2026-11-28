@@ -9,6 +9,7 @@ pub mod snapshot;
 pub mod usn;
 pub mod volume;
 pub mod win32;
+#[cfg(windows)]
 pub mod windows_service;
 
 pub use control::{IndexExecutor, IndexerControlPlane};

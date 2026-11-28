@@ -27,6 +27,44 @@ describe("App", () => {
     ).toBeInTheDocument();
   });
 
+  it("offers quick local search on macOS only", async () => {
+    const searchLocalFiles = vi
+      .fn()
+      .mockResolvedValue({ files: [], nextCursor: null, coverage: [] });
+    const windows = render(
+      <App
+        commands={{
+          ...unavailableCommands,
+          desktopPlatform: "windows",
+          searchLocalFiles,
+        }}
+      />,
+    );
+    expect(
+      screen.queryByRole("button", { name: "快速查找" }),
+    ).not.toBeInTheDocument();
+    windows.unmount();
+    render(
+      <App
+        commands={{
+          ...unavailableCommands,
+          desktopPlatform: "macos",
+          searchLocalFiles,
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "快速查找" }));
+    expect(
+      screen.getByRole("searchbox", { name: "查找文件名或路径" }),
+    ).toBeVisible();
+    await waitFor(() =>
+      expect(searchLocalFiles).toHaveBeenCalledWith({
+        query: "",
+        cursor: null,
+      }),
+    );
+  });
+
   it("keeps the knowledge conversation and selected resources while navigating inside the app", async () => {
     const commands: QizhiCommands = {
       ...unavailableCommands,

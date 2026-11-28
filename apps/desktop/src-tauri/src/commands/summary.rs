@@ -10,7 +10,7 @@ use tauri::{State, ipc::Channel};
 
 use crate::{
     app_state::AppState,
-    config::secret_store::WindowsCredentialStore,
+    config::secret_store::SystemCredentialStore,
     contracts::{SummarySettings, SummarySettingsInput},
     openai::{
         OpenAiClient, SummaryFileInput, SummaryGeneration,
@@ -19,7 +19,7 @@ use crate::{
     ragflow::client::{RagflowClient, RagflowUpload},
     scan::{
         file_filter::{FileCategory, FileTypeFilter},
-        policy::{ScanPolicy, active_roots},
+        policy::{ScanPolicy, live_scan_roots},
     },
 };
 
@@ -288,7 +288,7 @@ fn resolve_summary_selection(
         .iter()
         .map(PathBuf::from)
         .collect::<Vec<_>>();
-    let roots = active_roots(&rules.allowed_roots, &exclusions)
+    let roots = live_scan_roots(&rules.allowed_roots, &exclusions)
         .map_err(|_| "扫描目录无效，请在设置中重新保存。".to_owned())?;
     let policy = ScanPolicy::for_roots(exclusions, roots);
     let configured_filter = FileTypeFilter::new(rules.file_categories);
@@ -302,8 +302,8 @@ fn resolve_summary_selection(
         else {
             continue;
         };
-        let path = PathBuf::from(file.canonical_path);
-        if !configured_filter.allows(&path) || !policy.is_allowed(&path) {
+        let path = PathBuf::from(&file.canonical_path);
+        if !configured_filter.allows(&path) || !policy.is_allowed_record(&file) {
             continue;
         }
         if is_summary_candidate(&path) {
@@ -396,7 +396,7 @@ where
     });
     let client = OpenAiClient::from_active_provider(
         state.database.model_providers(),
-        WindowsCredentialStore,
+        SystemCredentialStore,
     )?;
     let generated = if batches.len() == 1 {
         let files = load_summary_files(state, &batches[0])?;
@@ -491,7 +491,7 @@ fn load_summary_files(state: &AppState, file_ids: &[i64]) -> Result<Vec<SummaryF
         .iter()
         .map(PathBuf::from)
         .collect::<Vec<_>>();
-    let roots = active_roots(&rules.allowed_roots, &exclusions)
+    let roots = live_scan_roots(&rules.allowed_roots, &exclusions)
         .map_err(|_| "扫描目录无效，请在设置中重新保存。".to_owned())?;
     let policy = ScanPolicy::for_roots(exclusions, roots);
     let configured_filter = FileTypeFilter::new(rules.file_categories);
@@ -505,14 +505,22 @@ fn load_summary_files(state: &AppState, file_ids: &[i64]) -> Result<Vec<SummaryF
             .map_err(|_| "无法读取所选文件。".to_owned())?
             .ok_or_else(|| "所选文件已不在列表中，请刷新后重试。".to_owned())?;
         let path = PathBuf::from(&file.canonical_path);
-        if !policy.is_allowed(&path) || !configured_filter.allows(&path) {
+        if !policy.is_allowed_record(&file) || !configured_filter.allows(&path) {
             return Err("所选文件已不在允许扫描范围内。".to_owned());
         }
         if !is_summary_candidate(&path) {
             return Err("今日总结暂不支持图片，请选择文档、文本或源代码。".to_owned());
         }
-        let metadata =
-            std::fs::metadata(&path).map_err(|_| "所选文件可能已移动或无法访问。".to_owned())?;
+        #[cfg(target_os = "macos")]
+        let mut opened = state
+            .scan_rules
+            .open_indexed_record(&file)
+            .map_err(|_| "所选文件可能已移动、变更或无法访问。".to_owned())?;
+        #[cfg(target_os = "macos")]
+        let metadata = opened.metadata();
+        #[cfg(not(target_os = "macos"))]
+        let metadata = std::fs::metadata(&path);
+        let metadata = metadata.map_err(|_| "所选文件可能已移动或无法访问。".to_owned())?;
         total_bytes = total_bytes
             .checked_add(metadata.len())
             .ok_or_else(|| "所选文件合计过大。".to_owned())?;
@@ -521,10 +529,18 @@ fn load_summary_files(state: &AppState, file_ids: &[i64]) -> Result<Vec<SummaryF
             .and_then(|value| value.to_str())
             .ok_or_else(|| "文件名无法识别。".to_owned())?
             .to_owned();
+        #[cfg(target_os = "macos")]
+        let bytes = {
+            use std::io::Read;
+            let mut bytes = Vec::new();
+            opened.read_to_end(&mut bytes).map(|_| bytes)
+        };
+        #[cfg(not(target_os = "macos"))]
+        let bytes = std::fs::read(&path);
         files.push(SummaryFileInput {
             name,
             mime_type: mime_type(&path).to_owned(),
-            bytes: std::fs::read(path).map_err(|_| "无法读取所选文件内容。".to_owned())?,
+            bytes: bytes.map_err(|_| "无法读取所选文件内容。".to_owned())?,
         });
     }
     validate_summary_limits(file_ids, total_bytes)?;
@@ -607,7 +623,7 @@ pub async fn upload_summary_markdown(
             document_count,
             parsing_started,
             parsing_error,
-        } = RagflowClient::from_saved_config(state.database.configs(), WindowsCredentialStore)?
+        } = RagflowClient::from_saved_config(state.database.configs(), SystemCredentialStore)?
             .upload_markdown(
                 &filename,
                 input.content.as_bytes(),

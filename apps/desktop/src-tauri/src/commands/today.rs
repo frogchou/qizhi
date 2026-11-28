@@ -9,23 +9,26 @@ use tauri::State;
 
 use crate::{
     app_state::AppState,
-    contracts::{FileRecord, FileRecordInput, LocalDayRange},
-    database::{AppError, repositories::FileRepository},
-    ntfs::{
-        ipc::{INDEXER_PROTOCOL_VERSION, IndexerRequest, IndexerRequestKind},
-        pipe::call_indexer_service,
-    },
+    contracts::{FileRecord, LocalDayRange},
+    file_index::resolved_size_bytes,
     scan::{
         configuration::ScanRules,
         file_filter::{FileCategory, FileTypeFilter},
-        policy::{AllowedRoot, ScanPolicy, active_roots, display_path},
+        policy::{AllowedRoot, ScanPolicy, active_roots, display_path, live_scan_roots},
         progress::TodayScanStatus,
     },
-    system::explorer::{ExplorerLauncher, WindowsProcessLauncher},
+    system::explorer::{ExplorerLauncher, SystemProcessLauncher},
     today_workspace::{
         WorkspaceBuildInput, WorkspaceCategory, WorkspacePage, WorkspaceSort, WorkspaceTree,
     },
 };
+
+#[cfg(any(not(target_os = "macos"), test))]
+use crate::database::{AppError, repositories::FileRepository};
+#[cfg(target_os = "macos")]
+use crate::file_index::macos::{MacRootCoverage, MacRootState};
+#[cfg(not(target_os = "macos"))]
+use crate::file_index::{IndexPeriod, IndexRefresh};
 
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -82,6 +85,9 @@ pub struct TodayReady {
     state: &'static str,
     files: Vec<TodayFile>,
     clusters: Vec<TodayCluster>,
+    #[cfg(target_os = "macos")]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    coverage: Vec<MacRootCoverage>,
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -119,9 +125,65 @@ pub(crate) fn rules(state: &AppState) -> Result<ActiveRules, TodayUnavailable> {
     if allowed_roots.is_empty() {
         return Err(unavailable("请先在设置中添加允许扫描的工作目录。"));
     }
-    let roots = active_roots(&allowed_roots, &exclusions)
+    let roots = live_scan_roots(&allowed_roots, &exclusions)
         .map_err(|_| unavailable("扫描目录无效，请在设置中重新保存。"))?;
     Ok((roots, exclusions, file_categories))
+}
+
+fn workspace_day_range(scope: WorkspaceScope, days: Option<u8>) -> LocalDayRange {
+    let (start, end) = match scope {
+        WorkspaceScope::Today => current_day_bounds(),
+        WorkspaceScope::Recent => recent_day_bounds(days.unwrap_or(5)),
+    };
+    LocalDayRange::new(start, end)
+}
+
+#[cfg(target_os = "macos")]
+fn macos_workspace_files(
+    state: &AppState,
+    range: LocalDayRange,
+    flush: bool,
+) -> Result<(Vec<FileRecord>, Vec<MacRootCoverage>), TodayUnavailable> {
+    let _publication = state
+        .scan_rules
+        .workspace_publication()
+        .map_err(|_| unavailable("无法同步扫描规则，请重试。"))?;
+    let rules = state
+        .scan_rules
+        .get()
+        .map_err(|_| unavailable("无法读取本地扫描规则。"))?;
+    if rules.allowed_roots.is_empty() {
+        return Err(unavailable("请先在设置中添加允许扫描的工作目录。"));
+    }
+    let snapshot = state
+        .file_index
+        .snapshot(range, flush)
+        .map_err(|error| unavailable(error.to_string()))?;
+    let filter = FileTypeFilter::new(rules.file_categories.clone());
+    let covered = snapshot
+        .coverage
+        .iter()
+        .filter(|root| root.state == MacRootState::Ready)
+        .map(|root| root.path.as_str())
+        .collect::<Vec<_>>();
+    let files = state
+        .database
+        .files()
+        .publish_macos_index(range, &snapshot.records, &filter, &covered)
+        .map_err(|_| unavailable("无法更新本地工作文件。"))?;
+    Ok((files, snapshot.coverage))
+}
+
+#[cfg(target_os = "macos")]
+fn macos_today_ready(
+    state: &AppState,
+    range: LocalDayRange,
+    flush: bool,
+) -> Result<TodayReady, TodayUnavailable> {
+    let (files, coverage) = macos_workspace_files(state, range, flush)?;
+    let mut ready = ready_from_files(files);
+    ready.coverage = coverage;
+    Ok(ready)
 }
 
 fn exclude_parent_from_rules(mut rules: ScanRules, file: &FileRecord) -> Result<ScanRules, String> {
@@ -130,63 +192,27 @@ fn exclude_parent_from_rules(mut rules: ScanRules, file: &FileRecord) -> Result<
         .filter(|path| path.is_absolute())
         .ok_or_else(|| "无法识别该文件所在目录。".to_owned())?;
     let parent = display_path(parent);
-    if !rules
-        .custom_exclusions
-        .iter()
-        .any(|existing| existing.eq_ignore_ascii_case(&parent))
-    {
+    if !rules.custom_exclusions.iter().any(|existing| {
+        if cfg!(windows) {
+            existing.eq_ignore_ascii_case(&parent)
+        } else {
+            Path::new(existing) == Path::new(&parent)
+        }
+    }) {
         rules.custom_exclusions.push(parent);
     }
     Ok(rules)
 }
 
 fn configure_indexer_after_rule_change(state: &AppState, rules: &ScanRules) {
-    let exclusions = rules
-        .custom_exclusions
-        .iter()
-        .map(PathBuf::from)
-        .collect::<Vec<_>>();
-    let roots = match active_roots(&rules.allowed_roots, &exclusions) {
-        Ok(roots) => roots,
-        Err(_) => {
-            state.logger.error(
-                "today-index",
-                "directory exclusion saved locally but local indexer configuration is invalid",
-            );
-            return;
-        }
-    };
-    let request = IndexerRequest {
-        protocol_version: INDEXER_PROTOCOL_VERSION,
-        request_id: format!(
-            "today-exclude-configure-{}",
-            chrono::Utc::now().timestamp_millis()
-        ),
-        kind: IndexerRequestKind::Configure {
-            allowed_roots: roots.iter().map(|root| display_path(&root.0)).collect(),
-            excluded_roots: rules.custom_exclusions.clone(),
-            file_categories: rules.file_categories.clone(),
-        },
-    };
-    match call_indexer_service(&request) {
-        Ok(response) if response.status == "ready" => state.logger.info(
+    match state.file_index.configure(rules) {
+        Ok(()) => state.logger.info(
             "today-index",
-            "directory exclusion synchronized to local NTFS indexer",
-        ),
-        Ok(response) => state.logger.error(
-            "today-index",
-            &format!(
-                "directory exclusion saved locally but indexer synchronization failed: {}",
-                response
-                    .message
-                    .unwrap_or_else(|| "local indexer rejected configuration".to_owned())
-            ),
+            "directory exclusion synchronized to the local index",
         ),
         Err(error) => state.logger.error(
             "today-index",
-            &format!(
-                "directory exclusion saved locally but indexer synchronization failed: {error}"
-            ),
+            &format!("directory exclusion saved locally but index synchronization failed: {error}"),
         ),
     }
 }
@@ -206,10 +232,31 @@ pub fn current_day_bounds() -> (i64, i64) {
     (start.timestamp_millis(), end.timestamp_millis())
 }
 
+#[cfg(not(target_os = "macos"))]
 fn recent_day_bounds(days: u8) -> (i64, i64) {
     let (today_start, _) = current_day_bounds();
     let days = i64::from(days.clamp(1, 5));
     (today_start - days * 24 * 60 * 60 * 1_000, today_start)
+}
+
+#[cfg(target_os = "macos")]
+fn recent_day_bounds(days: u8) -> (i64, i64) {
+    mac_recent_day_bounds(Local::now().date_naive(), days)
+}
+
+#[cfg(target_os = "macos")]
+fn mac_recent_day_bounds(today: chrono::NaiveDate, days: u8) -> (i64, i64) {
+    let start = today
+        .checked_sub_days(chrono::Days::new(u64::from(days.clamp(1, 5))))
+        .expect("past local calendar day");
+    let midnight = |date: chrono::NaiveDate| {
+        Local
+            .with_ymd_and_hms(date.year(), date.month(), date.day(), 0, 0, 0)
+            .earliest()
+            .expect("local midnight is representable")
+            .timestamp_millis()
+    };
+    (midnight(start), midnight(today))
 }
 
 #[cfg(test)]
@@ -222,7 +269,13 @@ fn refresh(state: &AppState) -> Result<TodayReady, TodayUnavailable> {
     }
     state
         .logger
-        .info("today-index", "today NTFS index synchronization started");
+        .info("today-index", "today file index synchronization started");
+    #[cfg(target_os = "macos")]
+    let result = {
+        let (start, end) = current_day_bounds();
+        macos_today_ready(state, LocalDayRange::new(start, end), true)
+    };
+    #[cfg(not(target_os = "macos"))]
     let result: Result<TodayReady, TodayUnavailable> = (|| {
         let (roots, exclusions, file_categories) = rules(state)?;
         let (start, end) = current_day_bounds();
@@ -241,61 +294,21 @@ fn refresh(state: &AppState) -> Result<TodayReady, TodayUnavailable> {
             )
             .map_err(|_| unavailable("无法读取本地 NTFS 索引结果。"));
         }
-        let configure = IndexerRequest {
-            protocol_version: INDEXER_PROTOCOL_VERSION,
-            request_id: format!("today-configure-{}", chrono::Utc::now().timestamp_millis()),
-            kind: IndexerRequestKind::Configure {
-                allowed_roots: roots
-                    .iter()
-                    .map(|root| crate::scan::policy::display_path(&root.0))
-                    .collect(),
-                excluded_roots: exclusions
-                    .iter()
-                    .map(|path| crate::scan::policy::display_path(path))
-                    .collect(),
-                file_categories: file_categories.clone(),
-            },
-        };
-        ensure_ready_response(call_indexer_service(&configure))?;
-        let sync = IndexerRequest {
-            protocol_version: INDEXER_PROTOCOL_VERSION,
-            request_id: format!("today-sync-{}", chrono::Utc::now().timestamp_millis()),
-            kind: IndexerRequestKind::Sync,
-        };
-        ensure_accepted_response(call_indexer_service(&sync))?;
-        let query = IndexerRequest {
-            protocol_version: INDEXER_PROTOCOL_VERSION,
-            request_id: format!("today-list-{}", chrono::Utc::now().timestamp_millis()),
-            kind: IndexerRequestKind::ListToday {
-                start_utc_ms: start,
-                end_utc_ms: end,
-            },
-        };
-        let response = call_indexer_service(&query).map_err(unavailable)?;
-        if response.status != "ready" {
-            return Err(unavailable(response.message.unwrap_or_else(|| {
-                "本地 NTFS 索引服务无法返回今日文件。".to_owned()
-            })));
-        }
-        let records = response
-            .candidates
-            .into_iter()
-            .map(|candidate| {
-                let size_bytes =
-                    resolved_size_bytes(Path::new(&candidate.canonical_path), candidate.size_bytes);
-                FileRecordInput {
-                    canonical_path: candidate.canonical_path,
-                    file_identity: candidate.file_reference_number,
-                    modified_at_utc_ms: candidate.modified_at_utc_ms,
-                    size_bytes,
-                    source: "本机 NTFS 索引".to_owned(),
-                }
+        let range = LocalDayRange::new(start, end);
+        let snapshot = state
+            .file_index
+            .refresh_range(IndexRefresh {
+                period: IndexPeriod::Today,
+                range,
+                roots: &roots,
+                exclusions: &exclusions,
+                categories: &file_categories,
             })
-            .collect::<Vec<_>>();
+            .map_err(|error| unavailable(error.to_string()))?;
         state
             .database
             .files()
-            .replace_indexed_for_local_day(LocalDayRange::new(start, end), &records)
+            .replace_indexed_for_local_day(range, &snapshot.records)
             .map_err(|_| unavailable("无法保存本地 NTFS 索引结果。"))?;
         cached_snapshot_for_range(
             state.database.files(),
@@ -312,7 +325,7 @@ fn refresh(state: &AppState) -> Result<TodayReady, TodayUnavailable> {
             state.logger.info(
                 "today-index",
                 &format!(
-                    "today NTFS index synchronization completed with {} files",
+                    "today file index synchronization completed with {} files",
                     snapshot.files.len()
                 ),
             );
@@ -322,7 +335,7 @@ fn refresh(state: &AppState) -> Result<TodayReady, TodayUnavailable> {
             state.logger.error(
                 "today-index",
                 &format!(
-                    "today NTFS index synchronization failed: {}",
+                    "today file index synchronization failed: {}",
                     error.remediation
                 ),
             );
@@ -331,6 +344,7 @@ fn refresh(state: &AppState) -> Result<TodayReady, TodayUnavailable> {
     result
 }
 
+#[cfg(any(not(target_os = "macos"), test))]
 fn cached_snapshot_for_range(
     files: FileRepository,
     start_utc_ms: i64,
@@ -365,6 +379,8 @@ fn ready_from_files(files: Vec<FileRecord>) -> TodayReady {
     }
     TodayReady {
         state: "ready",
+        #[cfg(target_os = "macos")]
+        coverage: vec![],
         files: files
             .into_iter()
             .map(|file| {
@@ -390,37 +406,17 @@ fn ready_from_files(files: Vec<FileRecord>) -> TodayReady {
     }
 }
 
-fn ensure_ready_response(
-    response: Result<crate::ntfs::ipc::IndexerResponse, String>,
-) -> Result<(), TodayUnavailable> {
-    match response {
-        Ok(response) if response.status == "ready" => Ok(()),
-        Ok(response) => {
-            Err(unavailable(response.message.unwrap_or_else(|| {
-                "本地 NTFS 索引服务拒绝了扫描范围。".to_owned()
-            })))
-        }
-        Err(message) => Err(unavailable(message)),
-    }
-}
-
-fn ensure_accepted_response(
-    response: Result<crate::ntfs::ipc::IndexerResponse, String>,
-) -> Result<(), TodayUnavailable> {
-    match response {
-        Ok(response) if response.status == "accepted" || response.status == "ready" => Ok(()),
-        Ok(response) => {
-            Err(unavailable(response.message.unwrap_or_else(|| {
-                "本地 NTFS 索引服务无法启动同步。".to_owned()
-            })))
-        }
-        Err(message) => Err(unavailable(message)),
-    }
-}
-
 pub fn query_workspace(
     state: &AppState,
     input: WorkspaceQueryInput,
+) -> Result<WorkspacePage, String> {
+    build_workspace_query(state, input, None)
+}
+
+fn build_workspace_query(
+    state: &AppState,
+    input: WorkspaceQueryInput,
+    indexed: Option<Vec<FileRecord>>,
 ) -> Result<WorkspacePage, String> {
     let saved_rules = state
         .scan_rules
@@ -434,22 +430,32 @@ pub fn query_workspace(
         .iter()
         .map(PathBuf::from)
         .collect::<Vec<_>>();
-    let roots = active_roots(&saved_rules.allowed_roots, &exclusions)
-        .map_err(|_| "扫描目录无效，请在设置中重新保存。".to_owned())?;
-    let (start, end) = match input.scope {
-        WorkspaceScope::Today => current_day_bounds(),
-        WorkspaceScope::Recent => recent_day_bounds(input.days.unwrap_or(5)),
-    };
+    let roots = if indexed.is_some() {
+        live_scan_roots(&saved_rules.allowed_roots, &exclusions)
+    } else {
+        active_roots(&saved_rules.allowed_roots, &exclusions)
+    }
+    .map_err(|_| "扫描目录无效，请在设置中重新保存。".to_owned())?;
     let policy = ScanPolicy::for_roots(exclusions, roots.clone());
     let file_filter = FileTypeFilter::new(saved_rules.file_categories.clone());
-    let files = state
-        .database
-        .files()
-        .list_for_local_day(LocalDayRange::new(start, end))
-        .map_err(|_| "无法读取本地工作文件索引。".to_owned())?
+    let records = match indexed {
+        Some(records) => records,
+        None => state
+            .database
+            .files()
+            .list_for_local_day(workspace_day_range(input.scope, input.days))
+            .map_err(|_| "无法读取本地工作文件索引。".to_owned())?,
+    };
+    let files = records
         .into_iter()
         .filter(|file| is_visible_today_file(file, &file_filter, &policy))
         .collect::<Vec<_>>();
+    let allowed_roots = if roots.is_empty() && cfg!(target_os = "macos") {
+        // An empty, partially covered Mac workspace still needs a query ID for the current view.
+        saved_rules.allowed_roots.clone()
+    } else {
+        roots.iter().map(|root| display_path(&root.0)).collect()
+    };
     let mut value_statuses = state
         .database
         .value_assessments()
@@ -466,15 +472,19 @@ pub fn query_workspace(
     }
     let tree = WorkspaceTree::build(WorkspaceBuildInput {
         files,
-        allowed_roots: roots.iter().map(|root| display_path(&root.0)).collect(),
+        allowed_roots,
         threshold: saved_rules.directory_group_threshold,
         category: input.category,
         search: input.search,
         value_statuses,
     })
     .map_err(|_| "无法整理工作文件目录，请检查扫描范围设置。".to_owned())?;
-    let query_id = state.workspace_queries.insert(tree, input.sort)?;
-    state.workspace_queries.page(&query_id, None, 0)
+    let query_id = state.workspace_queries.insert(
+        tree,
+        input.sort,
+        cfg!(target_os = "macos").then_some(saved_rules),
+    )?;
+    page_with_current_scan_rules(state, &query_id, None, 0)
 }
 
 pub fn expand_workspace_query(
@@ -483,9 +493,48 @@ pub fn expand_workspace_query(
     directory_id: &str,
     cursor: usize,
 ) -> Result<WorkspacePage, String> {
+    let page = page_with_current_scan_rules(state, query_id, Some(directory_id), cursor)?;
+    #[cfg(target_os = "macos")]
+    {
+        use crate::file_index::macos::can_list_parents;
+        use crate::today_workspace::WorkspaceEntryKind;
+
+        let (roots, exclusions, _) = rules(state).map_err(|error| error.remediation)?;
+        let policy = ScanPolicy::for_roots(exclusions, roots.clone());
+        let mut readable = BTreeMap::new();
+        for entry in &page.entries {
+            let path = Path::new(&entry.canonical_path);
+            if !policy.is_cached_path_allowed(path)
+                || !roots.iter().any(|root| {
+                    path.starts_with(&root.0) && can_list_parents(path, &root.0, &mut readable)
+                })
+                || (entry.kind == WorkspaceEntryKind::Directory && std::fs::read_dir(path).is_err())
+            {
+                return Err("文件夹已无法访问或已被排除，请刷新文件列表。".to_owned());
+            }
+        }
+    }
+    Ok(page)
+}
+
+fn page_with_current_scan_rules(
+    state: &AppState,
+    query_id: &str,
+    parent_id: Option<&str>,
+    cursor: usize,
+) -> Result<WorkspacePage, String> {
+    #[cfg(target_os = "macos")]
+    let current = Some(
+        state
+            .scan_rules
+            .get()
+            .map_err(|_| "无法读取本地扫描规则。".to_owned())?,
+    );
+    #[cfg(not(target_os = "macos"))]
+    let current = None::<ScanRules>;
     state
         .workspace_queries
-        .page(query_id, Some(directory_id), cursor)
+        .page(query_id, parent_id, cursor, current.as_ref())
 }
 
 pub fn resolve_workspace_selection(
@@ -497,10 +546,14 @@ pub fn resolve_workspace_selection(
             .workspace_queries
             .resolve(&input.query_id, &input.file_ids, &input.directory_ids)?;
     let (roots, exclusions, file_categories) = rules(state).map_err(|error| error.remediation)?;
+    #[cfg(target_os = "macos")]
+    let readable_roots = roots.clone();
     let policy = ScanPolicy::for_roots(exclusions, roots);
     let filter = FileTypeFilter::new(file_categories);
     let repository = state.database.files();
     let mut safe_ids = BTreeSet::new();
+    #[cfg(target_os = "macos")]
+    let mut readable = BTreeMap::new();
     for file_id in candidate_ids {
         let Some(file) = repository
             .get_by_id(file_id)
@@ -509,7 +562,14 @@ pub fn resolve_workspace_selection(
             continue;
         };
         let path = Path::new(&file.canonical_path);
-        if filter.allows(path) && policy.is_allowed(path) {
+        if filter.allows(path) && policy.is_allowed_record(&file) {
+            #[cfg(target_os = "macos")]
+            if !readable_roots.iter().any(|root| {
+                path.starts_with(&root.0)
+                    && crate::file_index::macos::can_list_parents(path, &root.0, &mut readable)
+            }) {
+                continue;
+            }
             safe_ids.insert(file.id);
         }
     }
@@ -545,19 +605,34 @@ pub async fn query_today_workspace(
     input: WorkspaceQueryInput,
 ) -> Result<WorkspacePage, String> {
     let state = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || query_workspace(&state, input))
-        .await
-        .map_err(|_| "整理工作文件时发生意外错误。".to_owned())?
+    tauri::async_runtime::spawn_blocking(move || {
+        #[cfg(target_os = "macos")]
+        {
+            let range = workspace_day_range(input.scope, input.days);
+            let (files, _) =
+                macos_workspace_files(&state, range, false).map_err(|error| error.remediation)?;
+            build_workspace_query(&state, input, Some(files))
+        }
+        #[cfg(not(target_os = "macos"))]
+        query_workspace(&state, input)
+    })
+    .await
+    .map_err(|_| "整理工作文件时发生意外错误。".to_owned())?
 }
 
 #[tauri::command]
-pub fn expand_today_workspace(
+pub async fn expand_today_workspace(
     state: State<'_, AppState>,
     query_id: String,
     directory_id: String,
     cursor: usize,
 ) -> Result<WorkspacePage, String> {
-    expand_workspace_query(&state, &query_id, &directory_id, cursor)
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        expand_workspace_query(&state, &query_id, &directory_id, cursor)
+    })
+    .await
+    .map_err(|_| "无法展开工作文件目录。".to_owned())?
 }
 
 #[tauri::command]
@@ -585,11 +660,23 @@ pub async fn get_today_snapshot(
     state: State<'_, AppState>,
 ) -> Result<TodayReady, TodayUnavailable> {
     let (start, end) = current_day_bounds();
-    let (roots, exclusions, file_categories) = rules(&state)?;
-    let file_filter = FileTypeFilter::new(file_categories);
-    let policy = ScanPolicy::for_roots(exclusions, roots);
-    cached_snapshot_for_range(state.database.files(), start, end, &file_filter, &policy)
-        .map_err(|_| unavailable("无法读取已发现的今日文件。"))
+    #[cfg(target_os = "macos")]
+    {
+        let state = state.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            macos_today_ready(&state, LocalDayRange::new(start, end), false)
+        })
+        .await
+        .map_err(|_| unavailable("读取今日文件时发生意外错误。"))?
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let (roots, exclusions, file_categories) = rules(&state)?;
+        let file_filter = FileTypeFilter::new(file_categories);
+        let policy = ScanPolicy::for_roots(exclusions, roots);
+        cached_snapshot_for_range(state.database.files(), start, end, &file_filter, &policy)
+            .map_err(|_| unavailable("无法读取已发现的今日文件。"))
+    }
 }
 
 #[tauri::command]
@@ -606,60 +693,32 @@ pub async fn get_recent_snapshot(
 fn recent_snapshot(state: &AppState, days: u8) -> Result<TodayReady, TodayUnavailable> {
     state.logger.info(
         "today-index",
-        &format!("past NTFS index synchronization started for {days} days"),
+        &format!("past file index synchronization started for {days} days"),
     );
+    #[cfg(target_os = "macos")]
+    let result = {
+        let (start, end) = recent_day_bounds(days);
+        macos_today_ready(state, LocalDayRange::new(start, end), true)
+    };
+    #[cfg(not(target_os = "macos"))]
     let result = (|| {
         let (roots, exclusions, file_categories) = rules(state)?;
         let (start, end) = recent_day_bounds(days);
-        let configure = IndexerRequest {
-            protocol_version: INDEXER_PROTOCOL_VERSION,
-            request_id: format!("recent-configure-{}", chrono::Utc::now().timestamp_millis()),
-            kind: IndexerRequestKind::Configure {
-                allowed_roots: roots.iter().map(|root| display_path(&root.0)).collect(),
-                excluded_roots: exclusions.iter().map(|path| display_path(path)).collect(),
-                file_categories: file_categories.clone(),
-            },
-        };
-        ensure_ready_response(call_indexer_service(&configure))?;
-        let sync = IndexerRequest {
-            protocol_version: INDEXER_PROTOCOL_VERSION,
-            request_id: format!("recent-sync-{}", chrono::Utc::now().timestamp_millis()),
-            kind: IndexerRequestKind::Sync,
-        };
-        ensure_accepted_response(call_indexer_service(&sync))?;
-        let request = IndexerRequest {
-            protocol_version: INDEXER_PROTOCOL_VERSION,
-            request_id: format!("recent-list-{}", chrono::Utc::now().timestamp_millis()),
-            kind: IndexerRequestKind::ListToday {
-                start_utc_ms: start,
-                end_utc_ms: end,
-            },
-        };
-        let response = call_indexer_service(&request).map_err(unavailable)?;
-        if response.status != "ready" {
-            return Err(unavailable(response.message.unwrap_or_else(|| {
-                "本地 NTFS 索引服务无法返回过去文件。".to_owned()
-            })));
-        }
-        let records = response
-            .candidates
-            .into_iter()
-            .map(|candidate| {
-                let size_bytes =
-                    resolved_size_bytes(Path::new(&candidate.canonical_path), candidate.size_bytes);
-                FileRecordInput {
-                    canonical_path: candidate.canonical_path,
-                    file_identity: candidate.file_reference_number,
-                    modified_at_utc_ms: candidate.modified_at_utc_ms,
-                    size_bytes,
-                    source: "本机 NTFS 索引".to_owned(),
-                }
+        let range = LocalDayRange::new(start, end);
+        let snapshot = state
+            .file_index
+            .refresh_range(IndexRefresh {
+                period: IndexPeriod::Recent,
+                range,
+                roots: &roots,
+                exclusions: &exclusions,
+                categories: &file_categories,
             })
-            .collect::<Vec<_>>();
+            .map_err(|error| unavailable(error.to_string()))?;
         state
             .database
             .files()
-            .replace_indexed_for_local_day(LocalDayRange::new(start, end), &records)
+            .replace_indexed_for_local_day(range, &snapshot.records)
             .map_err(|_| unavailable("无法保存过去的本地 NTFS 索引结果。"))?;
         cached_snapshot_for_range(
             state.database.files(),
@@ -674,14 +733,14 @@ fn recent_snapshot(state: &AppState, days: u8) -> Result<TodayReady, TodayUnavai
         Ok(snapshot) => state.logger.info(
             "today-index",
             &format!(
-                "past NTFS index synchronization completed with {} files",
+                "past file index synchronization completed with {} files",
                 snapshot.files.len()
             ),
         ),
         Err(error) => state.logger.error(
             "today-index",
             &format!(
-                "past NTFS index synchronization failed: {}",
+                "past file index synchronization failed: {}",
                 error.remediation
             ),
         ),
@@ -764,25 +823,35 @@ pub async fn exclude_file_directory(
                     .save(rules)
                     .map_err(|_| "无法保存屏蔽目录。".to_owned())
             })?;
-        let (start, end) = current_day_bounds();
-        let exclusions = saved
-            .custom_exclusions
-            .iter()
-            .map(PathBuf::from)
-            .collect::<Vec<_>>();
-        let roots = active_roots(&saved.allowed_roots, &exclusions)
-            .map_err(|_| "保存的扫描目录无效，请在设置中重新保存。".to_owned())?;
-        let snapshot = cached_snapshot_for_range(
-            state.database.files(),
-            start,
-            end,
-            &FileTypeFilter::new(saved.file_categories.clone()),
-            &ScanPolicy::for_roots(exclusions, roots),
-        )
-        .map_err(|_| "屏蔽目录后无法刷新今日列表。".to_owned())?;
-        let sync_state = state.clone();
-        std::thread::spawn(move || configure_indexer_after_rule_change(&sync_state, &saved));
-        Ok(snapshot)
+        #[cfg(target_os = "macos")]
+        {
+            configure_indexer_after_rule_change(&state, &saved);
+            let (start, end) = current_day_bounds();
+            macos_today_ready(&state, LocalDayRange::new(start, end), false)
+                .map_err(|error| error.remediation)
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let (start, end) = current_day_bounds();
+            let exclusions = saved
+                .custom_exclusions
+                .iter()
+                .map(PathBuf::from)
+                .collect::<Vec<_>>();
+            let roots = active_roots(&saved.allowed_roots, &exclusions)
+                .map_err(|_| "保存的扫描目录无效，请在设置中重新保存。".to_owned())?;
+            let snapshot = cached_snapshot_for_range(
+                state.database.files(),
+                start,
+                end,
+                &FileTypeFilter::new(saved.file_categories.clone()),
+                &ScanPolicy::for_roots(exclusions, roots),
+            )
+            .map_err(|_| "屏蔽目录后无法刷新今日列表。".to_owned())?;
+            let sync_state = state.clone();
+            std::thread::spawn(move || configure_indexer_after_rule_change(&sync_state, &saved));
+            Ok(snapshot)
+        }
     })
     .await
     .map_err(|_| "屏蔽目录时发生意外错误。".to_owned())?
@@ -793,20 +862,8 @@ fn launcher(state: &AppState) -> Result<ExplorerLauncher, String> {
     Ok(ExplorerLauncher::new(
         state.database.files(),
         ScanPolicy::for_roots(exclusions, roots),
-        Arc::new(WindowsProcessLauncher),
+        Arc::new(SystemProcessLauncher),
     ))
-}
-
-fn resolved_size_bytes(path: &Path, indexed_size: Option<i64>) -> i64 {
-    if let Some(size) = indexed_size.filter(|size| *size > 0) {
-        return size;
-    }
-
-    std::fs::metadata(path)
-        .ok()
-        .filter(|metadata| metadata.is_file())
-        .and_then(|metadata| i64::try_from(metadata.len()).ok())
-        .unwrap_or_else(|| indexed_size.unwrap_or_default().max(0))
 }
 
 #[cfg(test)]
@@ -825,6 +882,14 @@ mod tests {
         bounds, cached_snapshot_for_range, exclude_parent_from_rules, ready_from_files,
         resolved_size_bytes,
     };
+
+    fn test_work_path(path: &str) -> String {
+        if cfg!(windows) {
+            format!(r"D:\work{}", path.replace('/', "\\"))
+        } else {
+            format!("/Users/test/work{path}")
+        }
+    }
 
     #[test]
     fn resolves_missing_ntfs_size_from_file_metadata() {
@@ -856,6 +921,18 @@ mod tests {
         assert!(end > start);
     }
 
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_past_range_uses_calendar_midnight_across_daylight_saving() {
+        let today = chrono::NaiveDate::from_ymd_opt(2026, 3, 9).unwrap();
+        let (start, end) = super::mac_recent_day_bounds(today, 1);
+        let start = Local.timestamp_millis_opt(start).single().unwrap();
+        let end = Local.timestamp_millis_opt(end).single().unwrap();
+        assert_eq!(start.date_naive(), today.pred_opt().unwrap());
+        assert_eq!(end.date_naive(), today);
+        assert_eq!((start.hour(), end.hour()), (0, 0));
+    }
+
     #[test]
     fn an_empty_index_result_is_a_ready_empty_snapshot() {
         let snapshot = ready_from_files(Vec::new());
@@ -877,7 +954,7 @@ mod tests {
         database
             .files()
             .upsert(&FileRecordInput {
-                canonical_path: r"D:\\work\\today.txt".to_owned(),
+                canonical_path: test_work_path("/today.txt"),
                 file_identity: "today-file".to_owned(),
                 modified_at_utc_ms: start + 1,
                 size_bytes: 12,
@@ -895,7 +972,10 @@ mod tests {
         .expect("read persisted snapshot");
 
         assert_eq!(snapshot.files.len(), 1);
-        assert_eq!(snapshot.files[0].canonical_path, r"D:\\work\\today.txt");
+        assert_eq!(
+            snapshot.files[0].canonical_path,
+            test_work_path("/today.txt")
+        );
         let _ = std::fs::remove_file(path);
     }
 
@@ -909,13 +989,13 @@ mod tests {
         let database = Database::open(&path).expect("database opens");
         let (start, end) = bounds();
         for (canonical_path, identity) in [
-            (r"D:\\work\\old.o", "old-object"),
-            (r"D:\\work\\notes.md", "notes"),
+            (test_work_path("/old.o"), "old-object"),
+            (test_work_path("/notes.md"), "notes"),
         ] {
             database
                 .files()
                 .upsert(&FileRecordInput {
-                    canonical_path: canonical_path.to_owned(),
+                    canonical_path,
                     file_identity: identity.to_owned(),
                     modified_at_utc_ms: start + 1,
                     size_bytes: 12,
@@ -934,7 +1014,10 @@ mod tests {
         .expect("read persisted snapshot");
 
         assert_eq!(snapshot.files.len(), 1);
-        assert_eq!(snapshot.files[0].canonical_path, r"D:\\work\\notes.md");
+        assert_eq!(
+            snapshot.files[0].canonical_path,
+            test_work_path("/notes.md")
+        );
         let _ = std::fs::remove_file(path);
     }
 
@@ -944,12 +1027,12 @@ mod tests {
         let (start, end) = bounds();
         let repository = database.files();
         for (path, identity, source) in [
-            (r"D:\\work\\legacy.md", "legacy", "本机文件"),
-            (r"D:\\work\\indexed.md", "indexed", "本机 NTFS 索引"),
+            (test_work_path("/legacy.md"), "legacy", "本机文件"),
+            (test_work_path("/indexed.md"), "indexed", "本机 NTFS 索引"),
         ] {
             repository
                 .upsert(&FileRecordInput {
-                    canonical_path: path.to_owned(),
+                    canonical_path: path,
                     file_identity: identity.to_owned(),
                     modified_at_utc_ms: start + 1,
                     size_bytes: 12,
@@ -968,7 +1051,10 @@ mod tests {
         .expect("read persisted snapshot");
 
         assert_eq!(snapshot.files.len(), 1);
-        assert_eq!(snapshot.files[0].canonical_path, r"D:\\work\\indexed.md");
+        assert_eq!(
+            snapshot.files[0].canonical_path,
+            test_work_path("/indexed.md")
+        );
     }
 
     #[test]
@@ -1015,8 +1101,8 @@ mod tests {
         let (start, end) = bounds();
         let repository = database.files();
         for (canonical_path, identity) in [
-            (r"D:\work\private\notes.md".to_owned(), "private-notes"),
-            (r"D:\work\shared\plan.md".to_owned(), "shared-plan"),
+            (test_work_path("/private/notes.md"), "private-notes"),
+            (test_work_path("/shared/plan.md"), "shared-plan"),
         ] {
             repository
                 .upsert(&FileRecordInput {
@@ -1029,12 +1115,12 @@ mod tests {
                 .expect("persist today file");
         }
         let selected = repository
-            .get_by_identity(r"D:\work\private\notes.md", "private-notes")
+            .get_by_identity(&test_work_path("/private/notes.md"), "private-notes")
             .expect("read selected file")
             .expect("selected file exists");
         let rules = exclude_parent_from_rules(
             ScanRules {
-                allowed_roots: vec![r"D:\work".to_owned()],
+                allowed_roots: vec![test_work_path("")],
                 custom_exclusions: vec![],
                 file_categories: vec![],
                 directory_group_threshold: 5,
@@ -1064,9 +1150,12 @@ mod tests {
         )
         .expect("filtered cached snapshot");
 
-        assert_eq!(rules.custom_exclusions, vec![r"D:\work\private"]);
+        assert_eq!(rules.custom_exclusions, vec![test_work_path("/private")]);
         assert_eq!(snapshot.files.len(), 1);
-        assert_eq!(snapshot.files[0].canonical_path, r"D:\work\shared\plan.md");
+        assert_eq!(
+            snapshot.files[0].canonical_path,
+            test_work_path("/shared/plan.md")
+        );
     }
 
     #[test]
@@ -1075,12 +1164,12 @@ mod tests {
         let (start, end) = bounds();
         let repository = database.files();
         for (path, identity, source) in [
-            (r"D:\\work\\legacy.md", "legacy", "本机文件"),
-            (r"D:\\work\\history.md", "history", "浏览历史"),
+            (test_work_path("/legacy.md"), "legacy", "本机文件"),
+            (test_work_path("/history.md"), "history", "浏览历史"),
         ] {
             repository
                 .upsert(&FileRecordInput {
-                    canonical_path: path.to_owned(),
+                    canonical_path: path,
                     file_identity: identity.to_owned(),
                     modified_at_utc_ms: start + 1,
                     size_bytes: 12,
@@ -1093,7 +1182,7 @@ mod tests {
             .replace_indexed_for_local_day(
                 crate::contracts::LocalDayRange::new(start, end),
                 &[FileRecordInput {
-                    canonical_path: r"D:\\work\\indexed.docx".to_owned(),
+                    canonical_path: test_work_path("/indexed.docx"),
                     file_identity: "ntfs:42".to_owned(),
                     modified_at_utc_ms: start + 2,
                     size_bytes: 24,
@@ -1109,17 +1198,17 @@ mod tests {
         assert!(
             records
                 .iter()
-                .any(|record| record.canonical_path == r"D:\\work\\indexed.docx")
+                .any(|record| record.canonical_path == test_work_path("/indexed.docx"))
         );
         assert!(
             records
                 .iter()
-                .any(|record| record.canonical_path == r"D:\\work\\history.md")
+                .any(|record| record.canonical_path == test_work_path("/history.md"))
         );
         assert!(
             !records
                 .iter()
-                .any(|record| record.canonical_path == r"D:\\work\\legacy.md")
+                .any(|record| record.canonical_path == test_work_path("/legacy.md"))
         );
     }
 }

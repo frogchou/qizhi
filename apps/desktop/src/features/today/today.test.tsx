@@ -1005,6 +1005,33 @@ describe("TodayPage", () => {
     ).toBeInTheDocument();
   });
 
+  it("keeps the macOS index status visible when the cached snapshot command rejects", async () => {
+    const remediation = "此版本的 macOS 本地文件索引尚未启用。";
+    const client: QizhiCommands = {
+      ...commands({ state: "ready", files: [], clusters: [] }),
+      desktopPlatform: "macos",
+      getTodaySnapshot: vi
+        .fn()
+        .mockRejectedValue({ state: "unavailable", remediation }),
+      getRecentSnapshot: vi.fn().mockRejectedValue({
+        state: "unavailable",
+        remediation: "此版本暂时无法索引过去的文件。",
+      }),
+    };
+    render(<TodayPage commands={client} />);
+
+    expect(await screen.findByText(remediation)).toBeInTheDocument();
+    expect(
+      screen.queryByText("今天的扫描范围内还没有发现新建或修改的文件。"),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "过去" }));
+    expect(
+      await screen.findByText("此版本暂时无法索引过去的文件。"),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "今日" }));
+    expect(await screen.findByText(remediation)).toBeInTheDocument();
+  });
+
   it("explains that an empty ready snapshot found no files in the approved scope", async () => {
     render(
       <TodayPage
@@ -1064,6 +1091,9 @@ describe("TodayPage", () => {
     await waitFor(() => expect(client.refreshToday).toHaveBeenCalledTimes(1));
     expect(screen.getByRole("button", { name: "刷新中…" })).toBeDisabled();
     completeRefresh?.({ state: "ready", files: [], clusters: [] });
+    expect(
+      await screen.findByRole("button", { name: "刷新列表" }),
+    ).toBeEnabled();
   });
 
   it("follows an already-running scan instead of reporting a refresh failure", async () => {
@@ -1179,6 +1209,29 @@ describe("TodayPage", () => {
       expect.stringContaining("周报.docx"),
       expect.stringContaining("analysis.py"),
     ]);
+  });
+
+  it("finds a partial Chinese name without wildcard characters", async () => {
+    const snapshot: TodaySnapshot = {
+      ...readySnapshot,
+      files: [
+        ...readySnapshot.files,
+        {
+          ...readySnapshot.files[0],
+          id: 12,
+          canonicalPath: "D:\\工作\\测试测试1124.docx",
+        },
+      ],
+    };
+    render(<TodayPage commands={commands(snapshot)} />);
+    expect(await screen.findByText("周报.docx")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("按文件名搜索"), {
+      target: { value: "测试" },
+    });
+
+    expect(screen.getByText("测试测试1124.docx")).toBeInTheDocument();
+    expect(screen.queryByText("周报.docx")).not.toBeInTheDocument();
   });
 
   it("shows only recognized documents when the document filter is selected", async () => {

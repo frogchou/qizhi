@@ -2,7 +2,7 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use qizhi_desktop_lib::config::{SecretStore, secret_store::WindowsCredentialStore};
+use qizhi_desktop_lib::config::{SecretStore, secret_store::SystemCredentialStore};
 
 #[test]
 #[ignore = "requires an interactive Windows Credential Manager user session"]
@@ -12,7 +12,7 @@ fn saves_and_reads_a_windows_credential_in_the_same_user_session() {
         .expect("clock after epoch")
         .as_nanos();
     let reference = format!("qizhi/test/credential-roundtrip-{nonce}");
-    let store = WindowsCredentialStore;
+    let store = SystemCredentialStore;
     let _ = store.delete(&reference);
 
     store

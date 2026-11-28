@@ -4,7 +4,10 @@ use serde::{Deserialize, Serialize};
 use url::Url;
 
 use crate::{
-    config::{SecretStore, secret_store::WindowsCredentialStore},
+    config::{
+        SecretStore,
+        secret_store::{SystemCredentialStore, credential_message},
+    },
     contracts::JevValuePolicy,
     database::repositories::ConfigRepository,
     network::http::HttpClient,
@@ -66,15 +69,15 @@ pub struct JevClient {
 impl JevClient {
     pub fn from_saved_config(
         configs: ConfigRepository,
-        secrets: WindowsCredentialStore,
+        secrets: SystemCredentialStore,
     ) -> Result<Self, String> {
         let config = configs
             .find("jev")
             .map_err(|_| "无法读取 JEV 设置。".to_owned())?
             .ok_or_else(|| "请先在设置中保存 JEV Base URL 和 API Key。".to_owned())?;
-        let api_key = secrets
-            .get(&config.credential_reference)
-            .map_err(|_| "无法读取 JEV API Key，请在设置中重新保存。".to_owned())?;
+        let api_key = secrets.get(&config.credential_reference).map_err(|error| {
+            credential_message(error, "无法读取 JEV API Key，请在设置中重新保存。")
+        })?;
         Self::new(&config.endpoint, api_key)
     }
 

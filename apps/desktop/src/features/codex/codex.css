@@ -258,6 +258,12 @@
   font-size: 11px;
   color: #788985;
 }
+.codex-handoff-retry {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 30px;
+}
 .codex-runtime-chip {
   border: 1px solid #dce9e4;
   background: #fff;

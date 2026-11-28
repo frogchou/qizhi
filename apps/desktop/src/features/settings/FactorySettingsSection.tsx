@@ -198,7 +198,7 @@ export function FactorySettingsSection() {
               />
               <p className="factory-field-hint" id={modeId + "-credentials"}>
                 {transport === "desktop"
-                  ? "令牌保存在 Windows 凭据管理器中。更换地址后需重新输入。"
+                  ? "令牌保存在系统凭据存储中。更换地址后需重新输入。"
                   : "开发预览只在当前页面保存令牌，刷新后请重新输入。"}
               </p>
             </div>

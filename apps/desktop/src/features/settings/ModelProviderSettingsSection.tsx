@@ -96,9 +96,14 @@ export function ModelProviderSettingsSection({ commands }: Props) {
       setApiKey("");
       setLoadError(null);
       notify(`${saved.displayName} 配置已保存。`);
-    } catch {
+    } catch (error) {
       setApiKey("");
-      notify("模型服务配置未保存，请检查 Base URL、模型和 API Key。", "error");
+      notify(
+        error === "keychain_unavailable"
+          ? "无法访问登录钥匙串，请解锁后重试。"
+          : "模型服务配置未保存，请检查 Base URL、模型和 API Key。",
+        "error",
+      );
     } finally {
       setBusy(null);
     }

@@ -1,6 +1,8 @@
+#[cfg(windows)]
+use crate::ntfs::ipc::{INDEXER_PIPE_NAME, MAX_IPC_RESPONSE_BYTES};
 use crate::ntfs::ipc::{
-    INDEXER_PIPE_NAME, INDEXER_PROTOCOL_VERSION, IndexerRequest, IndexerRequestKind,
-    IndexerResponse, MAX_IPC_MESSAGE_BYTES, MAX_IPC_RESPONSE_BYTES,
+    INDEXER_PROTOCOL_VERSION, IndexerRequest, IndexerRequestKind, IndexerResponse,
+    MAX_IPC_MESSAGE_BYTES,
 };
 
 // `0x12019b` is the exact pipe-client access mask: read/write data, the
@@ -438,11 +440,6 @@ fn call_indexer_service_at(
 fn is_retryable_pipe_connect_error(error: u32) -> bool {
     use windows_sys::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_PIPE_BUSY};
     matches!(error, ERROR_FILE_NOT_FOUND | ERROR_PIPE_BUSY)
-}
-
-#[cfg(not(windows))]
-pub fn call_indexer_service(_: &IndexerRequest) -> Result<IndexerResponse, String> {
-    Err("本地索引服务仅支持 Windows".to_owned())
 }
 
 #[cfg(test)]

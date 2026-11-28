@@ -1,4 +1,4 @@
-use rusqlite::{Connection, Result};
+use rusqlite::{Connection, Result, Transaction, TransactionBehavior};
 
 pub fn apply(connection: &Connection) -> Result<()> {
     connection.execute_batch(include_str!("../../migrations/0001_initial.sql"))?;
@@ -60,5 +60,29 @@ pub fn apply(connection: &Connection) -> Result<()> {
             )?;
         }
     }
-    Ok(())
+    let transaction = Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+    for (version, migration) in [
+        (
+            16,
+            include_str!("../../migrations/0016_file_index_presence.sql"),
+        ),
+        (
+            17,
+            include_str!("../../migrations/0017_codex_executable_path.sql"),
+        ),
+    ] {
+        let applied = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version = ?1)",
+            [version],
+            |row| row.get::<_, bool>(0),
+        )?;
+        if !applied {
+            transaction.execute_batch(migration)?;
+            transaction.execute(
+                "INSERT INTO schema_migrations(version) VALUES (?1)",
+                [version],
+            )?;
+        }
+    }
+    transaction.commit()
 }

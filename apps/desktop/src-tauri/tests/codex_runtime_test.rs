@@ -72,10 +72,22 @@ fn initializes_once_and_reports_the_reused_local_account_and_sandbox() {
     let client = Arc::new(FakeClient::default());
     client.respond("initialize", json!({"userAgent":"codex"}));
     client.respond("account/read", json!({"account":{"type":"chatgpt","email":"person@example.com","planType":"plus"},"requiresOpenaiAuth":true}));
+    #[cfg(not(target_os = "macos"))]
     client.respond("windowsSandbox/readiness", json!({"status":"ready"}));
     let runtime = CodexRuntime::with_client(database, files, client.clone());
     let status = runtime.status().expect("status");
     assert_eq!(status.account, "ready");
+    #[cfg(target_os = "macos")]
+    {
+        assert_eq!(status.sandbox, "project_scope");
+        assert!(
+            !client
+                .calls()
+                .iter()
+                .any(|(method, _)| method.starts_with("windowsSandbox/"))
+        );
+    }
+    #[cfg(not(target_os = "macos"))]
     assert_eq!(status.sandbox, "ready");
     assert_eq!(
         client

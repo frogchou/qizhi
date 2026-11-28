@@ -1,8 +1,10 @@
+use crate::system::explorer::{FileAction, file_command};
+#[cfg(not(target_os = "macos"))]
+use std::process::{Command, Stdio};
 use std::{
     fs::File,
     io::Read,
     path::{Path, PathBuf},
-    process::{Command, Stdio},
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -15,7 +17,7 @@ use uuid::Uuid;
 
 use crate::{
     app_state::AppState,
-    config::secret_store::WindowsCredentialStore,
+    config::secret_store::SystemCredentialStore,
     contracts::{
         CodexArtifact, CodexConversation, CodexConversationHistory, CodexMaterial,
         CodexMaterialSourceStatus, CodexMaterialVersionInput, CodexPreferences, CodexProject,
@@ -107,6 +109,49 @@ pub fn save_codex_preferences(
         .codex()
         .get_preferences()
         .map_err(|_| "无法保存 Codex 偏好设置。".to_owned())
+}
+
+#[tauri::command]
+pub fn get_codex_executable_path(state: State<'_, AppState>) -> Result<Option<String>, String> {
+    #[cfg(target_os = "macos")]
+    return state
+        .database
+        .codex()
+        .executable_path()
+        .map_err(|_| "无法读取 Codex 程序路径。".to_owned());
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = state;
+        Ok(None)
+    }
+}
+
+#[tauri::command]
+pub fn save_codex_executable_path(
+    path: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<Option<String>, String> {
+    #[cfg(target_os = "macos")]
+    {
+        let path = path
+            .map(|path| {
+                crate::codex::macos_executable(PathBuf::from(path))
+                    .and_then(|path| path.to_str().map(str::to_owned))
+                    .ok_or_else(|| "请选择可执行的 Codex 程序文件。".to_owned())
+            })
+            .transpose()?;
+        state
+            .database
+            .codex()
+            .save_executable_path(path.as_deref())
+            .map_err(|_| "无法保存 Codex 程序路径。".to_owned())?;
+        Ok(path)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (path, state);
+        Err("此平台使用系统中的 Codex 程序。".to_owned())
+    }
 }
 
 #[tauri::command]
@@ -295,7 +340,28 @@ pub fn refresh_codex_material_with_state(
         return Err("该资料使用已保存的资料筐快照。需要新版本时请重新加入资料。".into());
     }
     let temporary;
+    #[cfg(target_os = "macos")]
+    let indexed_snapshot = open_indexed_material_source(state, &material)?
+        .map(|(mut file, path)| {
+            let layout = state
+                .codex_runtime
+                .project_files()
+                .create_layout(project_id)
+                .map_err(|_| "无法访问 Codex 项目目录。".to_owned())?;
+            let directory =
+                tempfile::tempdir_in(&layout.staging).map_err(|_| "无法暂存原文件。".to_owned())?;
+            let name = path
+                .file_name()
+                .ok_or_else(|| "无法读取原文件名。".to_owned())?;
+            let snapshot = directory.path().join(name);
+            let mut target = File::create(&snapshot).map_err(|_| "无法暂存原文件。".to_owned())?;
+            std::io::copy(&mut file, &mut target).map_err(|_| "无法暂存原文件。".to_owned())?;
+            Ok::<_, String>((directory, snapshot))
+        })
+        .transpose()?;
     let source = match material.kind.as_str() {
+        #[cfg(target_os = "macos")]
+        "local" if indexed_snapshot.is_some() => indexed_snapshot.as_ref().unwrap().1.clone(),
         "local" => resolve_local_material_source(state, &material)?,
         "ragflow_document" => {
             let metadata = material_metadata(&material)?;
@@ -308,7 +374,7 @@ pub fn refresh_codex_material_with_state(
                 .and_then(Value::as_str)
                 .ok_or_else(|| "RAGFlow 资料来源信息不完整。".to_owned())?;
             let bytes =
-                RagflowClient::from_saved_config(state.database.configs(), WindowsCredentialStore)?
+                RagflowClient::from_saved_config(state.database.configs(), SystemCredentialStore)?
                     .download_document(dataset_id, document_id)?;
             let layout = state
                 .codex_runtime
@@ -427,10 +493,8 @@ pub fn reveal_codex_material_source(
         .find(|material| material.id == material_id)
         .ok_or_else(|| "没有找到项目资料。".to_owned())?;
     let source = resolve_local_material_source(&state, &material)?;
-    launch_hidden(
-        "explorer.exe",
-        &[format!("/select,{}", source.to_string_lossy())],
-    )
+    let (program, arguments) = file_command(FileAction::Reveal, &source);
+    launch_hidden(program, &arguments)
 }
 
 #[tauri::command]
@@ -579,7 +643,8 @@ pub fn open_codex_artifact(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let path = artifact_path(&state, &project_id, &relative_path)?;
-    launch_hidden("explorer.exe", &[path.to_string_lossy().into_owned()])
+    let (program, arguments) = file_command(FileAction::Open, &path);
+    launch_hidden(program, &arguments)
 }
 
 #[tauri::command]
@@ -589,10 +654,8 @@ pub fn reveal_codex_artifact(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let path = artifact_path(&state, &project_id, &relative_path)?;
-    launch_hidden(
-        "explorer.exe",
-        &[format!("/select,{}", path.to_string_lossy())],
-    )
+    let (program, arguments) = file_command(FileAction::Reveal, &path);
+    launch_hidden(program, &arguments)
 }
 
 #[tauri::command]
@@ -688,6 +751,13 @@ fn inspect_material_source(
                 let current_hash = current_version
                     .as_ref()
                     .map(|version| version.content_hash.clone());
+                #[cfg(target_os = "macos")]
+                let actual_hash = match open_indexed_material_source(state, material) {
+                    Ok(Some((file, _))) => sha256_reader(file).ok(),
+                    Ok(None) => sha256_path(&path).ok(),
+                    Err(_) => None,
+                };
+                #[cfg(not(target_os = "macos"))]
                 let actual_hash = sha256_path(&path).ok();
                 let original_only = current_version.as_ref().is_some_and(|version| {
                     version.derived_snapshot_path.is_none()
@@ -765,10 +835,76 @@ fn requires_derived_snapshot(display_name: &str) -> bool {
     )
 }
 
+#[cfg(target_os = "macos")]
+fn indexed_material_record(
+    state: &AppState,
+    material: &CodexMaterial,
+) -> Result<
+    Option<(
+        crate::contracts::FileRecord,
+        crate::scan::policy::ScanPolicy,
+    )>,
+    String,
+> {
+    if material
+        .origin_reference
+        .as_deref()
+        .is_some_and(|origin| origin.starts_with("local:"))
+    {
+        let metadata = material_metadata(material)?;
+        let file_id = metadata
+            .get("fileId")
+            .and_then(Value::as_i64)
+            .ok_or_else(|| "资料来源信息不完整。".to_owned())?;
+        let identity = metadata
+            .get("fileIdentity")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "资料来源信息不完整。".to_owned())?;
+        let record = state
+            .database
+            .files()
+            .get_by_id(file_id)
+            .map_err(|_| "无法读取原文件。".to_owned())?
+            .ok_or_else(|| "原文件已经不存在。".to_owned())?;
+        let (policy, filter) = super::knowledge::upload_policy(state)?;
+        let path = PathBuf::from(&record.canonical_path);
+        return if record.file_identity == identity && filter.allows(&path) {
+            Ok(Some((record, policy)))
+        } else {
+            Err("原文件已变更或不在当前允许范围内。".to_owned())
+        };
+    }
+    Ok(None)
+}
+
+#[cfg(target_os = "macos")]
+fn open_indexed_material_source(
+    state: &AppState,
+    material: &CodexMaterial,
+) -> Result<Option<(File, PathBuf)>, String> {
+    indexed_material_record(state, material)?
+        .map(|(record, _)| {
+            state
+                .scan_rules
+                .open_indexed_record(&record)
+                .map(|file| (file, PathBuf::from(record.canonical_path)))
+                .map_err(|_| "原文件已变更或不在当前允许范围内。".to_owned())
+        })
+        .transpose()
+}
+
 fn resolve_local_material_source(
     state: &AppState,
     material: &CodexMaterial,
 ) -> Result<PathBuf, String> {
+    #[cfg(target_os = "macos")]
+    if let Some((record, policy)) = indexed_material_record(state, material)? {
+        return if policy.is_allowed_record(&record) {
+            Ok(PathBuf::from(record.canonical_path))
+        } else {
+            Err("原文件已变更或不在当前允许范围内。".to_owned())
+        };
+    }
     if let Ok(metadata) = material_metadata(material)
         && let Some(file_id) = metadata.get("fileId").and_then(Value::as_i64)
         && let Some(record) = state
@@ -876,7 +1012,11 @@ fn remove_imported_snapshot(item: &crate::codex::MaterialImportResult) {
 }
 
 fn sha256_path(path: &Path) -> Result<String, String> {
-    let mut file = File::open(path).map_err(|_| "无法读取原文件。".to_owned())?;
+    let file = File::open(path).map_err(|_| "无法读取原文件。".to_owned())?;
+    sha256_reader(file)
+}
+
+fn sha256_reader(mut file: File) -> Result<String, String> {
     let mut hash = Sha256::new();
     let mut buffer = [0_u8; 64 * 1024];
     loop {
@@ -945,21 +1085,31 @@ fn artifact_path(
 }
 
 fn launch_hidden(program: &str, arguments: &[String]) -> Result<(), String> {
-    let mut command = Command::new(program);
-    command
-        .args(arguments)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    #[cfg(windows)]
+    #[cfg(target_os = "macos")]
     {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(0x08000000);
+        use crate::system::explorer::{ProcessLauncher, SystemProcessLauncher};
+        SystemProcessLauncher
+            .launch(program, arguments)
+            .map_err(|_| "系统未能打开所选文件或位置。".to_owned())
     }
-    command
-        .spawn()
-        .map(|_| ())
-        .map_err(|_| "无法打开生成物。".to_owned())
+    #[cfg(not(target_os = "macos"))]
+    {
+        let mut command = Command::new(program);
+        command
+            .args(arguments)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(0x08000000);
+        }
+        command
+            .spawn()
+            .map(|_| ())
+            .map_err(|_| "无法打开生成物。".to_owned())
+    }
 }
 
 fn now_ms() -> i64 {

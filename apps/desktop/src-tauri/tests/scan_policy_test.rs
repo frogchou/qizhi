@@ -65,3 +65,116 @@ fn allows_a_normal_cached_path_under_an_extended_windows_scan_root() {
 
     assert!(policy.is_cached_path_allowed(&root.join("from-cache.md")));
 }
+
+#[cfg(target_os = "macos")]
+#[test]
+fn cached_macos_paths_keep_component_boundaries_and_spelling() {
+    use qizhi_desktop_lib::scan::policy::AllowedRoot;
+
+    let root = Path::new("/Users/test/工作");
+    let policy = ScanPolicy::for_roots(
+        vec![root.join("Private"), root.join("分组")],
+        vec![AllowedRoot(root.to_path_buf())],
+    );
+
+    assert!(policy.is_cached_path_allowed(&root.join("周报.md")));
+    assert!(policy.is_cached_path_allowed(&root.join("private/笔记.md")));
+    assert!(policy.is_cached_path_allowed(&root.join(r"分组\草稿.md")));
+    assert!(!policy.is_cached_path_allowed(&root.join("Private/笔记.md")));
+    assert!(!policy.is_cached_path_allowed(&root.join("分组/草稿.md")));
+    assert!(!policy.is_cached_path_allowed(&root.join("../外部/草稿.md")));
+    assert!(!policy.is_cached_path_allowed(Path::new("/Users/test/工作旧/草稿.md")));
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn macos_file_and_directory_checks_reject_symlinks_outside_work_root() {
+    use std::{fs, os::unix::fs::symlink};
+
+    let temporary = tempfile::tempdir().expect("test directory");
+    let base = temporary
+        .path()
+        .canonicalize()
+        .expect("canonical test directory");
+    let root = base.join("工作");
+    let outside = base.join("外部");
+    fs::create_dir(&root).expect("create work directory");
+    fs::create_dir(&outside).expect("create outside directory");
+    fs::write(outside.join("笔记.md"), "private").expect("create outside file");
+    fs::write(root.join("周报.md"), "work").expect("create allowed file");
+    let link = root.join("链接");
+    symlink(&outside, &link).expect("create test symlink");
+
+    let allowed = ScanPolicy::new(vec![])
+        .validate_root(&root)
+        .expect("valid root");
+    let policy = ScanPolicy::for_roots(vec![], vec![allowed]);
+    assert!(policy.is_allowed(&root.join("周报.md")));
+    assert!(!policy.is_allowed_directory(&link));
+    assert!(!policy.is_allowed(&link.join("笔记.md")));
+    assert!(!policy.is_cached_path_allowed(&link.join("笔记.md")));
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn macos_scan_scope_rejects_an_ordinary_file_as_a_root() {
+    use qizhi_desktop_lib::scan::policy::{active_roots, display_path};
+
+    let temporary = tempfile::tempdir().expect("test directory");
+    let root = temporary
+        .path()
+        .canonicalize()
+        .expect("canonical test directory");
+    let file = root.join("笔记.md");
+    std::fs::write(&file, "test").expect("create file");
+
+    assert!(active_roots(&[display_path(&file)], &[]).is_err());
+    assert!(active_roots(&[display_path(&root)], &[]).is_ok());
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn macos_scan_cannot_include_app_data_when_home_is_selected() {
+    use qizhi_desktop_lib::scan::policy::AllowedRoot;
+
+    let home = std::env::home_dir().expect("current user home");
+    let policy = ScanPolicy::for_roots(vec![], vec![AllowedRoot(home.clone())]);
+    assert!(!policy.is_cached_path_allowed(
+        &home.join("Library/Application Support/com.qizhi.desktop/资料.md")
+    ));
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn exclusion_blocks_different_spellings_of_the_same_directory() {
+    use std::fs;
+
+    let temporary = tempfile::tempdir().expect("test directory");
+    let root = temporary
+        .path()
+        .canonicalize()
+        .expect("canonical test directory");
+    fs::create_dir(root.join("Private")).expect("create excluded directory");
+    fs::write(root.join("Private/notes.md"), "private").expect("create excluded file");
+    let alias = root.join("private/notes.md");
+    if !alias.is_file() {
+        fs::create_dir(root.join("private")).expect("create separately spelled directory");
+        fs::write(&alias, "work").expect("create allowed file");
+    }
+    let aliases_same_directory =
+        fs::canonicalize(root.join("Private/notes.md")).ok() == fs::canonicalize(&alias).ok() || {
+            use std::os::unix::fs::MetadataExt;
+            fs::metadata(root.join("Private")).unwrap().ino()
+                == fs::metadata(root.join("private")).unwrap().ino()
+        };
+    let allowed = ScanPolicy::new(vec![])
+        .validate_root(&root)
+        .expect("valid root");
+    let policy = ScanPolicy::for_roots(vec![root.join("Private")], vec![allowed]);
+
+    assert_eq!(policy.is_allowed(&alias), !aliases_same_directory);
+    assert_eq!(
+        policy.is_cached_path_allowed(&alias),
+        !aliases_same_directory
+    );
+}

@@ -27,11 +27,23 @@ pub enum ExtractionError {
 }
 
 pub fn extract_value_text(path: &Path) -> Result<String, String> {
+    extract_value(path, || extract_document_text(path, MAX_MODEL_CHARS))
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn extract_open_value_text(path: &Path, file: File) -> Result<String, String> {
+    extract_value(path, || extract_document(path, MAX_MODEL_CHARS, Some(file)))
+}
+
+fn extract_value(
+    path: &Path,
+    extract: impl FnOnce() -> Result<String, ExtractionError>,
+) -> Result<String, String> {
     let file_extension = extension(path);
     if !VALUE_DOCUMENT_EXTENSIONS.contains(&file_extension.as_str()) {
         return Err("JEV 仅分析文档与文本文件。".to_owned());
     }
-    extract_document_text(path, MAX_MODEL_CHARS).map_err(|error| match error {
+    extract().map_err(|error| match error {
         ExtractionError::UnsupportedFormat(_) => {
             "暂不支持旧版 Office 二进制格式，请另存为新版格式。".to_owned()
         }
@@ -44,19 +56,45 @@ pub fn extract_value_text(path: &Path) -> Result<String, String> {
 }
 
 pub fn extract_document_text(path: &Path, max_chars: usize) -> Result<String, ExtractionError> {
+    extract_document(path, max_chars, None)
+}
+
+fn extract_document(
+    path: &Path,
+    max_chars: usize,
+    file: Option<File>,
+) -> Result<String, ExtractionError> {
     let file_extension = extension(path);
-    let metadata = std::fs::metadata(path).map_err(|_| ExtractionError::Unreadable)?;
+    let metadata = file
+        .as_ref()
+        .map_or_else(|| std::fs::metadata(path), File::metadata)
+        .map_err(|_| ExtractionError::Unreadable)?;
     if !metadata.is_file() {
         return Err(ExtractionError::NotRegularFile);
     }
     let text = match file_extension.as_str() {
-        "pdf" => pdf_extract::extract_text(path).map_err(|_| ExtractionError::InvalidFormat)?,
-        "docx" => extract_ooxml(path, &["word/document.xml", "word/footnotes.xml"])?,
-        "pptx" => extract_ooxml_prefixes(path, &["ppt/slides/slide"])?,
-        "xlsx" => extract_ooxml_prefixes(path, &["xl/sharedStrings.xml", "xl/worksheets/sheet"])?,
+        "pdf" => match file {
+            Some(mut file) => {
+                let mut bytes = Vec::new();
+                file.read_to_end(&mut bytes)
+                    .map_err(|_| ExtractionError::Unreadable)?;
+                pdf_extract::extract_text_from_mem(&bytes)
+            }
+            None => pdf_extract::extract_text(path),
+        }
+        .map_err(|_| ExtractionError::InvalidFormat)?,
+        "docx" => extract_ooxml(
+            open_for_extract(path, file)?,
+            &["word/document.xml", "word/footnotes.xml"],
+        )?,
+        "pptx" => extract_ooxml_prefixes(open_for_extract(path, file)?, &["ppt/slides/slide"])?,
+        "xlsx" => extract_ooxml_prefixes(
+            open_for_extract(path, file)?,
+            &["xl/sharedStrings.xml", "xl/worksheets/sheet"],
+        )?,
         "doc" | "xls" | "ppt" => return Err(ExtractionError::UnsupportedFormat(file_extension)),
         "txt" | "md" | "markdown" | "csv" | "tsv" | "rtf" | "odt" | "ods" | "odp" => {
-            extract_plain_text(path, metadata.len(), max_chars)?
+            extract_plain_text(path, file, metadata.len(), max_chars)?
         }
         _ => return Err(ExtractionError::UnsupportedFormat(file_extension)),
     };
@@ -76,6 +114,7 @@ fn extension(path: &Path) -> String {
 
 fn extract_plain_text(
     path: &Path,
+    file: Option<File>,
     length: u64,
     max_chars: usize,
 ) -> Result<String, ExtractionError> {
@@ -83,12 +122,23 @@ fn extract_plain_text(
     if length > limit {
         return Err(ExtractionError::TooLarge);
     }
-    let bytes = std::fs::read(path).map_err(|_| ExtractionError::Unreadable)?;
+    let mut bytes = Vec::new();
+    open_for_extract(path, file)?
+        .take(limit + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| ExtractionError::Unreadable)?;
+    if bytes.len() as u64 > limit {
+        return Err(ExtractionError::TooLarge);
+    }
     String::from_utf8(bytes).map_err(|_| ExtractionError::InvalidFormat)
 }
 
-fn extract_ooxml(path: &Path, names: &[&str]) -> Result<String, ExtractionError> {
-    let file = File::open(path).map_err(|_| ExtractionError::Unreadable)?;
+fn open_for_extract(path: &Path, file: Option<File>) -> Result<File, ExtractionError> {
+    file.map_or_else(|| File::open(path), Ok)
+        .map_err(|_| ExtractionError::Unreadable)
+}
+
+fn extract_ooxml(file: File, names: &[&str]) -> Result<String, ExtractionError> {
     let mut archive = zip::ZipArchive::new(file).map_err(|_| ExtractionError::InvalidFormat)?;
     let mut text = String::new();
     let mut expanded = 0_u64;
@@ -102,8 +152,7 @@ fn extract_ooxml(path: &Path, names: &[&str]) -> Result<String, ExtractionError>
     Ok(text)
 }
 
-fn extract_ooxml_prefixes(path: &Path, prefixes: &[&str]) -> Result<String, ExtractionError> {
-    let file = File::open(path).map_err(|_| ExtractionError::Unreadable)?;
+fn extract_ooxml_prefixes(file: File, prefixes: &[&str]) -> Result<String, ExtractionError> {
     let mut archive = zip::ZipArchive::new(file).map_err(|_| ExtractionError::InvalidFormat)?;
     let mut names = (0..archive.len())
         .filter_map(|index| {

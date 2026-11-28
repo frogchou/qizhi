@@ -1,0 +1,129 @@
+.file-search-page {
+  min-width: 0;
+}
+
+.file-search-input {
+  align-items: center;
+  background: #fff;
+  border: 1px solid #d8e1dc;
+  border-radius: 9px;
+  display: flex;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 0 12px;
+}
+
+.file-search-input:focus-within {
+  border-color: #6ba28f;
+  box-shadow: 0 0 0 3px rgb(45 121 95 / 10%);
+}
+
+.file-search-input input {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  min-width: 0;
+  outline: 0;
+  padding: 12px 0;
+  width: 100%;
+}
+
+.file-search-status,
+.file-search-coverage {
+  color: #526b60;
+  font-size: 13px;
+  margin: 12px 0;
+}
+
+.file-search-coverage summary {
+  cursor: pointer;
+  width: fit-content;
+}
+
+.file-search-coverage li {
+  margin-block: 6px;
+  overflow-wrap: anywhere;
+}
+
+.file-search-coverage li strong {
+  margin-inline-start: 12px;
+}
+
+.file-search-results {
+  overflow-x: auto;
+}
+
+.file-search-table {
+  background: #fff;
+  border-collapse: collapse;
+  table-layout: fixed;
+  width: 100%;
+}
+
+.file-search-table th,
+.file-search-table td {
+  border-bottom: 1px solid #e5ede8;
+  font-size: 13px;
+  padding: 8px 12px;
+  text-align: left;
+}
+
+.file-search-table th {
+  background: #f4f8f5;
+  color: #526b60;
+  white-space: nowrap;
+}
+
+.file-search-table th:nth-child(2) {
+  width: 113px;
+}
+
+.file-search-table th:nth-child(3) {
+  width: 64px;
+}
+
+.file-search-table th:last-child {
+  width: 198px;
+}
+
+.file-search-filename,
+.file-search-path {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-search-filename {
+  background: transparent;
+  border: 0;
+  color: #176650;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 650;
+  padding: 0;
+}
+
+.file-search-path {
+  color: #526b60;
+  font-size: 11px;
+  margin-top: 4px;
+}
+
+.file-search-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.file-search-actions .button {
+  font-size: 11px;
+  min-height: 28px;
+  padding: 4px 8px;
+}
+
+.file-search-more {
+  margin-top: 12px;
+}
